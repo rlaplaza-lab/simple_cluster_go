@@ -1,0 +1,37 @@
+"""Slab GA stamps n_slab_atoms / system_kind for downstream structure consumers."""
+
+from __future__ import annotations
+
+from ase import Atoms
+
+from scgo.algorithms.ga_common import slab_ga_metadata_extras
+from scgo.database.metadata import add_metadata
+from scgo.surface.config import SurfaceSystemConfig
+
+
+def test_slab_ga_metadata_extras_empty_without_surface() -> None:
+    assert slab_ga_metadata_extras(None, 4) == {}
+    slab = Atoms(
+        "Pt2", positions=[[0, 0, 0], [2.0, 0, 0]], cell=[20, 20, 20], pbc=False
+    )
+    cfg = SurfaceSystemConfig(slab=slab)
+    assert slab_ga_metadata_extras(cfg, 0) == {}
+
+
+def test_slab_ga_metadata_extras_and_add_metadata(pt_slab_small) -> None:
+    slab = pt_slab_small
+    cfg = SurfaceSystemConfig(slab=slab)
+    n_slab = len(slab)
+    ads = Atoms(
+        "Pt",
+        positions=[[0, 0, 3.0]],
+        cell=slab.get_cell(),
+        pbc=slab.get_pbc(),
+    )
+    combined = slab + ads
+    extra = slab_ga_metadata_extras(cfg, n_slab)
+    add_metadata(combined, run_id="run_test", **extra)
+    meta = combined.info["metadata"]
+    assert meta["n_slab_atoms"] == n_slab
+    assert meta["system_kind"] == "slab_adsorbate"
+    assert meta["run_id"] == "run_test"

@@ -1,0 +1,12 @@
+# SCGO conda environment. Dependencies come from pyproject.toml.
+# TorchSim uses nvalchemi-toolkit-ops; do not install vesin/vesin-torch.
+# e3nn is pinned in pyproject.toml for mace-torch compatibility.
+name: scgo
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.12
+  - pip
+  - pip:
+    - -e ".[dev]"

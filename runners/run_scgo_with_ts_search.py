@@ -1,0 +1,65 @@
+"""Run SCGO for a cluster composition and perform TS searches across found minima."""
+
+from pathlib import Path
+
+from scgo.param_presets import (
+    get_minimal_ga_params,
+    get_ts_run_kwargs,
+    get_ts_search_params,
+)
+from scgo.run_minima import run_scgo_campaign_one_element
+from scgo.ts_search import run_transition_state_search
+from scgo.utils.helpers import get_cluster_formula
+from scgo.utils.logging import get_logger
+
+# Configuration
+ELEMENT = "Cu"
+MIN_ATOMS = 4
+MAX_ATOMS = 4
+OUTPUT_ROOT = Path("ts_search_results").resolve()
+RANDOM_SEED = 42
+
+logger = get_logger(__name__)
+
+
+def main() -> None:
+    ga_params = get_minimal_ga_params()
+    ga_params["optimizer_params"]["ga"]["n_jobs_population_init"] = 1
+
+    OUTPUT_ROOT.mkdir(parents=True, exist_ok=True)
+
+    run_scgo_campaign_one_element(
+        ELEMENT,
+        MIN_ATOMS,
+        MAX_ATOMS,
+        params=ga_params,
+        seed=RANDOM_SEED,
+        output_dir=OUTPUT_ROOT,
+    )
+
+    ts_params = get_ts_search_params()
+    total_found = 0
+
+    for n_atoms in range(MIN_ATOMS, MAX_ATOMS + 1):
+        composition = [ELEMENT] * n_atoms
+        # TS search expects the formula-specific "*_searches" directory as base
+        formula_search_dir = (
+            OUTPUT_ROOT / f"{get_cluster_formula(composition)}_searches"
+        )
+        ts_results = run_transition_state_search(
+            composition,
+            base_dir=formula_search_dir,
+            seed=RANDOM_SEED,
+            **get_ts_run_kwargs(ts_params),
+        )
+        total_found += sum(1 for r in ts_results if r["status"] == "success")
+
+    logger.info(
+        "Finished TS search: %d successful NEB runs under %s",
+        total_found,
+        OUTPUT_ROOT,
+    )
+
+
+if __name__ == "__main__":
+    main()

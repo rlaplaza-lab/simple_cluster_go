@@ -1,0 +1,78 @@
+__pycache__/
+*.pyc
+*.pyo
+*.db
+go.db
+population.log
+final_unique_minima/
+.vscode/
+build/
+scgo.egg-info/
+test_output/
+
+# Generated analysis and documentation
+*_REPORT.md
+*_SUMMARY.md
+*_GUIDE.md
+
+# NEB/TS trajectory files (generated during transition state searches)
+*.traj
+
+# Search result directories
+*_searches/
+orca_calcs/
+out_dir/
+results_summary.json
+cluster_oh_relax_result.json
+
+# Local maintenance files (should not be tracked)
+paths-to-remove.txt
+check_benchmark/
+
+# Benchmark files (but keep Pt reference files)
+benchmark_files_*/
+!benchmark_files_Pt/
+benchmark_output.log
+
+# Coverage reports
+.coverage
+coverage.xml
+htmlcov/
+.pytest_cache/
+
+# Type checking
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# IDE
+.idea/
+*.swp
+*.swo
+*~
+
+# Temporary test scripts
+*_test.py
+*_benchmark.py
+extract_deps*
+check_benchmark/
+investigate_*.py
+test_*.py  # Root-level test scripts (e.g., test_facet_scaling.py)
+
+# Analysis and debugging artifacts
+*_analysis*.txt
+*_analysis*.log
+template_*_analysis.*
+tests/analyze_*.py
+test_results/
+test_run.log
+
+.pip-tools-cache/
+
+# Runner output files (generated during checks)
+runners/*.out
+*.out
+*.out
+
+# Ignore PNG plots in repository root (generated analysis/plots)
+/*.png

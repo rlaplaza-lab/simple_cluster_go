@@ -1,0 +1,104 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "scgo"
+version = "0.1.0"
+description = "A modern Python package for global optimization of atomic clusters using ASE with Basin Hopping and Genetic Algorithms. Features clean code, comprehensive testing, and support for multiple energy calculators."
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "MIT" }
+authors = [
+  { name = "R. Laplaza", email = "ruben.laplaza@iiq.csic.es" },
+]
+keywords = ["computational-chemistry", "structure-optimization", "atomic-clusters", "basin-hopping", "genetic-algorithm", "ase", "mace"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Chemistry",
+    "Topic :: Scientific/Engineering :: Physics",
+    "Topic :: Scientific/Engineering :: Information Analysis",
+]
+dependencies = [
+    "ase>=3.22.0",
+    "ase-ga>=0.1.0",
+    "e3nn==0.4.4",  # Pinned for mace-torch compatibility (0.5+ breaks model loading)
+    "mace-torch==0.3.15",
+    "numpy>=2.4.3",
+    "nvalchemi-toolkit-ops>=0.3.0",
+    "scipy>=1.17.1",
+    "torch>=2.0.0",
+    "torch-sim-atomistic[mace]==0.5.2",
+    "tqdm>=4.60.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/rlaplaza-lab/simple_cluster_go"
+Repository = "https://github.com/rlaplaza-lab/simple_cluster_go"
+Issues = "https://github.com/rlaplaza-lab/simple_cluster_go/issues"
+
+[project.optional-dependencies]
+test = [
+    "pytest>=7.0.0",
+    "pytest-cov>=4.0.0",
+    "pytest-mock>=3.10.0",
+    "pytest-profiling>=1.7.0",
+    "psutil>=7.0.0",
+    "ruff>=0.6.0",
+]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-cov>=4.0.0",
+    "pytest-mock>=3.10.0",
+    "pytest-profiling>=1.7.0",
+    "psutil>=7.0.0",
+    "ruff>=0.6.0",
+    "pre-commit>=3.0.0",
+    "pip-tools>=7.0.0",
+]
+
+
+[tool.setuptools]
+packages = { find = {} }
+
+[tool.ruff]
+line-length = 88
+target-version = "py312"
+
+[tool.ruff.lint]
+select = [
+    "E",  # pycodestyle errors
+    "W",  # pycodestyle warnings
+    "F",  # pyflakes
+    "I",  # isort
+    "B",  # flake8-bugbear
+    "C4", # flake8-comprehensions
+    "UP", # pyupgrade
+    "SIM", # simplify
+    "PERF", # performance
+    "PIE", # flake8-pie
+]
+ignore = [
+    "E501",  # line too long, handled by ruff format
+    "B008",  # do not perform function calls in argument defaults
+    "C901",  # too complex
+    "UP046",  # Generic class uses Generic subclass (maintains Python 3.11+ compatibility)
+]
+
+[tool.ruff.lint.per-file-ignores]
+"scgo/__init__.py" = ["E402"]  # set PYTORCH_CUDA_ALLOC_CONF before torch/torch_sim and scgo imports
+"tests/**/*" = ["B011"]
+"scgo/ase_ga_patches/*" = ["B011", "E402"]
+"benchmark/*" = ["E501", "T201"]  # E501: long lines in benchmark data; T201: print() OK in benchmarks
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "auto"
