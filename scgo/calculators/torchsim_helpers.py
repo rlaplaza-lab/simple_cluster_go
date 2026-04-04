@@ -18,7 +18,9 @@ import torch
 import torch_sim as ts
 from ase import Atoms
 from ase.build import bulk
+from ase.constraints import FixAtoms as ASEFixAtoms
 from mace.calculators.foundations_models import mace_mp  # type: ignore
+from torch_sim.constraints import FixAtoms as TSFixAtoms
 from torch_sim.models.mace import MaceModel  # type: ignore
 
 from scgo.calculators.mace_helpers import MaceUrls
@@ -126,8 +128,6 @@ def collect_ase_fixatoms_indices(atoms: Atoms) -> list[int]:
 
     Other ASE constraint types are ignored (not represented in TorchSim today).
     """
-    from ase.constraints import FixAtoms as ASEFixAtoms
-
     out: list[int] = []
     for c in atoms.constraints:
         if isinstance(c, ASEFixAtoms):
@@ -142,8 +142,6 @@ def _patch_torchsim_fixatoms_subconstraint_device() -> None:
     ``FixAtoms.select_sub_constraint`` while batched constraints live on CUDA,
     which makes ``torch.isin`` fail. This is applied once per process.
     """
-    from torch_sim.constraints import FixAtoms as TSFixAtoms
-
     if getattr(TSFixAtoms.select_sub_constraint, "_scgo_patched", False):
         return
 
@@ -175,8 +173,6 @@ def build_torchsim_fixatoms_from_ase_batch(
     Returns:
         A ``torch_sim.constraints.FixAtoms`` instance, or ``None`` if nothing to fix.
     """
-    from torch_sim.constraints import FixAtoms as TSFixAtoms
-
     merged: list[int] = []
     offset = 0
     for atoms in atoms_list:

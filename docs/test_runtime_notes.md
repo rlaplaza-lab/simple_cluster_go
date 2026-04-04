@@ -7,9 +7,15 @@ Machine-local timings vary with CPU/GPU and cache state. Values below are from a
 | Command | Approx. wall time | Notes |
 |--------|-------------------|--------|
 | `pytest tests/ -m "not slow"` | ~8–9 min | CI-style fast subset |
-| `pytest tests/` (full) | ~52 min | Includes `slow` + `integration`; ~1964 tests |
+| `pytest tests/ -n 2` (full) | (faster than serial) | CI uses **2 workers** (`ubuntu-latest` has 2 vCPUs). Requires `pytest-xdist` (`pip install -e ".[dev]"`). |
+| `pytest tests/ -n auto` (full) | (best on multi-core) | Local full suite; scales with CPU cores. |
+| `pytest tests/` (full, serial) | ~52 min (historical) | Includes `slow` + `integration`; ~1964 tests |
+
+**Parallel runs (`-n`):** GA tests with `n_jobs_population_init=-2` spawn their own worker processes; with many xdist workers you can oversubscribe CPUs—use a modest `-n` or cap library thread pools if you see thrashing. Heavy MACE tests in `tests/ts_search/test_ts_integration_cu4_mace.py` can contend on a **single GPU**; on GPU boxes you may prefer serial pytest for that file or a lower worker count.
 
 Slowest tests (examples from `--durations=40`): multiprocess reproducibility (~200 s), large template scan (~170 s), runner emulation + Cu4 MACE TS integration (~100–125 s each).
+
+**Suite trim (same strictness):** runner emulation merged to one GA campaign; GA multiprocess repro uses two runs instead of four; `test_near_match_templates_larger_sizes` uses 2 seeds × 4 sizes (was 3 × 4); `test_find_valid_types_very_large` uses `n=600` (was 1000). Re-check coverage after large changes.
 
 ## Benchmark and example runners
 

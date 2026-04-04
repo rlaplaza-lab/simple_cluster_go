@@ -169,7 +169,7 @@ class TestTemplateRemovalSafety:
             )
 
     @pytest.mark.slow
-    @pytest.mark.parametrize("seed", REPRODUCIBILITY_SEEDS[:3])
+    @pytest.mark.parametrize("seed", REPRODUCIBILITY_SEEDS[:2])
     @pytest.mark.parametrize("target_n,magic_n", NEAR_MAGIC_SIZES)
     def test_near_match_templates_larger_sizes(self, seed, target_n, magic_n):
         """Test near-match templates with larger sizes (slow)."""

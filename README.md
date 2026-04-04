@@ -142,7 +142,7 @@ params["optimizer_params"]["ga"]["surface_config"] = surface_config
 - **`run_scgo_trials`**: set `params["optimizer_params"]["ga"]["surface_config"]` to a `SurfaceSystemConfig` instance. The high-level runner only selects GA when `len(composition) >= 4`, so use **at least four adsorbate atoms** if you rely on automatic algorithm choice; for dimers/trimers, call `ga_go` directly as in the examples.
 - **Example runner scripts** in `runners/` show the full workflow (minima search + TS search) on graphene slabs. Replace the inline `_make_slab()` helper with any other slab to run on a different surface.
 
-> **Migration note:** The old `scgo.runner_graphene` module is deprecated. Replace `from scgo.runner_graphene import default_surface_config` with `from scgo.runner_surface import make_surface_config` and pass your slab explicitly.
+Surface workflows use `from scgo.runner_surface import make_surface_config` with your ASE slab.
 
 ### Slab motion during local relaxation
 

@@ -173,12 +173,16 @@ class TestParallelNEBBatch:
         )
 
 
-def test_parallel_neb_relax_batch_called_once_per_step(cu3_triangle, cu3_linear):
-    """Ensure ParallelNEBBatch uses one batched ``relax_batch`` per global step.
+def test_parallel_neb_relax_batch_one_global_then_per_neb_after_step(
+    cu3_triangle, cu3_linear
+):
+    """One global ``relax_batch``; cached PES forces avoid duplicate relaxer calls.
 
-    After the batch, each ``TorchSimNEB.get_forces()`` must use cached PES
-    forces (no per-band ``relax_batch``). ``increment_force_calls`` still
-    records one evaluation per band for the batched step.
+    ``ParallelNEBBatch`` evaluates all images in one ``relax_batch``, attaches
+    forces to each image, then ``TorchSimNEB.get_forces()`` uses the cache path
+    (no second ``relax_batch`` per band). With zero PES forces both bands can
+    report converged in a single outer step, so only one relaxer invocation
+    occurs.
     """
 
     class FakeRelaxer:

@@ -86,12 +86,12 @@ jobs:
       - name: Run fast tests
         if: github.ref != 'refs/heads/main' && github.event_name != 'workflow_dispatch'
         run: |
-          pytest tests/ -m "not slow" -v --cov=scgo --cov-report=xml --cov-report=term
+          pytest tests/ -n 2 -m "not slow" -v --cov=scgo --cov-report=xml --cov-report=term
 
       - name: Run all tests (including slow)
         if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
         run: |
-          pytest tests/ -v --cov=scgo --cov-report=xml --cov-report=term
+          pytest tests/ -n 2 -v --cov=scgo --cov-report=xml --cov-report=term
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v4

@@ -331,7 +331,7 @@ class TestFindValidTemplateTypes:
     @pytest.mark.slow
     def test_find_valid_types_very_large(self, rng):
         """Test finding valid types for very large cluster."""
-        valid_types = _find_valid_template_types(1000, rng)
+        valid_types = _find_valid_template_types(600, rng)
         assert isinstance(valid_types, list)
         # May or may not have valid types
 

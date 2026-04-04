@@ -764,7 +764,9 @@ class TestRobustness:
         n_workers = 4
         n_structures = 10
 
-        with ProcessPoolExecutor(max_workers=n_workers) as executor:
+        # Spawn avoids fork-after-thread issues when pytest-xdist workers are active.
+        ctx = mp.get_context("spawn")
+        with ProcessPoolExecutor(max_workers=n_workers, mp_context=ctx) as executor:
             futures = [
                 executor.submit(_write_to_database, (str(db_file), n_structures, wid))
                 for wid in range(n_workers)
