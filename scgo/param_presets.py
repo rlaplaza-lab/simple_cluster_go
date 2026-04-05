@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 import torch
 
@@ -11,6 +11,7 @@ from scgo.constants import (
     BOLTZMANN_K_EV_PER_K,
     DEFAULT_COMPARATOR_TOL,
     DEFAULT_ENERGY_TOLERANCE,
+    DEFAULT_NEB_TANGENT_METHOD,
     DEFAULT_PAIR_COR_MAX,
 )
 
@@ -22,8 +23,11 @@ AVAILABLE_MACE_MODELS = [
     "mace_off_small",  # Small MACE-OFF
 ]
 
+TsSearchRegime = Literal["gas", "surface"]
+
 __all__ = [
     "AVAILABLE_MACE_MODELS",
+    "TsSearchRegime",
     "get_default_params",
     "get_minimal_ga_params",
     "get_testing_params",
@@ -258,8 +262,23 @@ def get_high_energy_params() -> dict[str, Any]:
 def get_ts_search_params(
     calculator: str = "MACE",
     calculator_kwargs: dict[str, Any] | None = None,
+    *,
+    regime: TsSearchRegime = "gas",
 ) -> dict[str, Any]:
-    """Return TS search parameters (NEB settings and thresholds)."""
+    """Return TS search parameters (NEB settings and thresholds).
+
+    Parameters
+    ----------
+    regime:
+        ``"gas"`` (nanoparticle / non-periodic): defaults tuned for isolated clusters.
+        ``"surface"`` (slab + adsorbate, periodic in-plane): MIC interpolation,
+        ``neb_climb=False`` and slightly looser ``fmax`` (0.08 eV/Å) per MACE sweep on
+        graphene + cluster minima (see ``benchmark/neb_sweep_mace.py``).
+    """
+    if regime not in ("gas", "surface"):
+        msg = f"regime must be 'gas' or 'surface', got {regime!r}"
+        raise ValueError(msg)
+
     if calculator_kwargs is None:
         calculator_kwargs = {}
 
@@ -273,12 +292,14 @@ def get_ts_search_params(
             "max_pairs": None,
             "energy_gap_threshold": 1.0,
             "similarity_tolerance": DEFAULT_COMPARATOR_TOL,
-            "similarity_pair_cor_max": DEFAULT_PAIR_COR_MAX,
-            # Sweep results: prefer 3 images, small spring, no interior perturbation
+            # Match ``run_transition_state_search`` default (0.1 Å), not DEFAULT_PAIR_COR_MAX.
+            "similarity_pair_cor_max": 0.1,
+            # ``benchmark/neb_sweep_mace.py`` on real Cu₄ minima (gas, MACE): 24/24 converged;
+            # idpp ≈ linear; nimg=3, climb=True, k=0.1 gave tightest fmax (local JSONL, e.g.
+            # ``neb_mace_gas_Cu4.jsonl``). Re-validate with ``--primary-pair-count N`` over
+            # several pairs. Extended sweep: neb_align_endpoints=True required (12/12 vs 8/12).
             "neb_n_images": 3,
-            # Use a small spring constant to improve success rate while keeping
-            # the band flexible (empirically best for Pt4 sweep).
-            "neb_k": 0.05,
+            "neb_k": 0.1,
             "neb_fmax": 0.05,
             # Allow automatic scaling for NEB iterations (uses auto_niter_ts via runner)
             "neb_maxsteps": "auto",
@@ -299,6 +320,7 @@ def get_ts_search_params(
             "use_parallel_neb": False,
             "neb_climb": True,
             "neb_interpolation_method": "idpp",
+            "neb_tangent_method": DEFAULT_NEB_TANGENT_METHOD,
             "validate_ts_by_frequency": False,
             "imag_freq_threshold": 50.0,
             # TS minima deduplication defaults (keeps behavior consistent with
@@ -307,6 +329,24 @@ def get_ts_search_params(
             "minima_energy_tolerance": DEFAULT_ENERGY_TOLERANCE,
         }
     )
+
+    if regime == "surface":
+        # Primary sweep: graphene + Cu₄ (C18Cu4), local ``neb_mace_surface_graphene.jsonl``.
+        # Extended ``--grid extended``: with MIC + slab, neb_align_endpoints=False gave
+        # 10/12 converged vs 4/12 with True and physically consistent barriers
+        # (~0.17 eV vs ~7 eV). Optional ``--sweep-retry-on-endpoint`` compares retry
+        # behavior on the same grid. Keep climb=False, fmax=0.08 from primary robustness.
+        params.update(
+            {
+                "neb_interpolation_mic": True,
+                "neb_n_images": 3,
+                "neb_k": 0.1,
+                "neb_fmax": 0.08,
+                "torchsim_fmax": 0.08,
+                "neb_climb": False,
+                "neb_align_endpoints": False,
+            }
+        )
 
     return params
 
@@ -354,6 +394,9 @@ def get_ts_run_kwargs(ts_params: dict[str, Any] | None = None) -> dict[str, Any]
         "use_parallel_neb": ts_params.get("use_parallel_neb", False),
         "neb_climb": ts_params.get("neb_climb", True),
         "neb_interpolation_method": ts_params.get("neb_interpolation_method", "idpp"),
+        "neb_tangent_method": ts_params.get(
+            "neb_tangent_method", DEFAULT_NEB_TANGENT_METHOD
+        ),
         "validate_ts_by_frequency": ts_params.get("validate_ts_by_frequency", False),
         "imag_freq_threshold": ts_params.get("imag_freq_threshold", 50.0),
     }

@@ -33,6 +33,8 @@ check_benchmark/
 benchmark_files_*/
 !benchmark_files_Pt/
 benchmark_output.log
+benchmark/neb_mace*.jsonl
+benchmark/neb_tight*.jsonl
 
 # Coverage reports
 .coverage

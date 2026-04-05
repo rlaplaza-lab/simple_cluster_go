@@ -2,7 +2,7 @@
 
 import pytest
 
-from scgo.constants import DEFAULT_ENERGY_TOLERANCE
+from scgo.constants import DEFAULT_ENERGY_TOLERANCE, DEFAULT_NEB_TANGENT_METHOD
 from scgo.param_presets import get_ts_run_kwargs, get_ts_search_params
 
 
@@ -20,6 +20,8 @@ def test_ts_search_params_expose_dedupe_and_tolerance_defaults():
     assert kwargs["dedupe_minima"] is True
     assert kwargs["minima_energy_tolerance"] == pytest.approx(DEFAULT_ENERGY_TOLERANCE)
     assert kwargs.get("neb_interpolation_mic") is False
+    assert kwargs.get("neb_tangent_method") == DEFAULT_NEB_TANGENT_METHOD
+    assert kwargs.get("similarity_pair_cor_max") == pytest.approx(0.1)
 
 
 def test_ts_search_params_allow_overrides():
@@ -30,6 +32,26 @@ def test_ts_search_params_allow_overrides():
     kwargs = get_ts_run_kwargs(ts)
     assert kwargs["dedupe_minima"] is False
     assert kwargs["minima_energy_tolerance"] == pytest.approx(0.05)
+
+
+def test_ts_search_surface_regime_mic_and_fmax():
+    ts = get_ts_search_params(regime="surface")
+    assert ts["neb_interpolation_mic"] is True
+    assert ts["neb_n_images"] == 3
+    assert ts["neb_fmax"] == pytest.approx(0.08)
+    assert ts["torchsim_fmax"] == pytest.approx(0.08)
+    assert ts["neb_climb"] is False
+    assert ts["neb_align_endpoints"] is False
+    kwargs = get_ts_run_kwargs(ts)
+    assert kwargs["neb_interpolation_mic"] is True
+    assert kwargs["neb_n_images"] == 3
+    assert kwargs["neb_climb"] is False
+    assert kwargs["neb_align_endpoints"] is False
+
+
+def test_ts_search_regime_invalid():
+    with pytest.raises(ValueError, match="regime"):
+        get_ts_search_params(regime="invalid")  # type: ignore[arg-type]
 
 
 def test_ts_search_step_defaults_can_be_auto():

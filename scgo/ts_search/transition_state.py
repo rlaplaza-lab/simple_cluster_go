@@ -22,15 +22,16 @@ from ase.vibrations import Vibrations
 from scipy.optimize import linear_sum_assignment
 
 from scgo.calculators.torchsim_helpers import TorchSimBatchRelaxer
-from scgo.constants import DEFAULT_COMPARATOR_TOL, DEFAULT_PAIR_COR_MAX
+from scgo.constants import (
+    DEFAULT_COMPARATOR_TOL,
+    DEFAULT_NEB_TANGENT_METHOD,
+    DEFAULT_PAIR_COR_MAX,
+)
 from scgo.utils.helpers import extract_energy_from_atoms
 from scgo.utils.logging import get_logger
 from scgo.utils.run_helpers import cleanup_torch_cuda
 from scgo.utils.ts_provenance import is_cuda_oom_error, ts_output_provenance
 from scgo.utils.validation import validate_atoms, validate_calculator_attached
-
-# ASE NEB tangent method (see ase.mep.neb.NEB): prefer improved tangent over legacy aseneb.
-DEFAULT_NEB_TANGENT_METHOD = "improvedtangent"
 
 # ---------------------------------------------------------------------------
 # Helper utilities
@@ -333,7 +334,7 @@ def find_transition_state(
     pair_id: str,
     rng: np.random.Generator | None = None,
     n_images: int = 3,
-    spring_constant: float = 0.05,
+    spring_constant: float = 0.1,
     optimizer: type[Optimizer] = FIRE,
     fmax: float = 0.05,
     neb_steps: int = 500,

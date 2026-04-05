@@ -350,6 +350,7 @@ def test_find_ts_with_climb(cu3_triangle, cu3_linear, temp_output_dir):
         output_dir=temp_output_dir,
         pair_id="cu3_climb",
         n_images=5,
+        spring_constant=0.05,
         climb=True,
         fmax=0.1,
         neb_steps=200,
@@ -451,7 +452,7 @@ def test_find_ts_saves_trajectory(h2_reactant, h2_product, temp_output_dir):
 def test_find_transition_state_defaults_reflect_promoted_retry(
     h2_reactant, h2_product, temp_output_dir
 ):
-    """Ensure defaults were promoted from the staged-retry to the initial attempt."""
+    """Defaults align with MACE-tuned TS presets (spring k=0.1, climb True, etc.)."""
     result = find_transition_state(
         h2_reactant,
         h2_product,
@@ -464,7 +465,7 @@ def test_find_transition_state_defaults_reflect_promoted_retry(
         verbosity=0,
     )
 
-    assert result.get("spring_constant") == pytest.approx(0.05)
+    assert result.get("spring_constant") == pytest.approx(0.1)
     assert result.get("climb") is True
     assert result.get("perturb_sigma") == pytest.approx(0.0)
 

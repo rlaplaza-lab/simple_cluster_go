@@ -97,7 +97,7 @@ ignore = [
 "scgo/__init__.py" = ["E402"]  # set PYTORCH_CUDA_ALLOC_CONF before torch/torch_sim and scgo imports
 "tests/**/*" = ["B011"]
 "scgo/ase_ga_patches/*" = ["B011", "E402"]
-"benchmark/*" = ["E501", "T201"]  # E501: long lines in benchmark data; T201: print() OK in benchmarks
+"benchmark/*" = ["E501", "T201", "SIM108", "C408", "PERF401"]  # scripts: prints, dict builders, nested grid loops
 
 [tool.ruff.format]
 quote-style = "double"
