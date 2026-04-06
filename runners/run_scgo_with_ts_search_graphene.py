@@ -70,10 +70,7 @@ def main() -> None:
     full_composition = read_full_composition_from_first_xyz(final_minima_dir)
     logger.info("Detected full surface composition for TS search: %s", full_composition)
 
-    ts_params = get_ts_search_params()
-    ts_params["neb_interpolation_mic"] = True
-    ts_params["neb_fmax"] = 8.0
-    ts_params["torchsim_fmax"] = 8.0
+    ts_params = get_ts_search_params(regime="surface")
     ts_kwargs = get_ts_run_kwargs(ts_params)
     ts_kwargs["max_pairs"] = 15
     ts_results = run_transition_state_search(

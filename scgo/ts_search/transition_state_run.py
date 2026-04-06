@@ -23,7 +23,11 @@ from pathlib import Path
 from typing import Any
 
 from scgo.calculators.torchsim_helpers import TorchSimBatchRelaxer
-from scgo.constants import DEFAULT_COMPARATOR_TOL, DEFAULT_ENERGY_TOLERANCE
+from scgo.constants import (
+    DEFAULT_COMPARATOR_TOL,
+    DEFAULT_ENERGY_TOLERANCE,
+    DEFAULT_NEB_TANGENT_METHOD,
+)
 from scgo.database.metadata import add_metadata, get_metadata
 from scgo.utils.helpers import (
     auto_niter_ts,
@@ -94,6 +98,7 @@ def _build_failed_ts_result(
     neb_align_endpoints: bool,
     neb_perturb_sigma: float,
     neb_interpolation_mic: bool,
+    neb_tangent_method: str = DEFAULT_NEB_TANGENT_METHOD,
 ) -> dict[str, Any]:
     """Build a normalized failed-result payload for TS search."""
     return {
@@ -116,6 +121,7 @@ def _build_failed_ts_result(
         "align_endpoints": neb_align_endpoints,
         "perturb_sigma": neb_perturb_sigma,
         "neb_interpolation_mic": neb_interpolation_mic,
+        "neb_tangent_method": neb_tangent_method,
     }
 
 
@@ -130,7 +136,7 @@ def run_transition_state_search(
     similarity_tolerance: float = DEFAULT_COMPARATOR_TOL,
     similarity_pair_cor_max: float = 0.1,
     neb_n_images: int = 3,
-    neb_spring_constant: float = 0.05,
+    neb_spring_constant: float = 0.1,
     neb_fmax: float = 0.05,
     neb_steps: int | str = "auto",
     neb_climb: bool = True,
@@ -138,6 +144,7 @@ def run_transition_state_search(
     neb_align_endpoints: bool = True,
     neb_perturb_sigma: float = 0.0,
     neb_interpolation_mic: bool = False,
+    neb_tangent_method: str = DEFAULT_NEB_TANGENT_METHOD,
     neb_retry_on_endpoint: bool = True,
     use_torchsim: bool = False,
     use_parallel_neb: bool = False,
@@ -178,7 +185,7 @@ def run_transition_state_search(
         similarity_pair_cor_max: Maximum single distance difference tolerance for similarity.
             Default 0.1 Å.
         neb_n_images: Number of intermediate NEB images. Default 3 (recommended).
-        neb_spring_constant: Spring constant for NEB band (eV/Ų). Default 0.05 (recommended).
+        neb_spring_constant: Spring constant for NEB band (eV/Ų). Default 0.1 (MACE gas sweep).
         neb_fmax: Maximum force convergence for NEB (eV/Å). Default 0.05.
         neb_steps: Maximum NEB optimization steps. Default 'auto' (resolved with auto_niter_ts).
         neb_climb: Use climbing image NEB for better TS convergence. Default True.
@@ -186,6 +193,8 @@ def run_transition_state_search(
         neb_interpolation_mic: If True, use minimum-image convention for NEB path
             interpolation (ASE ``NEB.interpolate(mic=True)``). Use for periodic cells
             (e.g. slabs). Default False (gas-phase clusters).
+        neb_tangent_method: ASE NEB tangent method (``ase.mep.neb.NEB`` ``method``).
+            Default ``improvedtangent``.
         use_torchsim: Use TorchSim for GPU-efficient batched force evaluation. Default False.
         torchsim_params: Optional parameters for TorchSimBatchRelaxer when use_torchsim=True. If
             `torchsim_params['max_steps']` is 'auto', it will be resolved the same way as `neb_steps`.
@@ -270,6 +279,7 @@ def run_transition_state_search(
         "neb_align_endpoints": neb_align_endpoints,
         "neb_perturb_sigma": neb_perturb_sigma,
         "neb_interpolation_mic": neb_interpolation_mic,
+        "neb_tangent_method": neb_tangent_method,
     }
 
     if not minima_by_formula:
@@ -366,7 +376,13 @@ def run_transition_state_search(
                 rng=rng,
             )
 
-            neb = TorchSimNEB(images, relaxer, k=neb_spring_constant, climb=neb_climb)
+            neb = TorchSimNEB(
+                images,
+                relaxer,
+                k=neb_spring_constant,
+                climb=neb_climb,
+                method=neb_tangent_method,
+            )
             neb_instances.append(neb)
             pair_ids.append(pair_id)
 
@@ -401,6 +417,7 @@ def run_transition_state_search(
                 "use_torchsim": True,
                 "climb": neb_climb,
                 "neb_interpolation_mic": bool(neb_interpolation_mic),
+                "neb_tangent_method": neb_tangent_method,
             }
 
             # Extract TS as the highest-energy image (energies should be available via SinglePointCalculator)
@@ -528,6 +545,7 @@ def run_transition_state_search(
                         perturb_sigma=neb_perturb_sigma,
                         neb_interpolation_mic=neb_interpolation_mic,
                         neb_retry_on_endpoint=neb_retry_on_endpoint,
+                        neb_tangent_method=neb_tangent_method,
                         use_torchsim=use_torchsim,
                         torchsim_params=torchsim_params,
                         verbosity=verbosity,
@@ -580,6 +598,7 @@ def run_transition_state_search(
                         neb_align_endpoints=neb_align_endpoints,
                         neb_perturb_sigma=neb_perturb_sigma,
                         neb_interpolation_mic=neb_interpolation_mic,
+                        neb_tangent_method=neb_tangent_method,
                     )
                     break
             assert result is not None
@@ -641,8 +660,6 @@ def run_transition_state_search(
                 list(basename_to_path.keys()),
             )
 
-            added = 0
-            failed = 0
             for item in unique_ts:
                 ts_energy = item.get("ts_energy")
                 atoms_obj = item.get("_atoms_obj")
@@ -762,10 +779,7 @@ def run_transition_state_search(
                             add_metadata(
                                 atoms_for_db,
                                 connects=[i, j],
-                                minima_source_db=[
-                                    src_db_i if src_db_i is not None else None,
-                                    src_db_j if src_db_j is not None else None,
-                                ],
+                                minima_source_db=[src_db_i, src_db_j],
                                 minima_confids=[
                                     _get_min_id(i, "confid"),
                                     _get_min_id(j, "confid"),
@@ -791,10 +805,7 @@ def run_transition_state_search(
                             canonical_ts=True,
                             neb_converged=bool(neb_conv),
                         )
-                        if success:
-                            added += 1
-                        else:
-                            failed += 1
+                        if not success:
                             logger.warning(
                                 "add_ts_to_database returned False for %s -> %s",
                                 pair_id,
@@ -806,7 +817,6 @@ def run_transition_state_search(
                         OSError,
                         ValueError,
                     ) as e:
-                        failed += 1
                         logger.exception(
                             "Failed to add TS %s to DB %s (%s)",
                             pair_id,
@@ -934,6 +944,7 @@ def run_transition_state_campaign(
             - "neb_spring_constant": Spring constant
             - "neb_fmax": Force convergence criterion
             - "neb_steps": Maximum optimization steps
+            - "neb_tangent_method": ASE NEB tangent method (e.g. ``improvedtangent``)
 
     Returns:
         Dictionary mapping formula strings to lists of TS result dictionaries.
