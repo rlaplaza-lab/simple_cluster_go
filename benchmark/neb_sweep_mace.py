@@ -465,7 +465,7 @@ def main() -> None:
         "--neb-steps",
         type=int,
         default=None,
-        help="Override NEB steps for both regimes (legacy; prefer --gas-neb-steps / --supported-neb-steps)",
+        help="Override NEB steps for both regimes (prefer --gas-neb-steps / --supported-neb-steps)",
     )
     parser.add_argument(
         "--gas-neb-steps",

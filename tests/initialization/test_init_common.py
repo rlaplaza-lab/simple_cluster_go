@@ -921,7 +921,7 @@ class TestLoadDbCandidates:
         minima_default = extract_minima_from_database_file(str(db_path), run_id="runx")
 
         assert len(minima_default) == 1
-        # raw_score is stored as -energy (legacy ASE GA convention), so
+        # raw_score is stored as -energy in ASE GA rows, so
         # extract_minima_from_database returns the positive energy value.
         assert minima_default[0][0] == pytest.approx(10.0)
 

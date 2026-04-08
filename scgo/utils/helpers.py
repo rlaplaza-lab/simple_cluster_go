@@ -241,7 +241,7 @@ def perform_local_relaxation(
 
 
 def ensure_float64_forces(atoms: Atoms) -> np.ndarray:
-    """Ensure forces in atoms object are float64 for database compatibility.
+    """Ensure forces in atoms object are float64 for consistent DB persistence.
 
     Args:
         atoms: ASE Atoms object, modified in-place.

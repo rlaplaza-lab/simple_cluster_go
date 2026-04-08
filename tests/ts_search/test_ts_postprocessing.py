@@ -241,8 +241,8 @@ def test_add_ts_to_database_persists_marker(tmp_path):
         cand.info.setdefault("key_value_pairs", {})["raw_score"] = -0.5
         da.add_relaxed_step(cand)
 
-    # Add scgo_metadata so DB has consistent schema (mark_test_minima_as_final
-    # also adds scgo_metadata for discovery compatibility)
+    # Add scgo_metadata so DB has a consistent schema (mark_test_minima_as_final
+    # also adds scgo_metadata for discovery).
     mark_test_minima_as_final(db_file)
 
     # Add TS to DB (include run provenance so DB row should persist it)
@@ -287,7 +287,7 @@ def test_add_ts_to_database_persists_marker(tmp_path):
     assert kv.get("final_unique_ts") is not True
     assert abs(kv.get("raw_score", 0.0) + 0.5) < 1e-6
 
-    # Verify run_id persisted into DB row (metadata or legacy key_value_pairs)
+    # Verify run_id persisted into DB row (metadata or key_value_pairs).
     assert (
         ts_row.info.get("metadata", {}).get("run_id") == "run_ts_001"
         or ts_row.info.get("provenance", {}).get("run_id") == "run_ts_001"

@@ -27,7 +27,7 @@ def test_setup_diversity_scorer_uses_cwd(tmp_path, rng):
         # Mark the first entry as a final unique minimum so it can be used as a diversity reference.
         if i == 0:
             a.info.setdefault("metadata", {})["final_unique_minimum"] = True
-            # Also set legacy key_value_pairs flag so it is persisted by ASE DB
+            # Mirror the final marker in key_value_pairs so ASE DB persists it.
             a.info.setdefault("key_value_pairs", {})["final_unique_minimum"] = True
         da.add_relaxed_step(a)
 

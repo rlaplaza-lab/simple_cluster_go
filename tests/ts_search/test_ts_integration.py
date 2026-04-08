@@ -531,7 +531,7 @@ def test_run_transition_state_campaign():
 
 @pytest.mark.slow
 def test_run_transition_state_campaign_detects_searches_dir():
-    """Ensure the TS campaign will discover minima stored under the legacy
+    """Ensure the TS campaign will discover minima stored under the standard
     "{formula}_searches" layout (created by global-optimization runners)."""
     with tempfile.TemporaryDirectory() as tmpdir:
         # Create a mock database under the older "*_searches" name

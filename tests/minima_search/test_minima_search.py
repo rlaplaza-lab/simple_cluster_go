@@ -32,7 +32,7 @@ class TestEnsureCalculator:
 
 
 class TestValidateCalculatorCompatibility:
-    """Tests for _validate_calculator_compatibility function."""
+    """Tests for calculator interface validation."""
 
     def test_valid_calculator(self):
         """Test validation passes for valid calculator."""
@@ -152,7 +152,7 @@ class TestScgoFunction:
             )
 
     def test_scgo_invalid_calculator(self, tmp_path, rng):
-        """Test scgo() validates calculator compatibility."""
+        """Test scgo() validates calculator interface requirements."""
 
         class BadCalculator:
             """Calculator missing required methods."""

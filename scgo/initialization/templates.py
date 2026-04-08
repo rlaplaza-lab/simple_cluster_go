@@ -264,7 +264,7 @@ def remove_atoms_from_vertices(
         target_composition: Optional; preserves exact element counts in result.
         connectivity_factor: Factor for connectivity threshold when validating.
         min_distance_factor: Factor for minimum distance checks when validating.
-        rng: Optional RNG (kept for API compatibility).
+        rng: Optional RNG.
 
     Returns:
         New Atoms with atoms removed, or None if removal fails (e.g. <4 atoms,

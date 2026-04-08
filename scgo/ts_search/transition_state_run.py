@@ -187,7 +187,8 @@ def run_transition_state_search(
             Default 0.1 Å.
         pair_priority_mode: Pair-capping strategy when ``max_pairs`` is set.
             Default ``"physics"`` ranks candidates using energy/structure-aware
-            scoring before taking top-N. ``"legacy"`` keeps first-N in scan order.
+            scoring before taking top-N. The scan-order mode keeps first-N in
+            traversal order for deterministic baseline comparisons.
         neb_n_images: Number of intermediate NEB images. Default 3 (recommended).
         neb_spring_constant: Spring constant for NEB band (eV/Ų). Default 0.1 (MACE gas sweep).
         neb_fmax: Maximum force convergence for NEB (eV/Å). Default 0.05.

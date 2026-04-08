@@ -32,7 +32,7 @@ def ga_database(tmp_path, pt3_atoms, rng):
         from scgo.database.metadata import add_metadata
 
         add_metadata(atoms, raw_score=-10.0 - i)
-        atoms.info["confid"] = i  # Add confid for GA compatibility
+        atoms.info["confid"] = i  # Add confid expected by GA database flow.
         db.add_unrelaxed_candidate(atoms, description=f"test_{i}")
 
     # Create DataConnection and mark candidates as relaxed

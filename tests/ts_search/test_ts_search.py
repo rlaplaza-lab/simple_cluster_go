@@ -310,7 +310,7 @@ def test_setup_neb_path(h2_reactant, h2_product):
 def test_setup_neb_path_deepcopy_behavior(h2_reactant, h2_product):
     """Verify that calculators are deep-copied for NEB images.
 
-    This ensures compatibility with ML calculators which may be unsafe to
+    This ensures safe behavior with ML calculators which may be unsafe to
     reuse across multiple Atoms instances concurrently. Matches the policy
     used in GA (direct assignment for sequential use) vs NEB (deepcopy for
     concurrent use).

@@ -105,7 +105,7 @@ def test_mark_final_minima_matches_kvp_run_trial(tmp_path):
 
     from scgo.database.helpers import setup_database
 
-    # Template uses legacy key_value_pairs for identifiers
+    # Template stores identifiers in key_value_pairs.
     template = Atoms("Pt", positions=[[0, 0, 0]])
     template.info.setdefault("key_value_pairs", {})
     template.info["key_value_pairs"].update(
@@ -301,7 +301,7 @@ def test_mark_final_minima_matches_metadata_trial_key(tmp_path):
 
     from scgo.database.helpers import setup_database
 
-    # Template stores run_id and trial in key_value_pairs (legacy storage)
+    # Template stores run_id and trial in key_value_pairs.
     template = Atoms("Pt", positions=[[0, 0, 0]])
     template.info.setdefault("key_value_pairs", {})
     template.info["key_value_pairs"].update(
@@ -340,7 +340,7 @@ def test_mark_final_minima_matches_metadata_trial_key(tmp_path):
 
         import json
 
-        # Ensure metadata contains a 'trial' key (this is the new compatibility case)
+        # Ensure metadata contains a 'trial' key for matching.
         meta_json = json.loads(metadata_col) if metadata_col else {}
         meta_json.update({"trial": 1})
 
@@ -401,7 +401,7 @@ def test_mark_final_minima_matches_id_in_metadata(tmp_path):
 
     from scgo.database.helpers import setup_database
 
-    # Template stores id in key_value_pairs (legacy) and not confid
+    # Template stores id in key_value_pairs and not confid.
     template = Atoms("Pt", positions=[[0, 0, 0]])
     template.info.setdefault("key_value_pairs", {})
     template.info["key_value_pairs"].update(

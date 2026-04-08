@@ -40,7 +40,7 @@ def test_db_adapter_merges_metadata_into_key_value_pairs(tmp_path):
     u = db.get_an_unrelaxed_candidate()
     assert u is not None
 
-    # run_id should be present in either metadata or legacy key_value_pairs
+    # run_id should be present in either metadata or key_value_pairs
     assert_run_id_persisted(u, "run_test_123")
     # existing non-reserved keys should be preserved in key_value_pairs
     kv = u.info.get("key_value_pairs", {})
@@ -55,8 +55,8 @@ def test_unrelaxed_metadata_persisted_for_cross_process_reads(tmp_path):
 
     Regression: `_DBAdapter` previously cached metadata only in-memory which
     meant other connections could not discover provenance for unrelaxed rows.
-    We persist critical keys into `key_value_pairs` to maintain backward
-    compatibility and cross-process discovery.
+    We persist critical keys into `key_value_pairs` to keep cross-process
+    discovery straightforward.
     """
     outdir = tmp_path / "test_db_adapter_proc"
     db_file = outdir / "test.db"

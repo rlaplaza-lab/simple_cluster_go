@@ -24,4 +24,4 @@ DEFAULT_PAIR_COR_CUM_DIFF: float = DEFAULT_COMPARATOR_TOL
 """Cumulative pair-correlation difference tolerance (same as DEFAULT_COMPARATOR_TOL)."""
 
 DEFAULT_NEB_TANGENT_METHOD: str = "improvedtangent"
-"""ASE :class:`ase.mep.neb.NEB` tangent method (preferred over legacy ``aseneb``)."""
+"""ASE :class:`ase.mep.neb.NEB` tangent method used by default."""

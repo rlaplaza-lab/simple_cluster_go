@@ -542,11 +542,10 @@ def assert_cluster_valid(
 
 
 def assert_run_id_persisted(atoms: Atoms, expected_run_id: str) -> None:
-    """Assert `run_id` is present in `Atoms.info` (supports `metadata` or legacy `key_value_pairs`).
+    """Assert `run_id` is present in `Atoms.info` (`metadata` or `key_value_pairs`).
 
-    This helper centralizes the compatibility check for `run_id` across the test
-    suite so tests don't need to branch on DB schema (metadata column vs legacy
-    ASE `key_value_pairs`).
+    This helper centralizes the run_id check across the test suite so tests
+    don't branch on storage location.
     """
     md_run = atoms.info.get("metadata", {}).get("run_id")
     kv_run = atoms.info.get("key_value_pairs", {}).get("run_id")
@@ -560,7 +559,7 @@ def assert_db_final_row(db_path, expected_run_id, expect_final_id=True):
     """Assert at least one `systems` row is tagged as a final unique minimum.
 
     - Detects whether the DB `systems` table has a `metadata` column and
-      examines both `metadata` and legacy `key_value_pairs` JSON blobs.
+      examines both `metadata` and `key_value_pairs` JSON blobs.
     - If `expected_run_id` is not None, asserts at least one final-tagged row
       has `run_id == expected_run_id` (looks in `metadata`, `provenance`, and
       `key_value_pairs`).

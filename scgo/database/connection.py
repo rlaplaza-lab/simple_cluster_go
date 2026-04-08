@@ -53,7 +53,7 @@ def get_connection(
 ) -> Generator[DataConnection, None, None]:
     """Open and yield a DataConnection with optional WAL, timeouts and cache tuning.
 
-    WAL mode is disabled by default for better HPC compatibility.
+    WAL mode is disabled by default for safer HPC filesystems.
     Enable it only if running on reliable local filesystems with heavy concurrent access.
     """
     db_path = str(db_path)
