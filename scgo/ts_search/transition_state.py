@@ -14,6 +14,8 @@ import numpy as np
 from ase import Atoms
 from ase.calculators.calculator import Calculator
 from ase.calculators.singlepoint import SinglePointCalculator
+from ase.constraints import FixAtoms
+from ase.geometry import find_mic
 from ase.io import write
 from ase.mep import NEB
 from ase.optimize import FIRE
@@ -64,24 +66,37 @@ def calculate_structure_similarity(
     atoms2: Atoms,
     tolerance: float = DEFAULT_COMPARATOR_TOL,
     pair_cor_max: float = DEFAULT_PAIR_COR_MAX,
+    *,
+    ignore_fixed_atoms: bool = True,
 ) -> tuple[float, float, bool]:
     """Return (cum_diff, max_diff, are_similar) comparing two Atoms; raises ValueError if counts differ."""
-    from scgo.utils.comparators import PureInteratomicDistanceComparator
+    from scgo.utils.comparators import (
+        PureInteratomicDistanceComparator,
+        get_shared_mobile_atom_indices,
+    )
 
     if len(atoms1) != len(atoms2):
         raise ValueError(
             f"Atoms objects have different lengths: {len(atoms1)} vs {len(atoms2)}"
         )
 
+    comparison_indices = (
+        get_shared_mobile_atom_indices(atoms1, atoms2)
+        if ignore_fixed_atoms
+        else np.arange(len(atoms1), dtype=int)
+    )
+    atoms1_cmp = atoms1[comparison_indices]
+    atoms2_cmp = atoms2[comparison_indices]
+
     comparator = PureInteratomicDistanceComparator(
-        n_top=len(atoms1),
+        n_top=len(atoms1_cmp),
         tol=tolerance,
         pair_cor_max=pair_cor_max,
         mic=False,
     )
 
-    cum_diff, max_diff = comparator.get_differences(atoms1, atoms2)
-    are_similar = comparator.looks_like(atoms1, atoms2)
+    cum_diff, max_diff = comparator.get_differences(atoms1_cmp, atoms2_cmp)
+    are_similar = comparator.looks_like(atoms1_cmp, atoms2_cmp)
 
     return cum_diff, max_diff, are_similar
 
@@ -230,6 +245,16 @@ def _kabsch_rotation(P: np.ndarray, Q: np.ndarray) -> np.ndarray:
     return R
 
 
+def _fixed_atom_mask(atoms: Atoms) -> np.ndarray:
+    """Return a boolean mask for atoms fixed by ``FixAtoms`` constraints."""
+    mask = np.zeros(len(atoms), dtype=bool)
+    for constraint in atoms.constraints:
+        if isinstance(constraint, FixAtoms):
+            idx = np.asarray(constraint.get_indices(), dtype=int)
+            mask[idx] = True
+    return mask
+
+
 def interpolate_path(
     atoms1: Atoms,
     atoms2: Atoms,
@@ -243,7 +268,9 @@ def interpolate_path(
 ) -> list[Atoms]:
     """Interpolate between two Atoms and return images including endpoints.
 
-    ``align_endpoints`` (default True): reorder and Kabsch-align product to reactant.
+    ``align_endpoints`` (default True): reorder endpoint atoms to match reactant.
+    For periodic MIC workflows (``mic=True`` + periodic cell), alignment uses
+    MIC displacements instead of Cartesian Kabsch rotation.
     ``perturb_sigma``: optional Gaussian displacement (Å) on interior images only.
     ``rng``: optional NumPy Generator when ``perturb_sigma`` > 0.
     """
@@ -255,16 +282,32 @@ def interpolate_path(
     a2_copy = atoms2.copy()
 
     if align_endpoints:
-        # Compute permutation mapping and then Kabsch-rotate the reordered endpoint
+        # Compute permutation mapping so atom identities are consistently ordered.
         mapping = _match_atoms_by_fingerprint(a1_copy, a2_copy)
         new_pos = a2_copy.get_positions()[mapping]
-        P = a1_copy.get_positions().copy()
-        Q = new_pos.copy()
-        Pc = P - P.mean(axis=0)
-        Qc = Q - Q.mean(axis=0)
-        R = _kabsch_rotation(Pc, Qc)
-        Qrot = (Qc @ R.T) + P.mean(axis=0)
-        a2_copy.set_positions(Qrot)
+        pbc_active = bool(np.any(a1_copy.pbc))
+        if mic and pbc_active:
+            # Preserve periodic geometry by pulling each product atom to the
+            # nearest MIC image relative to the matched reactant atom.
+            ref_pos = a1_copy.get_positions().copy()
+            disp = new_pos - ref_pos
+            disp_mic, _ = find_mic(disp, cell=a1_copy.cell, pbc=a1_copy.pbc)
+            # For fixed slabs, anchor displacements to fixed atoms so alignment
+            # does not spuriously shift the slab reference frame.
+            fixed_mask = _fixed_atom_mask(a1_copy)
+            if np.any(fixed_mask):
+                fixed_shift = np.mean(disp_mic[fixed_mask], axis=0)
+                disp_mic = disp_mic - fixed_shift
+            a2_copy.set_positions(ref_pos + disp_mic)
+        else:
+            # Non-periodic alignment: rigid Kabsch transform minimizes RMSD.
+            P = a1_copy.get_positions().copy()
+            Q = new_pos.copy()
+            Pc = P - P.mean(axis=0)
+            Qc = Q - Q.mean(axis=0)
+            R = _kabsch_rotation(Pc, Qc)
+            Qrot = (Qc @ R.T) + P.mean(axis=0)
+            a2_copy.set_positions(Qrot)
 
     # Build images including endpoints (copies) and let ASE interpolate
     images = [a1_copy] + [a1_copy.copy() for _ in range(n_images)] + [a2_copy]
@@ -670,8 +713,9 @@ def find_transition_state(
                     }
                 )
 
+                retry_climb = climb if neb_interpolation_mic else True
                 attempt = {
-                    "climb": True,
+                    "climb": retry_climb,
                     "n_images": max(n_images, 5),
                     "spring_constant": max(spring_constant, 0.1),
                     "perturb_sigma": max(perturb_sigma, 0.01),

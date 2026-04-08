@@ -525,8 +525,8 @@ def _patch_ga_go_fakes(monkeypatch, atoms):
     return called
 
 
-def test_select_and_run_ga_uses_torchsim_when_available(monkeypatch, rng):
-    """ML calculator + use_torchsim=True uses ga_go_torchsim (CPU or GPU)."""
+def test_select_and_run_ga_uses_torchsim_for_ml_calculator(monkeypatch, rng):
+    """ML calculator always uses ga_go_torchsim."""
     atoms = Atoms("H2", positions=[[0, 0, 0], [0, 0, 0.74]])
     calc = _DummyMLCalculator()
     monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
@@ -536,7 +536,6 @@ def test_select_and_run_ga_uses_torchsim_when_available(monkeypatch, rng):
         composition=["H", "H"],
         output_dir=".",
         optimizer_kwargs={
-            "use_torchsim": True,
             "niter": 1,
             "population_size": 2,
         },
@@ -550,33 +549,8 @@ def test_select_and_run_ga_uses_torchsim_when_available(monkeypatch, rng):
     assert isinstance(results, list)
 
 
-def test_select_and_run_ga_uses_ase_ga_when_torchsim_disabled(monkeypatch, rng):
-    """When use_torchsim is False, use ASE GA even for ML calculators."""
-    atoms = Atoms("H2", positions=[[0, 0, 0], [0, 0, 0.74]])
-    calc = _DummyMLCalculator()
-    monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
-    called = _patch_ga_go_fakes(monkeypatch, atoms)
-
-    results = main_mod._select_and_run_ga(
-        composition=["H", "H"],
-        output_dir=".",
-        optimizer_kwargs={
-            "use_torchsim": False,
-            "niter": 1,
-            "population_size": 2,
-        },
-        calculator=calc,
-        rng=rng,
-        verbosity=0,
-    )
-
-    assert called["torchsim"] is False
-    assert called["ase_ga"] is True
-    assert isinstance(results, list)
-
-
-def test_select_and_run_ga_uses_ase_for_non_ml_even_with_use_torchsim(monkeypatch, rng):
-    """Non-ML calculator always uses ASE GA; use_torchsim is ignored."""
+def test_select_and_run_ga_uses_ase_for_non_ml_calculator(monkeypatch, rng):
+    """Non-ML calculator uses ASE GA."""
     atoms = Atoms("H2", positions=[[0, 0, 0], [0, 0, 0.74]])
     calc = EMT()
     monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
@@ -586,7 +560,6 @@ def test_select_and_run_ga_uses_ase_for_non_ml_even_with_use_torchsim(monkeypatc
         composition=["H", "H"],
         output_dir=".",
         optimizer_kwargs={
-            "use_torchsim": True,
             "niter": 1,
             "population_size": 2,
         },

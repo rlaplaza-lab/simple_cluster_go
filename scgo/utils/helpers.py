@@ -19,15 +19,20 @@ from ase.calculators.calculator import Calculator
 from ase.calculators.singlepoint import SinglePointCalculator
 from ase.optimize.optimize import Optimizer
 from ase.vibrations import Vibrations
-from ase_ga.standard_comparators import SequentialComparator
 from scipy.spatial import KDTree
 
 from scgo.constants import (
+    DEFAULT_COMPARATOR_TOL,
     DEFAULT_ENERGY_TOLERANCE,
+    DEFAULT_PAIR_COR_MAX,
     MIN_ATOMIC_DISTANCE_WARNING,
     PENALTY_ENERGY,
 )
 from scgo.database.metadata import get_metadata
+from scgo.utils.comparators import (
+    PureInteratomicDistanceComparator,
+    get_shared_mobile_atom_indices,
+)
 from scgo.utils.logging import get_logger
 
 
@@ -85,6 +90,72 @@ def _assign_penalty_energy(atoms: Atoms) -> float:
     return PENALTY_ENERGY
 
 
+def _rigid_shift_adsorbate_com_to_unit_cell(atoms: Atoms, n_slab: int) -> None:
+    """Translate all atoms by a lattice vector so adsorbate COM lies in [0,1)^d in scaled space.
+
+    Uses mass-weighted mean scaled position of atoms ``n_slab:``. For each axis with
+    ``pbc`` True, subtracts ``floor(s_com[i])`` in fractional coordinates (equivalent
+    Cartesian shift ``-floor @ cell``). Skips per-atom ``wrap()`` so clusters stay intact.
+
+    Args:
+        atoms: Combined slab + adsorbate system; modified in-place.
+        n_slab: Number of leading slab atoms; adsorbate slice is ``n_slab:``.
+    """
+    n_tot = len(atoms)
+    if n_slab <= 0 or n_slab >= n_tot:
+        return
+
+    pbc = np.asarray(atoms.get_pbc(), dtype=bool)
+    if not np.any(pbc):
+        return
+
+    scaled = atoms.get_scaled_positions(wrap=False)
+    masses = atoms.get_masses()[n_slab:]
+    ads_scaled = scaled[n_slab:]
+    s_com = np.average(ads_scaled, axis=0, weights=masses)
+
+    n_int = np.zeros(3, dtype=float)
+    for i in range(3):
+        if pbc[i]:
+            n_int[i] = np.floor(s_com[i])
+
+    if not np.any(n_int):
+        return
+
+    cell = np.asarray(atoms.get_cell(), dtype=float)
+    translation = -n_int @ cell
+    atoms.positions = atoms.get_positions() + translation
+
+
+def canonicalize_storage_frame(
+    atoms: Atoms,
+    *,
+    pbc_aware: bool = True,
+    center: bool = True,
+    n_slab: int = 0,
+) -> None:
+    """Normalize atomic positions to a deterministic translation frame.
+
+    Args:
+        atoms: Atoms object to mutate in-place.
+        pbc_aware: If True, apply PBC-aware normalization when any PBC axis is active.
+        center: If True, center atoms in the current cell after optional wrap (ignored
+            when ``n_slab > 0``).
+        n_slab: If positive, treat atoms as slab (indices ``0..n_slab-1``) plus adsorbate.
+            Uses a rigid lattice translation from adsorbate COM fractional coordinates on
+            periodic axes (no per-atom ``wrap()``, no full-cell ``center()``).
+    """
+    if n_slab > 0:
+        if pbc_aware:
+            _rigid_shift_adsorbate_com_to_unit_cell(atoms, n_slab)
+        return
+
+    if pbc_aware and np.any(atoms.get_pbc()):
+        atoms.wrap()
+    if center:
+        atoms.center()
+
+
 def perform_local_relaxation(
     atoms: Atoms,
     calculator: Calculator,
@@ -95,6 +166,7 @@ def perform_local_relaxation(
     trajectory: str | None = None,
     *,
     center_after_relax: bool = True,
+    n_slab: int = 0,
 ) -> float:
     """Performs a local structure relaxation on an ASE Atoms object.
 
@@ -108,6 +180,8 @@ def perform_local_relaxation(
         trajectory: Optional path to a file for saving the optimization trajectory.
         center_after_relax: If True (default), call ``atoms.center()`` after relaxation.
             Use False for slab+adsorbate systems.
+        n_slab: If positive, slab+adsorbate rigid lattice canonicalization on periodic axes
+            (see :func:`canonicalize_storage_frame`); use ``len(slab)`` for surface GA.
 
     Returns:
         The potential energy of the relaxed structure. Returns penalty energy if relaxation fails.
@@ -144,10 +218,12 @@ def perform_local_relaxation(
             atoms
         )
 
-        if np.any(atoms.get_pbc()):
-            atoms.wrap()
-        if center_after_relax:
-            atoms.center()
+        canonicalize_storage_frame(
+            atoms,
+            pbc_aware=True,
+            center=center_after_relax,
+            n_slab=n_slab,
+        )
 
         from scgo.database.metadata import add_metadata
 
@@ -422,7 +498,12 @@ def _check_duplicate_in_energy_bins(
             if energy_diff > energy_tolerance:
                 continue
 
-            if comparer.looks_like(atoms, unique_atoms_object):
+            comparison_indices = get_shared_mobile_atom_indices(
+                atoms, unique_atoms_object
+            )
+            if comparer.looks_like(
+                atoms[comparison_indices], unique_atoms_object[comparison_indices]
+            ):
                 return True
 
     return False
@@ -523,12 +604,12 @@ def filter_unique_minima(
     if not valid_minima:
         return []
 
-    n_atoms: int = len(valid_minima[0][1])
-    # Import here to avoid circular dependency
-    from scgo.algorithms.ga_common import create_structure_comparator
-
-    comparer: SequentialComparator = create_structure_comparator(
-        n_atoms, energy_tolerance
+    comparer: PureInteratomicDistanceComparator = PureInteratomicDistanceComparator(
+        n_top=len(valid_minima[0][1]),
+        tol=DEFAULT_COMPARATOR_TOL,
+        pair_cor_max=DEFAULT_PAIR_COR_MAX,
+        dE=energy_tolerance,
+        mic=False,
     )
 
     sorted_minima: list[tuple[float, Atoms]] = sorted(

@@ -64,6 +64,11 @@ def test_ga_go_torchsim_surface_config_mock_relaxer(pt_slab_small, tmp_path, rng
     _e, best = minima[0]
     n_slab = len(slab)
     assert len(best) == n_slab + 2
+    np.testing.assert_allclose(
+        best.get_positions()[:n_slab].mean(axis=0),
+        slab.get_positions().mean(axis=0),
+        atol=1e-6,
+    )
     z_top = slab_surface_extreme(slab, 2, upper=True)
     ads_z = best.get_positions()[n_slab:, 2]
     assert np.min(ads_z) > z_top - 0.2

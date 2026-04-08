@@ -47,7 +47,8 @@ from scgo.database import (
     setup_database,
     update_metadata,
 )
-from tests.test_utils import assert_run_id_persisted, create_test_atoms
+from tests.database.concurrent_stress_worker import write_to_database as _mp_write_db
+from tests.test_utils import assert_run_id_persisted
 
 
 def _final_kvp(raw_score: float) -> dict[str, float | bool]:
@@ -94,29 +95,6 @@ def _count_open_files() -> int:
     except (OSError, PermissionError):
         pass
     return -1
-
-
-def _write_to_database(args):
-    """Helper function for multiprocess database writing."""
-    db_path, n_structures, worker_id = args
-
-    atoms_list = []
-    for i in range(n_structures):
-        atoms = create_test_atoms(
-            ["Pt", "Pt"],
-            positions=[[0, 0, 0], [2.5 + i * 0.1, 0, 0]],
-            raw_score=-10.0 - i * 0.1,
-        )
-        atoms.info["data"] = {"worker_tag": f"w{worker_id}"}
-        atoms_list.append(atoms)
-
-    with open_db(db_path, wal_mode=True, busy_timeout=60000) as da:
-        for atoms in atoms_list:
-            da.add_unrelaxed_candidate(
-                atoms, description=f"concurrent_stress:w{worker_id}"
-            )
-            da.add_relaxed_step(atoms)
-    return True, worker_id
 
 
 class TestDatabaseSetupAndFlow:
@@ -768,7 +746,7 @@ class TestRobustness:
         ctx = mp.get_context("spawn")
         with ProcessPoolExecutor(max_workers=n_workers, mp_context=ctx) as executor:
             futures = [
-                executor.submit(_write_to_database, (str(db_file), n_structures, wid))
+                executor.submit(_mp_write_db, (str(db_file), n_structures, wid))
                 for wid in range(n_workers)
             ]
 

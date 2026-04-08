@@ -4,6 +4,10 @@ The utilities here drive SCGO against a curated Pt benchmark set and evaluate
 the recovered minima primarily through geometric agreement and, secondarily,
 relative energetic ordering. The script doubles as a pytest entry point and a
 standalone CLI for rapid regression checks while tweaking optimization knobs.
+
+Campaign outputs are written under ``benchmark/results/pt_cluster/`` (per-formula
+subdirectories named ``<Formula>_searches``), alongside the other Pt benchmarks;
+see ``benchmark.benchmark_common`` for path constants.
 """
 
 import pytest

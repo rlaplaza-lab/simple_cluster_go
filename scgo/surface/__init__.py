@@ -11,6 +11,7 @@ from scgo.surface.deposition import (
     slab_surface_extreme,
 )
 from scgo.surface.objectives import adsorption_energy
+from scgo.surface.validation import validate_supported_cluster_deposit
 
 __all__ = [
     "SurfaceSystemConfig",
@@ -20,4 +21,5 @@ __all__ = [
     "create_deposited_cluster",
     "create_deposited_cluster_batch",
     "slab_surface_extreme",
+    "validate_supported_cluster_deposit",
 ]

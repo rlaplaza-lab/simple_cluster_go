@@ -445,3 +445,41 @@ def test_empty_results_handling(tmp_path, rng):
     # Database should exist even if empty
     db_path = os.path.join(run_dir, "trial_1", "bh_go.db")
     assert os.path.exists(db_path)
+
+
+def test_final_xyz_is_canonicalized_before_write(tmp_path, rng, monkeypatch):
+    """Final minima export should use canonical storage-frame normalization."""
+    from scgo.database.metadata import add_metadata
+    from scgo.minima_search import core as core_mod
+
+    atoms = Atoms(
+        "Pt2",
+        positions=[[1.0, 2.0, 3.0], [2.2, 2.0, 3.0]],
+        cell=[10.0, 10.0, 10.0],
+        pbc=False,
+    )
+    add_metadata(atoms, raw_score=-1.0, run_id="run_test", trial=1)
+
+    def fake_scgo(**kwargs):
+        return [(-1.0, atoms.copy())]
+
+    monkeypatch.setattr(core_mod, "scgo", fake_scgo)
+
+    output_dir = str(tmp_path / "canonical_output")
+    run_trials(
+        composition=["Pt", "Pt"],
+        global_optimizer="bh",
+        global_optimizer_kwargs={"niter": 1, "niter_local_relaxation": 1},
+        n_trials=1,
+        output_dir=output_dir,
+        calculator_for_global_optimization=EMT(),
+        validate_with_hessian=False,
+        rng=rng,
+    )
+
+    xyz_files = sorted((Path(output_dir) / "final_unique_minima").glob("*.xyz"))
+    assert xyz_files
+    out_atoms = read(str(xyz_files[0]))
+    np.testing.assert_allclose(
+        out_atoms.get_center_of_mass(), [5.0, 5.0, 5.0], atol=1e-8
+    )

@@ -20,10 +20,15 @@ from ase.io import write
 
 from scgo.algorithms import bh_go, ga_go, ga_go_torchsim, simple_go
 from scgo.database import SCGODatabaseManager
-from scgo.database.metadata import add_metadata, mark_final_minima_in_db
+from scgo.database.metadata import (
+    add_metadata,
+    get_metadata,
+    mark_final_minima_in_db,
+)
 from scgo.initialization import create_initial_cluster
 from scgo.surface.config import SurfaceSystemConfig
 from scgo.utils.helpers import (
+    canonicalize_storage_frame,
     compute_final_id,
     ensure_directory_exists,
     filter_dict_keys,
@@ -150,16 +155,7 @@ def _is_ml_calculator_for_torchsim(calculator: Calculator) -> bool:
 def _filter_ga_kwargs_for_torchsim(
     optimizer_kwargs: dict[str, Any],
 ) -> dict[str, Any]:
-    """Filter optimizer kwargs for TorchSim GA.
-
-    Removes keys that are not applicable to TorchSim (optimizer, use_torchsim).
-
-    Args:
-        optimizer_kwargs: Dictionary of optimizer parameters.
-
-    Returns:
-        Filtered dictionary suitable for TorchSim GA.
-    """
+    """Filter optimizer kwargs for TorchSim GA (drops ASE-only keys, including stale ``use_torchsim``)."""
     return filter_dict_keys(optimizer_kwargs, {"optimizer", "use_torchsim"})
 
 
@@ -192,36 +188,20 @@ def _resolve_ga_backend(
     calculator: Calculator,
     logger: Any,
 ) -> tuple[bool, dict[str, Any], dict[str, Any]]:
-    """Pick TorchSim vs ASE GA and return filtered kwargs for the chosen path.
-
-    TorchSim GA is used for ML calculators when ``use_torchsim`` is true (default).
-    Non-ML calculators always use ASE GA. ``use_torchsim=False`` forces ASE GA
-    even for ML calculators (CPU or GPU).
-    """
+    """TorchSim GA for MLIPs; ASE GA otherwise. Ignores any ``use_torchsim`` key (removed from public API)."""
     ml = _is_ml_calculator_for_torchsim(calculator)
-    want_torchsim = bool(optimizer_kwargs.get("use_torchsim", True))
-    use_torchsim = ml and want_torchsim
-
     torchsim_kwargs = _filter_ga_kwargs_for_torchsim(optimizer_kwargs)
     ase_ga_kwargs = _filter_ga_kwargs_for_ase(optimizer_kwargs)
 
-    if use_torchsim:
-        optimizer_specified = optimizer_kwargs.get("optimizer")
-        if (
-            isinstance(optimizer_specified, str)
-            and optimizer_specified.upper() != "FIRE"
-        ):
-            logger.warning(
-                f'TorchSim GA ignores optimizer "{optimizer_specified}"; uses FIRE. '
-                f"Set use_torchsim=False to use {optimizer_specified}."
-            )
-        logger.info("Using TorchSim GA (ML calculator)")
-    elif not ml:
-        logger.info("Using ASE GA (non-ML calculator)")
-    else:
-        logger.info("Using ASE GA (use_torchsim=False)")
+    if ml:
+        opt = optimizer_kwargs.get("optimizer")
+        if isinstance(opt, str) and opt.upper() != "FIRE":
+            logger.debug('TorchSim GA ignores optimizer "%s"; uses FIRE.', opt)
+        logger.debug("Using TorchSim GA (ML calculator)")
+        return True, torchsim_kwargs, {}
 
-    return use_torchsim, torchsim_kwargs, ase_ga_kwargs
+    logger.debug("Using ASE GA (non-ML calculator)")
+    return False, {}, ase_ga_kwargs
 
 
 def _select_and_run_ga(
@@ -234,14 +214,7 @@ def _select_and_run_ga(
     run_id: str | None = None,
     clean: bool = False,
 ) -> list[tuple[float, Atoms]]:
-    """Select and run the appropriate GA implementation (TorchSim vs ASE GA).
-
-    TorchSim GA is used for ML calculators when ``use_torchsim`` is true
-    (default), including on CPU. Non-ML calculators always use ASE GA.
-    ``use_torchsim=False`` forces ASE GA for ML calculators.
-
-    When TorchSim is selected but a non-FIRE optimizer name is provided, a
-    warning is logged; TorchSim uses FIRE internally.
+    """Run TorchSim GA for MLIPs and ASE GA for classical calculators.
 
     Args:
         composition: List of element symbols defining the cluster composition.
@@ -654,7 +627,16 @@ def run_trials(
 
         atoms_clean = atoms.copy()
         atoms_clean.calc = None
-        atoms_clean.center()
+        n_slab_meta = get_metadata(atoms_clean, "n_slab_atoms", 0) or 0
+        if get_metadata(atoms_clean, "system_kind") == "slab_adsorbate" and n_slab_meta:
+            canonicalize_storage_frame(
+                atoms_clean,
+                pbc_aware=True,
+                center=False,
+                n_slab=int(n_slab_meta),
+            )
+        else:
+            canonicalize_storage_frame(atoms_clean)
         if "tags" in atoms_clean.arrays:
             del atoms_clean.arrays["tags"]
 

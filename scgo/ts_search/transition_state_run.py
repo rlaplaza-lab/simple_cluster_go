@@ -132,9 +132,10 @@ def run_transition_state_search(
     seed: int | None = None,
     verbosity: int = 1,
     max_pairs: int | None = None,
-    energy_gap_threshold: float | None = None,
+    energy_gap_threshold: float | None = 1.0,
     similarity_tolerance: float = DEFAULT_COMPARATOR_TOL,
     similarity_pair_cor_max: float = 0.1,
+    pair_priority_mode: str = "physics",
     neb_n_images: int = 3,
     neb_spring_constant: float = 0.1,
     neb_fmax: float = 0.05,
@@ -178,12 +179,15 @@ def run_transition_state_search(
         max_pairs: Maximum number of structure pairs to evaluate. If None, evaluates all pairs.
             Default None.
         energy_gap_threshold: Only pair structures with energy gap below this threshold (eV).
-            If None, pairs all structures. Default None.
+            If None, pairs all structures. Default 1.0.
         similarity_tolerance: Cumulative difference tolerance for structure comparison.
             Structures with cumulative difference below this are considered too similar to pair.
             Default `DEFAULT_COMPARATOR_TOL`.
         similarity_pair_cor_max: Maximum single distance difference tolerance for similarity.
             Default 0.1 Å.
+        pair_priority_mode: Pair-capping strategy when ``max_pairs`` is set.
+            Default ``"physics"`` ranks candidates using energy/structure-aware
+            scoring before taking top-N. ``"legacy"`` keeps first-N in scan order.
         neb_n_images: Number of intermediate NEB images. Default 3 (recommended).
         neb_spring_constant: Spring constant for NEB band (eV/Ų). Default 0.1 (MACE gas sweep).
         neb_fmax: Maximum force convergence for NEB (eV/Å). Default 0.05.
@@ -280,6 +284,7 @@ def run_transition_state_search(
         "neb_perturb_sigma": neb_perturb_sigma,
         "neb_interpolation_mic": neb_interpolation_mic,
         "neb_tangent_method": neb_tangent_method,
+        "pair_priority_mode": pair_priority_mode,
     }
 
     if not minima_by_formula:
@@ -315,6 +320,8 @@ def run_transition_state_search(
         energy_gap_threshold=energy_gap_threshold,
         similarity_tolerance=similarity_tolerance,
         similarity_pair_cor_max=similarity_pair_cor_max,
+        pair_priority_mode=pair_priority_mode,
+        surface_aware=bool(neb_interpolation_mic),
     )
 
     if not pairs:
@@ -939,7 +946,7 @@ def run_transition_state_campaign(
             when running many compositions in sequence.
             - "max_pairs": Maximum structure pairs to evaluate
             - "energy_gap_threshold": Energy cutoff for pairing
-            - "rmsd_cutoff": RMSD similarity threshold
+            - "pair_priority_mode": Pair ranking mode used during capping
             - "neb_n_images": Number of intermediate images
             - "neb_spring_constant": Spring constant
             - "neb_fmax": Force convergence criterion

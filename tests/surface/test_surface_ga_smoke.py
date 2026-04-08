@@ -12,7 +12,7 @@ from scgo.surface.deposition import slab_surface_extreme
 
 
 def test_ga_go_surface_config_emt_smoke(pt_slab_small, tmp_path):
-    """Minimal GA on a slab: same recipe as examples/surface_ga_pt_dimer_demo.py."""
+    """Minimal GA on a slab: same recipe as the surface runner workflow."""
     slab = pt_slab_small
     surface_config = SurfaceSystemConfig(
         slab=slab,

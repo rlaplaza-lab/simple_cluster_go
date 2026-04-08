@@ -1,5 +1,6 @@
 import math
 
+import numpy as np
 from ase import Atoms
 from ase.calculators.emt import EMT
 
@@ -226,3 +227,57 @@ def test_ga_go_torchsim_offspring_fraction_creates_expected_offspring(
 
     unique_confids = {a.info.get("confid") for a in gen0}
     assert len(unique_confids) - population_size == expected_offspring
+
+
+def test_ga_persisted_unconstrained_rows_are_centered(tmp_path, rng):
+    from scgo.database import open_db
+
+    calc = EMT()
+    outdir_ase = tmp_path / "ga_center_ase"
+    ga_go(
+        composition=["Pt", "Pt", "Pt"],
+        output_dir=str(outdir_ase),
+        calculator=calc,
+        rng=rng,
+        niter=1,
+        population_size=3,
+        niter_local_relaxation=1,
+    )
+
+    with open_db(str(outdir_ase / "ga_go.db")) as da:
+        rows_ase = da.get_all_relaxed_candidates()
+    assert rows_ase
+    for row in rows_ase:
+        bbox_center = 0.5 * (
+            row.get_positions().min(axis=0) + row.get_positions().max(axis=0)
+        )
+        np.testing.assert_allclose(
+            bbox_center,
+            np.diag(row.get_cell()) / 2.0,
+            atol=1e-6,
+        )
+
+    outdir_ts = tmp_path / "ga_center_torchsim"
+    ga_go_torchsim(
+        composition=["Pt", "Pt", "Pt"],
+        output_dir=str(outdir_ts),
+        calculator=calc,
+        relaxer=MockRelaxer(max_steps=1),
+        niter=1,
+        population_size=3,
+        niter_local_relaxation=1,
+        batch_size=2,
+        rng=rng,
+    )
+    with open_db(str(outdir_ts / "ga_go.db")) as da:
+        rows_ts = da.get_all_relaxed_candidates()
+    assert rows_ts
+    for row in rows_ts:
+        bbox_center = 0.5 * (
+            row.get_positions().min(axis=0) + row.get_positions().max(axis=0)
+        )
+        np.testing.assert_allclose(
+            bbox_center,
+            np.diag(row.get_cell()) / 2.0,
+            atol=1e-6,
+        )

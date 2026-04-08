@@ -72,6 +72,8 @@ def main() -> None:
     logger.info("Full system composition for TS search: %s", full_composition)
 
     ts_params = get_ts_search_params(regime="surface")
+    # Match graphene TS presets (non-climb, n_images=3); global surface defaults target NiO-supported Pt5.
+    ts_params.update({"neb_climb": False, "neb_n_images": 3})
     ts_kwargs = get_ts_run_kwargs(ts_params)
     ts_kwargs["max_pairs"] = 15
     ts_results = run_transition_state_search(

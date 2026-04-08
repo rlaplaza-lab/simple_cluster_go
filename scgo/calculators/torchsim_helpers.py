@@ -9,6 +9,7 @@ from __future__ import annotations
 import functools
 import json
 import time
+import warnings
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -460,12 +461,31 @@ class TorchSimBatchRelaxer:
         else:
             system_in = atoms_seq
 
-        state = self._ts.optimize(  # type: ignore[call-arg]
-            system=system_in,
-            model=self.model,
-            optimizer=self.optimizer,
-            **runner_kwargs,
-        )
+        # `steps=0` is intentionally used as a single-point mode in TS/NEB paths
+        # (endpoint energies and batched force evaluations). Some torch-sim versions
+        # emit a generic warning about max steps reached in this mode; suppress only
+        # that specific, non-actionable warning.
+        max_steps_now = runner_kwargs.get("max_steps", self.max_steps)
+        if max_steps_now == 0:
+            with warnings.catch_warnings():
+                warnings.filterwarnings(
+                    "ignore",
+                    message=r"All systems have reached the maximum number of steps: 0\.",
+                    category=UserWarning,
+                )
+                state = self._ts.optimize(  # type: ignore[call-arg]
+                    system=system_in,
+                    model=self.model,
+                    optimizer=self.optimizer,
+                    **runner_kwargs,
+                )
+        else:
+            state = self._ts.optimize(  # type: ignore[call-arg]
+                system=system_in,
+                model=self.model,
+                optimizer=self.optimizer,
+                **runner_kwargs,
+            )
 
         # Cache the memory scaler if we computed a new estimate (avoid ~70s re-probing)
         if self.max_memory_scaler is None and "autobatcher" in self._runner_kwargs:

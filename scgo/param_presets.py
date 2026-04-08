@@ -83,7 +83,6 @@ def get_default_params() -> dict[str, Any]:
             },
             "ga": {
                 "optimizer": "FIRE",
-                "use_torchsim": True,  # True=TorchSim GA for ML (CPU/GPU); False=force ASE GA
                 "population_size": "auto",
                 "niter": "auto",
                 "niter_local_relaxation": "auto",
@@ -162,7 +161,6 @@ def get_testing_params() -> dict[str, Any]:
             },
             "ga": {
                 "optimizer": "FIRE",
-                "use_torchsim": False,  # False=force ASE GA for ML (testing); True=TorchSim GA for ML
                 "population_size": 5,
                 "offspring_fraction": 0.5,
                 "niter": 2,
@@ -220,7 +218,6 @@ def get_torchsim_ga_params(seed: int) -> dict[str, Any]:
                 compile_model=False,
             ),
             # Leave batch_size unset so all unrelaxed candidates are batched together
-            # use_torchsim defaults True: ML calculators use TorchSim GA (CPU or GPU)
         },
     )
 
@@ -272,8 +269,10 @@ def get_ts_search_params(
     regime:
         ``"gas"`` (nanoparticle / non-periodic): defaults tuned for isolated clusters.
         ``"surface"`` (slab + adsorbate, periodic in-plane): MIC interpolation,
-        ``neb_climb=False`` and slightly looser ``fmax`` (0.08 eV/Å) per MACE sweep on
-        graphene + cluster minima (see ``benchmark/neb_sweep_mace.py``).
+        ``neb_n_images=5``, ``neb_climb=True``, strict ``fmax`` (0.05 eV/Å).
+        Endpoint alignment stays off by default for fixed-slab/PBC (tuned for
+        supported Pt5-on-NiO MACE NEB sweeps). Other surfaces (e.g. graphene Cu4)
+        can pass ``neb_climb=False`` / ``neb_n_images=3`` via explicit kwargs.
     """
     if regime not in ("gas", "surface"):
         msg = f"regime must be 'gas' or 'surface', got {regime!r}"
@@ -294,10 +293,11 @@ def get_ts_search_params(
             "similarity_tolerance": DEFAULT_COMPARATOR_TOL,
             # Match ``run_transition_state_search`` default (0.1 Å), not DEFAULT_PAIR_COR_MAX.
             "similarity_pair_cor_max": 0.1,
-            # ``benchmark/neb_sweep_mace.py`` on real Cu₄ minima (gas, MACE): 24/24 converged;
-            # idpp ≈ linear; nimg=3, climb=True, k=0.1 gave tightest fmax (local JSONL, e.g.
-            # ``neb_mace_gas_Cu4.jsonl``). Re-validate with ``--primary-pair-count N`` over
-            # several pairs. Extended sweep: neb_align_endpoints=True required (12/12 vs 8/12).
+            # Physics-ranked pair capping improves max_pairs hit-rate versus scan-order truncation.
+            "pair_priority_mode": "physics",
+            # Pt5 gas sweep on prioritized top-50 pairs (`benchmark/neb_pt5_mace_clean.jsonl`,
+            # MACE/TorchSim, 100 NEB-step benchmark budget): `neb_climb=False` outperformed
+            # `neb_climb=True` on convergence (26/50 vs 20/50) with comparable final_fmax.
             "neb_n_images": 3,
             "neb_k": 0.1,
             "neb_fmax": 0.05,
@@ -318,7 +318,7 @@ def get_ts_search_params(
             # Whether to run multiple NEBs together using `ParallelNEBBatch`.
             # Default: False (opt-in).
             "use_parallel_neb": False,
-            "neb_climb": True,
+            "neb_climb": False,
             "neb_interpolation_method": "idpp",
             "neb_tangent_method": DEFAULT_NEB_TANGENT_METHOD,
             "validate_ts_by_frequency": False,
@@ -331,19 +331,18 @@ def get_ts_search_params(
     )
 
     if regime == "surface":
-        # Primary sweep: graphene + Cu₄ (C18Cu4), local ``neb_mace_surface_graphene.jsonl``.
-        # Extended ``--grid extended``: with MIC + slab, neb_align_endpoints=False gave
-        # 10/12 converged vs 4/12 with True and physically consistent barriers
-        # (~0.17 eV vs ~7 eV). Optional ``--sweep-retry-on-endpoint`` compares retry
-        # behavior on the same grid. Keep climb=False, fmax=0.08 from primary robustness.
+        # Supported nanoparticle-on-slab (e.g. Pt5 on NiO): ``benchmark/neb_sweep_mace.py``
+        # proxy ranking on MACE/TorchSim favors ``n_images=5`` + ``neb_climb=True`` over
+        # smaller bands / non-climbing for fewer endpoint-as-TS failures; keep MIC + no
+        # endpoint alignment for PBC.
         params.update(
             {
                 "neb_interpolation_mic": True,
-                "neb_n_images": 3,
+                "neb_n_images": 5,
                 "neb_k": 0.1,
-                "neb_fmax": 0.08,
-                "torchsim_fmax": 0.08,
-                "neb_climb": False,
+                "neb_fmax": 0.05,
+                "torchsim_fmax": 0.05,
+                "neb_climb": True,
                 "neb_align_endpoints": False,
             }
         )
@@ -372,6 +371,7 @@ def get_ts_run_kwargs(ts_params: dict[str, Any] | None = None) -> dict[str, Any]
         "energy_gap_threshold": ts_params.get("energy_gap_threshold"),
         "similarity_tolerance": ts_params.get("similarity_tolerance"),
         "similarity_pair_cor_max": ts_params.get("similarity_pair_cor_max"),
+        "pair_priority_mode": ts_params.get("pair_priority_mode", "physics"),
         "neb_n_images": ts_params.get("neb_n_images"),
         "neb_spring_constant": ts_params.get("neb_k"),
         "neb_fmax": ts_params.get("neb_fmax"),

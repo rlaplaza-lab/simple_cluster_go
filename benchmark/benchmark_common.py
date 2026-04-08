@@ -37,6 +37,34 @@ NUM_GROUND_TRUTH = 50
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 BENCHMARK_DIR = PROJECT_ROOT / "benchmark" / "benchmark_files_Pt"
 
+# Campaign outputs (used by benchmark_Pt, benchmark_Pt_PBE, benchmark_Pt_surface_nio).
+# Each suite writes under ``results/<suite>/``; per-formula runs use ``<Formula>_searches``.
+BENCHMARK_RESULTS_ROOT = PROJECT_ROOT / "benchmark" / "results"
+PT_CLUSTER_RESULTS_DIR = BENCHMARK_RESULTS_ROOT / "pt_cluster"
+PT_CLUSTER_PBE_RESULTS_DIR = BENCHMARK_RESULTS_ROOT / "pt_cluster_pbe"
+PT_SURFACE_NIO_RESULTS_DIR = BENCHMARK_RESULTS_ROOT / "pt_surface_nio"
+
+
+def default_pt_cluster_benchmark_output_dir(model_name: str | None) -> Path:
+    """Destination for gas-phase Pt benchmark campaigns (split by MACE variant)."""
+    if model_name == "large":
+        return PT_CLUSTER_PBE_RESULTS_DIR.resolve()
+    return PT_CLUSTER_RESULTS_DIR.resolve()
+
+
+def resolve_pt_cluster_benchmark_output_dir(
+    params: dict,
+    output_dir: str | Path | None = None,
+) -> Path:
+    """Resolve and create the output root for a Pt cluster benchmark campaign."""
+    if output_dir is not None:
+        path = Path(output_dir).resolve()
+    else:
+        model_name = params.get("calculator_kwargs", {}).get("model_name")
+        path = default_pt_cluster_benchmark_output_dir(model_name)
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
 
 def _parse_atom_count(cluster_formula: str) -> int:
     """Extract the integer atom count from a cluster formula like 'Pt7'."""
@@ -78,9 +106,11 @@ def _campaign_cache_key(
     max_atoms: int,
     seed: int,
     params: dict,
+    output_dir: str | Path | None,
 ) -> str:
     digest = _params_digest(params)
-    return f"{element}|{min_atoms}|{max_atoms}|{seed}|{digest}"
+    out = str(Path(output_dir).resolve()) if output_dir is not None else ""
+    return f"{element}|{min_atoms}|{max_atoms}|{seed}|{digest}|{out}"
 
 
 def _get_campaign_results(
@@ -89,9 +119,10 @@ def _get_campaign_results(
     max_atoms: int,
     seed: int,
     params: dict,
+    output_dir: str | Path,
 ) -> dict[str, list[tuple[float, Atoms]]]:
     """Run (or reuse) a SCGO campaign for the requested configuration."""
-    key = _campaign_cache_key(element, min_atoms, max_atoms, seed, params)
+    key = _campaign_cache_key(element, min_atoms, max_atoms, seed, params, output_dir)
     cached = _CAMPAIGN_RESULTS_CACHE.get(key)
     if cached is not None:
         return cached
@@ -103,6 +134,7 @@ def _get_campaign_results(
         max_atoms,
         params=params_copy,
         seed=seed,
+        output_dir=output_dir,
     )
     _CAMPAIGN_RESULTS_CACHE[key] = results
     return results
@@ -168,6 +200,7 @@ def evaluate_cluster(
     element: str = "Pt",
     campaign_results: dict[str, list[tuple[float, Atoms]]] | None = None,
     verbose: bool = False,
+    output_dir: str | Path | None = None,
 ) -> BenchmarkResult:
     """Run SCGO for a single cluster and evaluate against the benchmark set."""
     lines: list[str] = []
@@ -200,12 +233,14 @@ def evaluate_cluster(
     )
 
     if campaign_results is None:
+        resolved_out = resolve_pt_cluster_benchmark_output_dir(params, output_dir)
         campaign_results = _get_campaign_results(
             element=element,
             min_atoms=n_atoms,
             max_atoms=n_atoms,
             seed=seed,
             params=params,
+            output_dir=resolved_out,
         )
     found_minima_tuples = campaign_results.get(cluster_formula)
 
@@ -301,6 +336,7 @@ def run_benchmark_suite(
     params: dict | None = None,
     model_name: str | None = None,
     verbose: bool = True,
+    output_dir: str | Path | None = None,
 ) -> list[BenchmarkResult]:
     """Execute the Pt benchmark suite for a set of cluster formulas."""
     clusters = clusters or DEFAULT_CLUSTERS
@@ -315,12 +351,14 @@ def run_benchmark_suite(
     max_atoms = max(atom_counts)
     element = "Pt"
 
+    resolved_out = resolve_pt_cluster_benchmark_output_dir(params, output_dir)
     shared_campaign_results = _get_campaign_results(
         element=element,
         min_atoms=min_atoms,
         max_atoms=max_atoms,
         seed=seed,
         params=params,
+        output_dir=resolved_out,
     )
 
     results: list[BenchmarkResult] = []

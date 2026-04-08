@@ -37,15 +37,15 @@ def test_ts_search_params_allow_overrides():
 def test_ts_search_surface_regime_mic_and_fmax():
     ts = get_ts_search_params(regime="surface")
     assert ts["neb_interpolation_mic"] is True
-    assert ts["neb_n_images"] == 3
-    assert ts["neb_fmax"] == pytest.approx(0.08)
-    assert ts["torchsim_fmax"] == pytest.approx(0.08)
-    assert ts["neb_climb"] is False
+    assert ts["neb_n_images"] == 5
+    assert ts["neb_fmax"] == pytest.approx(0.05)
+    assert ts["torchsim_fmax"] == pytest.approx(0.05)
+    assert ts["neb_climb"] is True
     assert ts["neb_align_endpoints"] is False
     kwargs = get_ts_run_kwargs(ts)
     assert kwargs["neb_interpolation_mic"] is True
-    assert kwargs["neb_n_images"] == 3
-    assert kwargs["neb_climb"] is False
+    assert kwargs["neb_n_images"] == 5
+    assert kwargs["neb_climb"] is True
     assert kwargs["neb_align_endpoints"] is False
 
 

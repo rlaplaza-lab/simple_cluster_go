@@ -11,6 +11,7 @@ import pytest
 import torch
 from ase import Atoms
 from ase.calculators.emt import EMT
+from ase.constraints import FixAtoms
 
 from scgo.ts_search.transition_state import (
     calculate_structure_similarity,
@@ -234,6 +235,58 @@ def test_calculate_similarity_basic():
     cum_diff, max_diff, are_similar = calculate_structure_similarity(atoms1, atoms4)
     assert cum_diff > 0.01
     # are_similar may be implementation-dependent; ensure the difference is large enough to indicate dissimilarity
+
+
+def test_calculate_similarity_ignores_fixed_slab_atoms():
+    """Fixed slab atoms should not affect similarity metrics."""
+    slab_mobile = [[0.0, 0.0, 0.0], [1.2, 0.0, 0.0], [0.6, 1.0, 0.0], [0.6, 0.4, 1.8]]
+    atoms1 = Atoms("Pt4", positions=slab_mobile)
+    atoms2 = atoms1.copy()
+    atoms1.set_constraint(FixAtoms(indices=[0, 1, 2]))
+    atoms2.set_constraint(FixAtoms(indices=[0, 1, 2]))
+    # Move only frozen slab atoms in atoms2
+    pos2 = atoms2.get_positions()
+    pos2[:3, 0] += 0.4
+    atoms2.set_positions(pos2)
+
+    cum_diff, _max_diff, are_similar = calculate_structure_similarity(atoms1, atoms2)
+    assert cum_diff == pytest.approx(0.0, abs=1e-10)
+    assert are_similar is True
+
+
+def test_select_structure_pairs_ignores_fixed_slab_atom_differences():
+    """Pair filtering should reject endpoint pairs that differ only in frozen slab atoms."""
+    base = Atoms(
+        "Pt5",
+        positions=[
+            [0.0, 0.0, 0.0],
+            [1.2, 0.0, 0.0],
+            [0.6, 1.0, 0.0],
+            [0.6, 0.4, 1.8],
+            [1.8, 0.4, 1.8],
+        ],
+    )
+    base.set_constraint(FixAtoms(indices=[0, 1, 2]))
+    slab_shifted = base.copy()
+    slab_shifted.set_constraint(FixAtoms(indices=[0, 1, 2]))
+    shifted_pos = slab_shifted.get_positions()
+    shifted_pos[:3, 1] += 0.35
+    slab_shifted.set_positions(shifted_pos)
+    mobile_changed = base.copy()
+    mobile_pos = mobile_changed.get_positions()
+    mobile_pos[4, 0] += 0.8
+    mobile_changed.set_positions(mobile_pos)
+
+    minima = [(-1.0, base), (-0.95, slab_shifted), (-0.90, mobile_changed)]
+    pairs = select_structure_pairs(
+        minima,
+        max_pairs=None,
+        similarity_tolerance=0.01,
+        similarity_pair_cor_max=0.2,
+    )
+
+    assert (0, 1) not in pairs
+    assert (0, 2) in pairs
 
 
 def test_setup_neb_path(h2_reactant, h2_product):
@@ -643,6 +696,46 @@ def test_select_structure_pairs_energy_gap():
     assert (0, 1) in pairs
     assert (0, 2) not in pairs
     assert (1, 2) not in pairs
+
+
+def test_select_structure_pairs_physics_mode_reorders_capped_pairs(monkeypatch):
+    """Physics mode should rank capped pairs, not keep scan order."""
+    atoms0 = Atoms("H2", positions=[[0.0, 0, 0], [1.0, 0, 0]])
+    atoms1 = Atoms("H2", positions=[[1.0, 0, 0], [1.5, 0, 0]])
+    atoms2 = Atoms("H2", positions=[[2.0, 0, 0], [2.5, 0, 0]])
+    minima = [(-1.0, atoms0), (-0.95, atoms1), (-0.55, atoms2)]
+
+    def _fake_similarity(
+        a_i: Atoms,
+        a_j: Atoms,
+        tolerance: float = 0.1,
+        pair_cor_max: float = 0.1,
+    ) -> tuple[float, float, bool]:
+        pair = tuple(
+            sorted(
+                (
+                    int(round(a_i.get_positions()[0, 0])),
+                    int(round(a_j.get_positions()[0, 0])),
+                )
+            )
+        )
+        table = {
+            (0, 1): (0.02, 0.10, False),
+            (0, 2): (0.20, 0.20, False),
+            (1, 2): (0.25, 0.15, False),
+        }
+        return table[pair]
+
+    monkeypatch.setattr(
+        "scgo.ts_search.transition_state_io.calculate_structure_similarity",
+        _fake_similarity,
+    )
+
+    legacy = select_structure_pairs(minima, max_pairs=2, pair_priority_mode="legacy")
+    physics = select_structure_pairs(minima, max_pairs=2, pair_priority_mode="physics")
+
+    assert legacy == [(0, 1), (0, 2)]
+    assert physics == [(1, 2), (0, 2)]
 
 
 def test_find_ts_emt_basic(cu3_triangle, cu3_linear, temp_output_dir):

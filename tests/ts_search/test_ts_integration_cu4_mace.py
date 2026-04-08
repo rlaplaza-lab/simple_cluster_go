@@ -145,6 +145,8 @@ def test_full_workflow_cu4_mace_database_persistence():
             params=ts_params,
             verbosity=0,
             max_pairs=3,
+            energy_gap_threshold=None,
+            dedupe_minima=False,
             neb_n_images=5,
             neb_fmax=0.1,
             neb_steps=120,

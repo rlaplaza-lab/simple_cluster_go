@@ -149,7 +149,6 @@ def validate_algorithm_params(
             "max_mutation_probability",
             "vacuum",
             "energy_tolerance",
-            "use_torchsim",
             "use_adaptive_mutations",
             "stagnation_trigger",
             "stagnation_full_trigger",
@@ -387,7 +386,15 @@ def log_configuration(
 
     calculator_kwargs = params.get("calculator_kwargs", {})
     if calculator_kwargs:
-        logger.info("SCGO config: calculator_kwargs=%s", calculator_kwargs)
+        if verbosity >= 2:
+            logger.info("SCGO config: calculator_kwargs=%s", calculator_kwargs)
+        else:
+            kwarg_keys = sorted(str(k) for k in calculator_kwargs)
+            logger.info(
+                "SCGO config: calculator_kwargs_keys=%s (n=%d)",
+                kwarg_keys,
+                len(kwarg_keys),
+            )
 
     logger.info(
         "SCGO config: validate_with_hessian=%s check_hessian=%s fmax_threshold=%s imag_freq_threshold=%s",

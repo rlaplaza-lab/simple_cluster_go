@@ -6,12 +6,14 @@ This module tests various utility functions used throughout the SCGO package.
 import numpy as np
 import pytest
 from ase import Atoms
+from ase.constraints import FixAtoms
 
 from scgo.utils.helpers import (
     auto_niter,
     auto_niter_local_relaxation,
     auto_niter_ts,
     auto_population_size,
+    canonicalize_storage_frame,
     ensure_float64_forces,
     filter_unique_minima,
     get_cluster_formula,
@@ -52,6 +54,27 @@ class TestFilterUniqueMinima:
         # Should return both since they have different positions
         result = filter_unique_minima([(1.0, atoms1), (2.0, atoms2)])
         assert len(result) == 2
+
+    def test_filter_unique_minima_ignores_fixed_slab_atom_differences(self):
+        """Minima dedup should ignore changes confined to fixed slab atoms."""
+        base = Atoms(
+            "Pt4",
+            positions=[
+                [0.0, 0.0, 0.0],
+                [1.2, 0.0, 0.0],
+                [0.6, 1.0, 0.0],
+                [0.6, 0.4, 1.8],
+            ],
+        )
+        base.set_constraint(FixAtoms(indices=[0, 1, 2]))
+        slab_shifted = base.copy()
+        slab_shifted.set_constraint(FixAtoms(indices=[0, 1, 2]))
+        p = slab_shifted.get_positions()
+        p[:3, 2] += 0.3
+        slab_shifted.set_positions(p)
+
+        result = filter_unique_minima([(0.0, base), (0.001, slab_shifted)])
+        assert len(result) == 1
 
 
 class TestAutoNiter:
@@ -328,3 +351,89 @@ class TestEnsureFloat64Forces:
 
         # Values should be approximately equal (allowing for float32 precision loss)
         np.testing.assert_allclose(atoms.arrays["forces"], original_forces, rtol=1e-5)
+
+
+class TestCanonicalizeStorageFrame:
+    """Tests for translation-only canonicalization before persistence."""
+
+    def test_non_pbc_recenter_to_cell_midpoint(self):
+        atoms = Atoms(
+            "Pt2",
+            positions=[[1.0, 2.0, 3.0], [2.5, 2.0, 3.0]],
+            cell=[10.0, 10.0, 10.0],
+            pbc=False,
+        )
+        canonicalize_storage_frame(atoms)
+        com = atoms.get_center_of_mass()
+        np.testing.assert_allclose(com, [5.0, 5.0, 5.0], atol=1e-8)
+
+    def test_pbc_wraps_before_centering(self):
+        atoms = Atoms(
+            "Pt2",
+            positions=[[-0.2, 0.1, 0.1], [9.8, 0.1, 0.1]],
+            cell=[10.0, 10.0, 10.0],
+            pbc=True,
+        )
+        canonicalize_storage_frame(atoms)
+        positions = atoms.get_positions()
+        assert np.all(positions >= -1e-8)
+        assert np.all(positions <= 10.0 + 1e-8)
+
+    def test_can_skip_centering_for_surface_frames(self):
+        atoms = Atoms(
+            "Pt2",
+            positions=[[0.5, 0.5, 0.5], [1.0, 1.0, 1.0]],
+            cell=[10.0, 10.0, 10.0],
+            pbc=False,
+        )
+        before = atoms.get_center_of_mass().copy()
+        canonicalize_storage_frame(atoms, center=False)
+        after = atoms.get_center_of_mass()
+        np.testing.assert_allclose(after, before, atol=1e-8)
+
+
+class TestCanonicalizeSlabAdsorbateFrame:
+    """Rigid lattice shift for slab+adsorbate under in-plane PBC."""
+
+    def test_adsorbate_com_fractional_in_unit_cell_after_canonicalize(self):
+        cell = [[10.0, 0, 0], [0, 10.0, 0], [0, 0, 15.0]]
+        pbc = [True, True, False]
+        atoms = Atoms(
+            ["Pt", "Pt"],
+            positions=[[1.0, 5.0, 2.0], [12.0, 5.0, 3.0]],
+            cell=cell,
+            pbc=pbc,
+        )
+        canonicalize_storage_frame(atoms, pbc_aware=True, center=False, n_slab=1)
+        scaled = atoms.get_scaled_positions(wrap=False)[1:]
+        com = np.average(scaled, axis=0, weights=atoms.get_masses()[1:])
+        assert 0 <= com[0] < 1
+        assert 0 <= com[1] < 1
+
+    def test_lattice_translated_pairs_match_after_canonicalize(self):
+        cell = [[10.0, 0, 0], [0, 10.0, 0], [0, 0, 15.0]]
+        pbc = [True, True, False]
+        a = Atoms(
+            ["Pt", "Pt"],
+            positions=[[1.0, 5.0, 2.0], [12.0, 5.0, 3.0]],
+            cell=cell,
+            pbc=pbc,
+        )
+        b = a.copy()
+        b.positions += np.array([-10.0, 0.0, 0.0])
+        canonicalize_storage_frame(a, pbc_aware=True, center=False, n_slab=1)
+        canonicalize_storage_frame(b, pbc_aware=True, center=False, n_slab=1)
+        np.testing.assert_allclose(a.get_positions(), b.get_positions(), atol=1e-10)
+
+    def test_n_slab_zero_still_wraps_and_centers_pbc_cluster(self):
+        """Regression: gas-style PBC dimer path unchanged when n_slab is 0."""
+        atoms = Atoms(
+            "Pt2",
+            positions=[[-0.2, 0.1, 0.1], [9.8, 0.1, 0.1]],
+            cell=[10.0, 10.0, 10.0],
+            pbc=True,
+        )
+        canonicalize_storage_frame(atoms, n_slab=0)
+        positions = atoms.get_positions()
+        assert np.all(positions >= -1e-8)
+        assert np.all(positions <= 10.0 + 1e-8)

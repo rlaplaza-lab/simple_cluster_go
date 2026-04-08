@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 from ase import Atoms
+from ase.constraints import FixAtoms
 
 from scgo.ts_search.transition_state_io import write_final_unique_ts
 from scgo.ts_search.transition_state_run import integrate_ts_to_database
@@ -98,6 +99,46 @@ def test_write_final_unique_ts_keeps_similar_ts_across_different_pairs(tmp_path)
     assert data["formula"] == "Pt2"
     assert len(data["unique_ts"]) == 1
     assert len(data["unique_ts"][0]["connected_edges"]) == 2
+
+
+def test_write_final_unique_ts_ignores_fixed_slab_atom_differences(tmp_path):
+    ts1 = Atoms(
+        "Pt4",
+        positions=[[0.0, 0.0, 0.0], [1.2, 0.0, 0.0], [0.6, 1.0, 0.0], [0.6, 0.4, 1.8]],
+    )
+    ts1.set_constraint(FixAtoms(indices=[0, 1, 2]))
+    ts1.info.setdefault("key_value_pairs", {})["raw_score"] = -0.5
+    ts2 = ts1.copy()
+    ts2.set_constraint(FixAtoms(indices=[0, 1, 2]))
+    pos = ts2.get_positions()
+    pos[:3, 0] += 0.45
+    ts2.set_positions(pos)
+    ts2.info.setdefault("key_value_pairs", {})["raw_score"] = -0.51
+
+    ts_results = [
+        {
+            "pair_id": "0_1",
+            "status": "success",
+            "neb_converged": True,
+            "transition_state": ts1,
+            "ts_energy": 0.5,
+            "barrier_height": 0.2,
+        },
+        {
+            "pair_id": "1_2",
+            "status": "success",
+            "neb_converged": True,
+            "transition_state": ts2,
+            "ts_energy": 0.51,
+            "barrier_height": 0.21,
+        },
+    ]
+
+    out = str(tmp_path / "ts_results_Pt4")
+    os.makedirs(out, exist_ok=True)
+    summary = write_final_unique_ts(ts_results, out, ["Pt", "Pt", "Pt", "Pt"])
+    assert len(summary) == 1
+    assert {edge["pair_id"] for edge in summary[0]["connected_edges"]} == {"0_1", "1_2"}
 
 
 @pytest.mark.parametrize(

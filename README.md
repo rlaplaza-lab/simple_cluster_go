@@ -105,7 +105,7 @@ Notes:
 Tagging final minima in databases: ✅ After writing final XYZ files, SCGO can optionally tag the corresponding database records with metadata ("final_unique_minimum": true, "final_rank", and "final_written") so downstream tools can find final minima without re-scanning databases. This behaviour is enabled by default and can be disabled by setting `params['tag_final_minima'] = False` when calling `run_scgo_trials(...)`.
 - `fitness_strategy`: `low_energy` (default), `high_energy`, `diversity`.
 - `validate_with_hessian` (bool): run force + Hessian checks (uses ASE vibrational analysis).
-- `optimizer_params.ga.use_torchsim` (bool): default `True` uses TorchSim batched GA for ML calculators (CPU or GPU); set `False` to force the classic ASE GA even for MLIPs. Non-ML calculators always use ASE GA.
+- **GA backend**: MLIPs use TorchSim batched GA; classical calculators use ASE GA.
 
 Important: `diversity` requires a `diversity_reference_db` glob (e.g. `"Pt*_searches/**/*.db"`).
 
@@ -136,10 +136,8 @@ params = get_minimal_ga_params(seed=42)
 params["optimizer_params"]["ga"]["surface_config"] = surface_config
 ```
 
-- **Direct API** (any adsorbate size): `from scgo import ga_go, SurfaceSystemConfig` and pass `surface_config=...`. Examples:
-  - [`examples/surface_ga_pt_dimer_demo.py`](examples/surface_ga_pt_dimer_demo.py) — rigid slab (`fix_all_slab_atoms=True`).
-  - [`examples/surface_ga_relax_top_layers_demo.py`](examples/surface_ga_relax_top_layers_demo.py) — only the top *N* distinct slab layers relax (`n_relax_top_slab_layers`).
-- **`run_scgo_trials`**: set `params["optimizer_params"]["ga"]["surface_config"]` to a `SurfaceSystemConfig` instance. The high-level runner only selects GA when `len(composition) >= 4`, so use **at least four adsorbate atoms** if you rely on automatic algorithm choice; for dimers/trimers, call `ga_go` directly as in the examples.
+- **Direct API** (any adsorbate size): `from scgo import ga_go, SurfaceSystemConfig` and pass `surface_config=...`.
+- **`run_scgo_trials`**: set `params["optimizer_params"]["ga"]["surface_config"]` to a `SurfaceSystemConfig` instance. The high-level runner only selects GA when `len(composition) >= 4`, so use **at least four adsorbate atoms** if you rely on automatic algorithm choice; for dimers/trimers, call `ga_go` directly.
 - **Example runner scripts** in `runners/` show the full workflow (minima search + TS search) on graphene slabs. Replace the inline `_make_slab()` helper with any other slab to run on a different surface.
 
 Surface workflows use `from scgo.runner_surface import make_surface_config` with your ASE slab.

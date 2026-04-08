@@ -5,6 +5,9 @@ the recovered minima primarily through geometric agreement and, secondarily,
 relative energetic ordering. The script doubles as a pytest entry point and a
 standalone CLI for rapid regression checks while tweaking optimization knobs.
 Uses PBE-trained MACE-MP large model.
+
+Campaign outputs go to ``benchmark/results/pt_cluster_pbe/`` (per-formula
+``<Formula>_searches`` directories); see ``benchmark.benchmark_common``.
 """
 
 import pytest

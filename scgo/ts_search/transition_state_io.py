@@ -7,8 +7,9 @@ and writing TS results with full provenance tracking.
 from __future__ import annotations
 
 import json
+import math
 import os
-from typing import Any
+from typing import Any, Literal
 
 from ase import Atoms
 from ase.io import write as ase_write
@@ -255,6 +256,8 @@ def select_structure_pairs(
     energy_gap_threshold: float | None = None,
     similarity_tolerance: float = DEFAULT_COMPARATOR_TOL,
     similarity_pair_cor_max: float = 0.1,
+    pair_priority_mode: Literal["legacy", "physics"] = "legacy",
+    surface_aware: bool = False,
 ) -> list[tuple[int, int]]:
     """Select pairs of minima for TS calculations.
 
@@ -282,7 +285,37 @@ def select_structure_pairs(
         logger.info(f"Only {len(minima)} minima, need at least 2 to pair")
         return []
 
+    if pair_priority_mode not in ("legacy", "physics"):
+        raise ValueError(
+            "pair_priority_mode must be 'legacy' or 'physics', "
+            f"got {pair_priority_mode!r}"
+        )
+
     pairs: list[tuple[int, int]] = []
+    scored_pairs: list[tuple[float, int, int]] = []
+
+    def _score_candidate(gap: float, cum_diff: float, max_diff: float) -> float:
+        """Return higher-is-better physics-guided priority score.
+
+        Uses a compact blend of:
+        - energy-gap proximity to a regime-dependent target window,
+        - moderate structural dissimilarity preference,
+        - endpoint mismatch penalty to avoid overly-discontinuous paths.
+        """
+        # Surface systems often tolerate/require slightly larger endpoint deltas.
+        gap_center = 0.45 if surface_aware else 0.30
+        gap_width = 0.55 if surface_aware else 0.40
+        gap_score = math.exp(-(((gap - gap_center) / max(1e-8, gap_width)) ** 2))
+
+        # Prefer distinct structures, but saturate to avoid over-valuing extremes.
+        cum_scale = 0.12 if surface_aware else 0.09
+        distinct_score = 1.0 - math.exp(-max(0.0, cum_diff) / max(1e-8, cum_scale))
+
+        # Strongly penalize very large single-pair distortions.
+        mismatch_scale = 0.45 if surface_aware else 0.35
+        mismatch_penalty = math.exp(-max(0.0, max_diff) / max(1e-8, mismatch_scale))
+
+        return 0.5 * gap_score + 0.35 * distinct_score + 0.15 * mismatch_penalty
 
     for i in range(len(minima)):
         for j in range(i + 1, len(minima)):
@@ -290,10 +323,9 @@ def select_structure_pairs(
             energy_j, atoms_j = minima[j]
 
             # Energy gap filter
-            if energy_gap_threshold is not None:
-                gap = abs(energy_j - energy_i)
-                if gap > energy_gap_threshold:
-                    continue
+            gap = abs(energy_j - energy_i)
+            if energy_gap_threshold is not None and gap > energy_gap_threshold:
+                continue
 
             # Permutation-invariant similarity filter
             try:
@@ -318,11 +350,35 @@ def select_structure_pairs(
                 continue
 
             pairs.append((i, j))
+            if pair_priority_mode == "physics":
+                scored_pairs.append(
+                    (_score_candidate(gap, float(cum_diff), float(max_diff)), i, j)
+                )
 
-            if max_pairs is not None and len(pairs) >= max_pairs:
+            if (
+                pair_priority_mode == "legacy"
+                and max_pairs is not None
+                and len(pairs) >= max_pairs
+            ):
                 return pairs
 
-    return pairs
+        if (
+            pair_priority_mode == "legacy"
+            and max_pairs is not None
+            and len(pairs) >= max_pairs
+        ):
+            break
+
+    if pair_priority_mode == "legacy" or not pairs:
+        return pairs
+
+    # Deterministic ordering: higher score first, then stable index tie-break.
+    scored_pairs.sort(key=lambda item: (-item[0], item[1], item[2]))
+    ranked_pairs = [(i, j) for _score, i, j in scored_pairs]
+    if max_pairs is None:
+        return ranked_pairs
+
+    return ranked_pairs[:max_pairs]
 
 
 def save_transition_state_results(

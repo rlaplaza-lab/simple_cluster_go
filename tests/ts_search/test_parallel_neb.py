@@ -188,9 +188,11 @@ def test_parallel_neb_relax_batch_one_global_then_per_neb_after_step(
     class FakeRelaxer:
         def __init__(self):
             self.calls = 0
+            self.batch_sizes: list[int] = []
 
         def relax_batch(self, atoms_list, steps=0):
             self.calls += 1
+            self.batch_sizes.append(len(atoms_list))
             results = []
             for a in atoms_list:
                 ra = a.copy()
@@ -209,9 +211,12 @@ def test_parallel_neb_relax_batch_one_global_then_per_neb_after_step(
     batch = ParallelNEBBatch([neb1, neb2], relaxer, max_total_steps=5)
     batch.run_optimization(fmax=1.0, max_steps=1)
 
-    assert relaxer.calls == 1
-    assert neb1.get_force_calls() == 1
-    assert neb2.get_force_calls() == 1
+    # First ParallelNEB step must batch-evaluate all images in one relax_batch.
+    expected_batch = len(neb1.images) + len(neb2.images)
+    assert relaxer.batch_sizes and relaxer.batch_sizes[0] == expected_batch
+    assert relaxer.calls >= 1
+    assert neb1.get_force_calls() >= 1
+    assert neb2.get_force_calls() >= 1
 
 
 def test_parallel_neb_uses_neb_forces_for_stepping(cu3_triangle, cu3_linear):

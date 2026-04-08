@@ -282,7 +282,8 @@ def create_ga_pairing(
             )
         idx_top = range(n_to_optimize)
 
-    all_atom_types = get_all_atom_types(atoms_template, idx_top)
+    top_atomic_numbers = [int(atoms_template.numbers[i]) for i in idx_top]
+    all_atom_types = get_all_atom_types(atoms_template, top_atomic_numbers)
     blmin = closest_distances_generator(all_atom_types, ratio_of_covalent_radii=0.7)
 
     if slab_atoms is not None and len(slab_atoms) > 0:

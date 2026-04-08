@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import numpy as np
 from ase import Atoms
+from ase.constraints import FixAtoms
 
 from scgo.constants import (
     DEFAULT_COMPARATOR_TOL,
@@ -65,6 +66,47 @@ def get_sorted_dist_list(atoms: Atoms, mic: bool = False) -> dict[int, np.ndarra
         d.sort()
         pair_cor[n] = np.array(d)
     return pair_cor
+
+
+def get_mobile_atom_indices(atoms: Atoms) -> np.ndarray:
+    """Return indices for atoms not constrained by ``FixAtoms``.
+
+    If no fixed atoms are present (or all atoms are fixed), this falls back to
+    all atom indices to preserve historical comparison behavior.
+    """
+    n_atoms = len(atoms)
+    fixed_mask = np.zeros(n_atoms, dtype=bool)
+    for constraint in getattr(atoms, "constraints", ()):
+        if isinstance(constraint, FixAtoms):
+            idx = np.asarray(constraint.get_indices(), dtype=int)
+            fixed_mask[idx] = True
+
+    if not np.any(fixed_mask):
+        return np.arange(n_atoms, dtype=int)
+
+    mobile = np.flatnonzero(~fixed_mask).astype(int, copy=False)
+    if mobile.size == 0:
+        return np.arange(n_atoms, dtype=int)
+    return mobile
+
+
+def get_shared_mobile_atom_indices(a1: Atoms, a2: Atoms) -> np.ndarray:
+    """Return index set suitable for comparing two structures.
+
+    Uses the intersection of mobile (non-``FixAtoms``) indices from both
+    structures, falling back to all indices if no shared mobile atoms exist.
+    """
+    if len(a1) != len(a2):
+        raise ValueError(
+            f"The two configurations must have the same number of atoms: {len(a1)} vs {len(a2)}",
+        )
+
+    idx1 = get_mobile_atom_indices(a1)
+    idx2 = get_mobile_atom_indices(a2)
+    shared = np.intersect1d(idx1, idx2, assume_unique=False)
+    if shared.size == 0:
+        return np.arange(len(a1), dtype=int)
+    return shared.astype(int, copy=False)
 
 
 class PureInteratomicDistanceComparator:
