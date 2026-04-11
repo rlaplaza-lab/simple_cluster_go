@@ -269,12 +269,15 @@ def get_ts_search_params(
     Parameters
     ----------
     regime:
-        ``"gas"`` (nanoparticle / non-periodic): defaults tuned for isolated clusters.
+        ``"gas"`` (nanoparticle / non-periodic): ``neb_n_images=5`` for a thicker
+        initial band (fewer false endpoint-TS bands than 3 images on metals),
+        ``energy_gap_threshold=2.0`` eV so pairs are not dropped when relaxed
+        minima span more than 1 eV, and ``neb_climb=False`` (see preset comments).
         ``"surface"`` (slab + adsorbate, periodic in-plane): MIC interpolation,
         ``neb_n_images=5``, ``neb_climb=False``, and ``fmax=0.1 eV/Å``.
         Endpoint alignment stays off by default for fixed-slab/PBC (tuned for
-        supported Pt5-on-NiO MACE NEB sweeps). Other surfaces (e.g. graphene Cu4)
-        can pass ``neb_climb=False`` / ``neb_n_images=3`` via explicit kwargs.
+        supported Pt5-on-NiO MACE NEB sweeps). Override any key via the returned
+        dict before calling :func:`get_ts_run_kwargs`.
     surface_config:
         The same :class:`scgo.surface.config.SurfaceSystemConfig` instance wired into
         ``optimizer_params["ga"]["surface_config"]``. Stored on the returned dict
@@ -299,14 +302,16 @@ def get_ts_search_params(
     params.update(
         {
             "max_pairs": None,
-            "energy_gap_threshold": 1.0,
+            # Wider than 1.0 eV so distinct minima (e.g. relaxed Cu clusters) are not
+            # all mutually filtered when energies span >1 eV.
+            "energy_gap_threshold": 2.0,
             "similarity_tolerance": DEFAULT_COMPARATOR_TOL,
             # Match ``run_transition_state_search`` default (0.1 Å), not DEFAULT_PAIR_COR_MAX.
             "similarity_pair_cor_max": 0.1,
-            # Pt5 gas sweep on prioritized top-50 pairs (`benchmark/neb_pt5_mace_clean.jsonl`,
-            # MACE/TorchSim, 100 NEB-step benchmark budget): `neb_climb=False` outperformed
-            # `neb_climb=True` on convergence (26/50 vs 20/50) with comparable final_fmax.
-            "neb_n_images": 3,
+            # Pt5 gas sweep: `neb_climb=False` beat `neb_climb=True` on convergence.
+            # Five images give a smoother initial path than three for 3D metal clusters
+            # (fewer bands that collapse to an endpoint before retry).
+            "neb_n_images": 5,
             "neb_spring_constant": 0.1,
             "neb_fmax": 0.05,
             # Allow automatic scaling for NEB iterations (uses auto_niter_ts via runner)

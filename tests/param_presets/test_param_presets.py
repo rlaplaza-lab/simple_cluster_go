@@ -12,6 +12,8 @@ def test_ts_search_params_expose_dedupe_and_tolerance_defaults():
     ts = get_ts_search_params()
 
     # Defaults must exist and be coherent with project-wide defaults
+    assert ts.get("neb_n_images") == 5
+    assert ts.get("energy_gap_threshold") == pytest.approx(2.0)
     assert ts.get("dedupe_minima", None) is True
     assert ts.get("minima_energy_tolerance", None) == pytest.approx(
         DEFAULT_ENERGY_TOLERANCE

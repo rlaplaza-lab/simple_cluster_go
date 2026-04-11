@@ -269,7 +269,7 @@ ts_results = run_transition_state_search(
 - `base_dir`: Directory containing `run_*/` folders with previous optimization results (default: `{formula}_searches`). TS artifacts are written to `base_dir/ts_results_{formula}/`.
 - `max_pairs`: Maximum number of structure pairs to evaluate
 - `energy_gap_threshold`: Only pair structures with energy gap below threshold (eV)
-- `neb_n_images`: Number of NEB images (default: 3)
+- `neb_n_images`: Number of NEB images (API default 3; ``get_ts_search_params()`` uses 5 for gas and surface presets)
 - `neb_spring_constant`: Spring constant for NEB band (default: 0.1)
 - `neb_perturb_sigma`: Interior-image perturbation (Å) applied after interpolation (default: 0.0)
 - `neb_fmax`: Force convergence criterion (default: 0.05 eV/Å)
