@@ -81,8 +81,6 @@ def add_ts_to_database(
         da = DataConnection(db_file)
         ts_atoms = ts_structure.copy()
         ts_atoms.calc = None
-        with contextlib.suppress(AttributeError, TypeError, RuntimeError):
-            ts_atoms.center()
         if "tags" in ts_atoms.arrays:
             del ts_atoms.arrays["tags"]
 
@@ -135,7 +133,6 @@ def add_ts_to_database(
 
         def _add() -> bool:
             ts_db_atoms = ts_atoms.copy()
-            ts_db_atoms.calc = None
             with contextlib.suppress(AttributeError, TypeError, RuntimeError):
                 ts_db_atoms.center()
             if "tags" in ts_db_atoms.arrays:

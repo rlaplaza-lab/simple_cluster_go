@@ -45,6 +45,14 @@ class DatabaseRegistry:
 
     REGISTRY_FILENAME = ".scgo_db_registry.json"
 
+    @staticmethod
+    def _safe_file_size_mb(path: Path) -> float:
+        """Return file size in MiB, falling back to 0 on filesystem races/errors."""
+        try:
+            return path.stat().st_size / (1024 * 1024)
+        except OSError:
+            return 0.0
+
     def __init__(self, base_dir: str | Path):
         """Initialize registry.
 
@@ -110,9 +118,7 @@ class DatabaseRegistry:
                 "composition_str": self._make_composition_key(composition or []),
                 "run_id": run_id,
                 "trial_id": trial_id,
-                "size_mb": db_path.stat().st_size / (1024 * 1024)
-                if db_path.exists()
-                else 0,
+                "size_mb": self._safe_file_size_mb(db_path),
                 "metadata": metadata or {},
             }
 
@@ -382,7 +388,7 @@ class DatabaseRegistry:
         # Try to detect composition from first readable structure (strict mode).
         # Under strict/default policy we surface DB/ASE errors instead of
         # silently swallowing them so callers can correct invalid DBs.
-        if db_path.exists() and db_path.stat().st_size > 0:
+        if self._safe_file_size_mb(db_path) > 0:
             # Prefer a 'relaxed' systems row; fall back to any row. Use a
             # direct SQL read for the row id to avoid calling fragile ASE
             # helper methods that vary across ASE versions.

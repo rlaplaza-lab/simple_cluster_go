@@ -135,5 +135,6 @@ def simple_go(
             return []
 
         return all_minima
+
     finally:
         close_data_connection(da, log_errors=False)

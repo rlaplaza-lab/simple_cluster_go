@@ -9,7 +9,11 @@ from ase.build import fcc111
 
 from scgo.algorithms.geneticalgorithm_go_torchsim import _torchsim_prepare_relaxed_copy
 from scgo.surface.config import SurfaceSystemConfig
-from scgo.surface.constraints import attach_slab_constraints
+from scgo.surface.constraints import (
+    attach_slab_constraints,
+    attach_slab_constraints_from_surface_config,
+    surface_slab_constraint_summary,
+)
 
 
 def _three_layer_slab_positions() -> np.ndarray:
@@ -137,6 +141,45 @@ def test_surface_config_both_layer_specs_rejected() -> None:
             n_fix_bottom_slab_layers=1,
             n_relax_top_slab_layers=1,
         )
+
+
+def test_attach_slab_constraints_from_surface_config_matches_explicit() -> None:
+    pos = _three_layer_slab_positions()
+    slab = Atoms("Pt6", positions=pos, cell=[10, 10, 10], pbc=False)
+    ads = Atoms("Pt", positions=[[0.0, 0.0, 5.0]], cell=slab.cell, pbc=False)
+    cfg = SurfaceSystemConfig(
+        slab=slab,
+        fix_all_slab_atoms=False,
+        n_fix_bottom_slab_layers=2,
+    )
+    c_cfg = slab + ads
+    attach_slab_constraints_from_surface_config(c_cfg, cfg)
+    c_exp = slab + ads
+    attach_slab_constraints(
+        c_exp,
+        len(slab),
+        fix_all_slab_atoms=False,
+        n_fix_bottom_slab_layers=2,
+        n_relax_top_slab_layers=None,
+        surface_normal_axis=2,
+    )
+    assert _fix_indices(c_cfg) == _fix_indices(c_exp)
+
+
+def test_surface_slab_constraint_summary_json_safe() -> None:
+    pos = _three_layer_slab_positions()
+    slab = Atoms("Pt6", positions=pos, cell=[10, 10, 10], pbc=False)
+    cfg = SurfaceSystemConfig(
+        slab=slab,
+        fix_all_slab_atoms=False,
+        n_relax_top_slab_layers=2,
+    )
+    s = surface_slab_constraint_summary(cfg)
+    assert s["n_slab_atoms"] == len(slab)
+    assert s["surface_normal_axis"] == 2
+    assert s["fix_all_slab_atoms"] is False
+    assert s["n_fix_bottom_slab_layers"] is None
+    assert s["n_relax_top_slab_layers"] == 2
 
 
 def test_torchsim_prepare_relaxed_copy_attaches_fixatoms() -> None:

@@ -11,7 +11,6 @@ from ase import Atoms
 from ase_ga.utilities import atoms_too_close, atoms_too_close_two_sets
 
 from scgo.initialization.geometry_helpers import _generate_rotation_matrix
-from scgo.surface.validation import validate_supported_cluster_deposit
 from scgo.utils.logging import get_logger
 
 if TYPE_CHECKING:
@@ -109,18 +108,7 @@ def create_deposited_cluster(
         if atoms_too_close_two_sets(ads, slab, blmin):
             continue
 
-        combined = combine_slab_adsorbate(slab, ads)
-        ok_bind, bind_msg = validate_supported_cluster_deposit(
-            combined,
-            len(slab),
-            surface_normal_axis=axis,
-            use_mic=config.comparator_use_mic,
-        )
-        if not ok_bind:
-            logger.debug("create_deposited_cluster: %s", bind_msg)
-            continue
-
-        return combined
+        return combine_slab_adsorbate(slab, ads)
 
     logger.warning(
         "create_deposited_cluster: exceeded max_placement_attempts=%s",

@@ -196,20 +196,19 @@ class ParallelNEBBatch:
                                 self.failed_nebs[neb_idx] = str(e)
                                 continue
 
-                            # Recompute NEB forces after the optimizer step so the
-                            # reported final_fmax reflects the updated geometry.
-                            try:
-                                neb_forces_after = neb.get_forces()
-                                results[neb_idx]["final_fmax"] = float(
-                                    np.max(np.abs(neb_forces_after))
-                                )
-                            except (AttributeError, RuntimeError, ValueError):
-                                results[neb_idx]["final_fmax"] = float(max_force)
+                            # Do NOT recompute NEB forces per-NEB here: that
+                            # triggers an individual TorchSim evaluation per NEB,
+                            # defeating the batched GPU strategy.  The next outer
+                            # loop iteration will batch-evaluate all active NEBs
+                            # together.  For the final iteration the pre-step fmax
+                            # is a conservative (over-)estimate of residual forces.
 
                             if self.step_count < max_steps - 1:
                                 still_active.append(neb_idx)
                             else:
-                                # Last allowed iteration: update convergence status
+                                # Last allowed iteration: use pre-step fmax as a
+                                # conservative convergence proxy (true post-step
+                                # fmax would require an extra evaluation).
                                 results[neb_idx]["converged"] = (
                                     results[neb_idx]["final_fmax"] < fmax
                                 )
@@ -253,7 +252,15 @@ class ParallelNEBBatch:
         # Finalize results
         for neb_idx in range(len(self.neb_instances)):
             if neb_idx not in self.converged_nebs and neb_idx not in self.failed_nebs:
-                results[neb_idx]["error"] = "NEB not processed"
+                if (
+                    results[neb_idx]["steps_taken"]
+                    and results[neb_idx]["steps_taken"] > 0
+                ):
+                    results[neb_idx]["error"] = (
+                        f"NEB did not converge after {results[neb_idx]['steps_taken']} steps"
+                    )
+                else:
+                    results[neb_idx]["error"] = "NEB not processed"
 
         logger.info(
             f"Parallel NEB batch complete: {self.step_count} steps, "

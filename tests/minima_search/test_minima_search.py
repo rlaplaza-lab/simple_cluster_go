@@ -591,6 +591,9 @@ def test_sanitize_global_optimizer_kwargs_for_metadata_surface_config():
     assert isinstance(clean["surface_config"], dict)
     assert clean["surface_config"]["present"] is True
     assert clean["surface_config"]["n_slab_atoms"] == len(slab)
+    assert clean["surface_config"]["slab_chemical_symbols"] == list(
+        slab.get_chemical_symbols()
+    )
     assert clean["surface_config"]["surface_normal_axis"] == 2
     assert clean["surface_config"]["fix_all_slab_atoms"] is True
     assert clean["surface_config"]["n_fix_bottom_slab_layers"] is None

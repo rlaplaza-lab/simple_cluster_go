@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import json
+
 import numpy as np
 from ase import Atoms
 
+from scgo.database.metadata import get_metadata
 from scgo.initialization.geometry_helpers import (
     get_covalent_radius,
     validate_cluster_structure,
@@ -13,9 +16,69 @@ from scgo.initialization.initialization_config import (
     CONNECTIVITY_FACTOR,
     MIN_DISTANCE_FACTOR_DEFAULT,
 )
+from scgo.surface.config import SurfaceSystemConfig
 
 # Small slack below nominal slab top (numerical / structural roughness).
 _BINDING_PENETRATION_TOLERANCE_A = 0.1
+
+
+def validate_surface_config_slab_prefix(
+    atoms: Atoms, config: SurfaceSystemConfig
+) -> None:
+    """Ensure ``atoms`` satisfies the slab-first ordering contract for ``config``.
+
+    Production workflows assume indices ``0 .. len(config.slab)-1`` are exactly the
+    reference slab (same chemical symbols in the same order as ``config.slab``).
+    :func:`attach_slab_constraints_from_surface_config` and surface GA rely on this.
+
+    Raises:
+        ValueError: If the structure is too short or the prefix does not match.
+    """
+    n = len(config.slab)
+    if len(atoms) < n:
+        raise ValueError(
+            "Slab-first ordering: combined system must have at least "
+            f"{n} atoms (slab size from surface_config.slab); got len(atoms)={len(atoms)}"
+        )
+    ref = config.slab.get_chemical_symbols()
+    got = atoms.get_chemical_symbols()[:n]
+    if got != ref:
+        ref_head, got_head = ref[:12], got[:12]
+        raise ValueError(
+            "Slab-first ordering contract violated: the first len(slab) atoms must "
+            "match surface_config.slab chemical symbols in order (same count and "
+            "sequence as the template slab). "
+            f"Expected prefix (len {len(ref)}): {ref_head}{'...' if len(ref) > 12 else ''}; "
+            f"got (len {len(got)}): {got_head}{'...' if len(got) > 12 else ''}."
+        )
+
+
+def validate_stored_slab_adsorbate_metadata(atoms: Atoms) -> None:
+    """If GA slab metadata is present, verify the atom list still matches it.
+
+    Older databases may only have ``n_slab_atoms`` / ``system_kind`` without
+    ``slab_chemical_symbols_json``; in that case only ``len(atoms) >= n_slab`` is checked.
+    """
+    if get_metadata(atoms, "system_kind") != "slab_adsorbate":
+        return
+    n_meta = int(get_metadata(atoms, "n_slab_atoms", 0) or 0)
+    if n_meta <= 0:
+        return
+    if len(atoms) < n_meta:
+        raise ValueError(
+            "Slab metadata expects at least "
+            f"{n_meta} atoms (n_slab_atoms), got len(atoms)={len(atoms)}"
+        )
+    js = get_metadata(atoms, "slab_chemical_symbols_json", None)
+    if js is None:
+        return
+    expected = json.loads(js)
+    got = atoms.get_chemical_symbols()[:n_meta]
+    if list(expected) != got:
+        raise ValueError(
+            "Loaded structure disagrees with stored slab_chemical_symbols_json prefix; "
+            "atom ordering may have been scrambled when reading/writing the file."
+        )
 
 
 def _slab_top_coordinate(slab: Atoms, axis: int) -> float:

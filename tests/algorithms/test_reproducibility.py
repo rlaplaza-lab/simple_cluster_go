@@ -4,8 +4,6 @@ This module verifies that optimization algorithms produce identical results
 when run with the same random seed, ensuring deterministic behavior.
 """
 
-import random
-
 import numpy as np
 import pytest
 from ase import Atoms
@@ -770,39 +768,46 @@ def test_ga_multiprocess_reproducibility(tmp_path):
     """
     comp = ["Pt", "Pt", "Pt"]
     seed = 789
-    ga_params = {
-        "population_size": 4,
-        "niter": 2,
-        "niter_local_relaxation": 2,
-        "optimizer": FIRE,
-        "fmax": 0.2,
-        "vacuum": 5.0,
-        "energy_tolerance": 0.1,
-        "mutation_probability": 0.2,
-    }
 
-    random.seed(seed)
-    rng1, _ = create_paired_rngs(seed)
-    minima1 = ga_go(
+    # Run with single process
+    minima1, _ = run_algorithm_reproducibility_test(
+        ga_go,
         comp,
-        calculator=EMT(),
-        output_dir=str(tmp_path / "single"),
-        rng=rng1,
-        n_jobs_population_init=1,
-        **ga_params,
+        seed,
+        tmp_path / "run1",
+        {
+            "population_size": 4,
+            "niter": 2,
+            "niter_local_relaxation": 2,
+            "optimizer": FIRE,
+            "fmax": 0.2,
+            "vacuum": 5.0,
+            "energy_tolerance": 0.1,
+            "n_jobs_population_init": 1,  # Single process
+            "mutation_probability": 0.2,
+        },
     )
 
-    random.seed(seed)
-    rng2, _ = create_paired_rngs(seed)
-    minima2 = ga_go(
+    # Run with multiple processes
+    minima2, _ = run_algorithm_reproducibility_test(
+        ga_go,
         comp,
-        calculator=EMT(),
-        output_dir=str(tmp_path / "multi"),
-        rng=rng2,
-        n_jobs_population_init=-2,
-        **ga_params,
+        seed,
+        tmp_path / "run2",
+        {
+            "population_size": 4,
+            "niter": 2,
+            "niter_local_relaxation": 2,
+            "optimizer": FIRE,
+            "fmax": 0.2,
+            "vacuum": 5.0,
+            "energy_tolerance": 0.1,
+            "n_jobs_population_init": -2,  # Multiple processes
+            "mutation_probability": 0.2,
+        },
     )
 
+    # Results should be identical regardless of parallelization
     assert compare_minima_lists(minima1, minima2)
 
 

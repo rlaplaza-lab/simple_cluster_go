@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import math
 import os
-from typing import Any, Literal
+from typing import Any
 
 from ase import Atoms
 from ase.io import write as ase_write
@@ -21,6 +21,7 @@ from scgo.database import (
 )
 from scgo.database.discovery import list_discovered_db_paths_with_run_trial
 from scgo.database.metadata import add_metadata, get_metadata
+from scgo.surface.validation import validate_stored_slab_adsorbate_metadata
 from scgo.utils.helpers import get_cluster_formula, validate_pair_id
 from scgo.utils.logging import get_logger
 from scgo.utils.ts_provenance import ts_output_provenance
@@ -117,6 +118,7 @@ def load_minima_by_composition(
                     source_db=os.path.basename(db_file),
                     source_db_relpath=_relative_db_path(db_file, base_dir),
                 )
+                validate_stored_slab_adsorbate_metadata(atoms_copy)
                 minima_by_formula[formula].append((energy, atoms_copy))
 
         except (ValueError, OSError) as e:
@@ -256,13 +258,14 @@ def select_structure_pairs(
     energy_gap_threshold: float | None = None,
     similarity_tolerance: float = DEFAULT_COMPARATOR_TOL,
     similarity_pair_cor_max: float = 0.1,
-    pair_priority_mode: Literal["legacy", "physics"] = "legacy",
     surface_aware: bool = False,
 ) -> list[tuple[int, int]]:
     """Select pairs of minima for TS calculations.
 
     Pairs nearby minima in energy space, using permutation-invariant structural
-    comparison to avoid pairing very similar structures.
+    comparison to avoid pairing very similar structures. When ``max_pairs`` is
+    set, candidates are ranked by a physics-guided score (energy gap and
+    structural dissimilarity) before taking the top N.
 
     Args:
         minima: List of (energy, Atoms) tuples, sorted by energy.
@@ -275,6 +278,7 @@ def select_structure_pairs(
             to pair. Default `DEFAULT_COMPARATOR_TOL` (tighter than GA duplicate detection).
         similarity_pair_cor_max: Maximum single distance difference tolerance.
             Default 0.1 Å (tighter than GA to ensure truly distinct structures).
+        surface_aware: Use slightly looser scoring scales (slab / periodic systems).
 
     Returns:
         List of (index1, index2) tuples where index1 < index2, indicating which minima to pair.
@@ -285,14 +289,8 @@ def select_structure_pairs(
         logger.info(f"Only {len(minima)} minima, need at least 2 to pair")
         return []
 
-    if pair_priority_mode not in ("legacy", "physics"):
-        raise ValueError(
-            "pair_priority_mode must be 'legacy' or 'physics', "
-            f"got {pair_priority_mode!r}"
-        )
-
-    pairs: list[tuple[int, int]] = []
     scored_pairs: list[tuple[float, int, int]] = []
+    n_skipped_similar = 0
 
     def _score_candidate(gap: float, cum_diff: float, max_diff: float) -> float:
         """Return higher-is-better physics-guided priority score.
@@ -337,10 +335,14 @@ def select_structure_pairs(
                 )
 
                 if are_similar:
-                    logger.info(
-                        f"Skipping pair ({i}, {j}): structures too similar "
-                        f"(cum_diff={cum_diff:.4f} < {similarity_tolerance}, "
-                        f"max_diff={max_diff:.3f} Å < {similarity_pair_cor_max} Å)"
+                    n_skipped_similar += 1
+                    logger.debug(
+                        "Skipping pair (%s, %s): structures too similar "
+                        "(cum_diff=%.4f, max_diff=%.3f Å)",
+                        i,
+                        j,
+                        cum_diff,
+                        max_diff,
                     )
                     continue
             except (ValueError, RuntimeError) as e:
@@ -349,28 +351,18 @@ def select_structure_pairs(
                 )
                 continue
 
-            pairs.append((i, j))
-            if pair_priority_mode == "physics":
-                scored_pairs.append(
-                    (_score_candidate(gap, float(cum_diff), float(max_diff)), i, j)
-                )
+            scored_pairs.append(
+                (_score_candidate(gap, float(cum_diff), float(max_diff)), i, j)
+            )
 
-            if (
-                pair_priority_mode == "legacy"
-                and max_pairs is not None
-                and len(pairs) >= max_pairs
-            ):
-                return pairs
+    if n_skipped_similar:
+        logger.debug(
+            "Pair selection: skipped %d too-similar candidate pairs",
+            n_skipped_similar,
+        )
 
-        if (
-            pair_priority_mode == "legacy"
-            and max_pairs is not None
-            and len(pairs) >= max_pairs
-        ):
-            break
-
-    if pair_priority_mode == "legacy" or not pairs:
-        return pairs
+    if not scored_pairs:
+        return []
 
     # Deterministic ordering: higher score first, then stable index tie-break.
     scored_pairs.sort(key=lambda item: (-item[0], item[1], item[2]))
@@ -706,10 +698,10 @@ def write_final_unique_ts(
 
         first_edge = connected_edges[0]
         pair_id = str(first_edge["pair_id"])
-        minima_indices = (
+        minima_indices = [
             int(first_edge["minima_indices"][0]),
             int(first_edge["minima_indices"][1]),
-        )
+        ]
 
         connected_minima_sorted = sorted(
             {idx for e in connected_edges for idx in e["minima_indices"]}

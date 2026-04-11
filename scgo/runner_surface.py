@@ -8,11 +8,22 @@ these helpers — no surface-specific module required.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 from ase import Atoms
 from ase.io import read
 
 from scgo.surface.config import SurfaceSystemConfig
+
+
+def surface_config_ts_kwargs(surface_config: SurfaceSystemConfig) -> dict[str, Any]:
+    """Kwargs fragment for :func:`scgo.ts_search.run_transition_state_search`.
+
+    Pass the **same** ``SurfaceSystemConfig`` instance used under
+    ``optimizer_params["ga"]["surface_config"]`` so NEB slab fixing matches
+    global optimization (frozen vs partially relaxed slab).
+    """
+    return {"surface_config": surface_config}
 
 
 def make_surface_config(
@@ -41,6 +52,14 @@ def make_surface_config(
         when the slab has in-plane periodicity).
     max_placement_attempts:
         Maximum random placement retries per candidate structure.
+
+    See Also
+    --------
+    surface_config_ts_kwargs :
+        Forward this config to transition-state search so constraints stay aligned.
+    attach_slab_constraints_from_surface_config :
+        Lower-level helper applied automatically when ``surface_config`` is passed
+        to ``run_transition_state_search``.
     """
     return SurfaceSystemConfig(
         slab=slab,
@@ -66,7 +85,9 @@ def read_full_composition_from_first_xyz(
     Returns
     -------
     list[str]
-        Chemical symbols of the full system (slab atoms followed by adsorbate atoms).
+        Chemical symbols of the full system in **file order** (must be slab first,
+        then adsorbate — the same ordering :class:`~scgo.surface.config.SurfaceSystemConfig`
+        assumes).
 
     Raises
     ------

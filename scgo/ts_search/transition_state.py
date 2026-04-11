@@ -158,7 +158,7 @@ class TorchSimNEB(NEB):
         self._force_calls += 1
         results = self.relaxer.relax_batch(self.images, steps=0)
 
-        for atoms, (energy, relaxed_atoms) in zip(self.images, results, strict=False):
+        for atoms, (energy, relaxed_atoms) in zip(self.images, results, strict=True):
             forces = relaxed_atoms.arrays.get("forces")
             if forces is None and relaxed_atoms.calc is not None:
                 with contextlib.suppress(AttributeError, NotImplementedError):
@@ -240,7 +240,10 @@ def _kabsch_rotation(P: np.ndarray, Q: np.ndarray) -> np.ndarray:
     C = P.T @ Q
     U, S, Vt = np.linalg.svd(C)
     d = np.linalg.det(U @ Vt)
-    D = np.diag([1.0, 1.0, np.sign(d)])
+    # Guard against degenerate case where det is exactly zero (singular SVD);
+    # treat as proper rotation (sign +1) to avoid a singular D matrix.
+    sign_d = np.sign(d) if d != 0.0 else 1.0
+    D = np.diag([1.0, 1.0, sign_d])
     R = U @ D @ Vt
     return R
 
@@ -273,6 +276,15 @@ def interpolate_path(
     MIC displacements instead of Cartesian Kabsch rotation.
     ``perturb_sigma``: optional Gaussian displacement (Å) on interior images only.
     ``rng``: optional NumPy Generator when ``perturb_sigma`` > 0.
+
+    **Fixed slab / supported-cluster NEB:** Endpoints often carry ``FixAtoms`` on the
+    substrate. ASE's ``NEB.interpolate`` defaults to ``apply_constraint=True``, which
+    projects each interpolation step onto constrained degrees of freedom and commonly
+    yields broken or unphysical initial bands (or failures) for slab systems. This
+    function always uses ``apply_constraint=False`` so the path is built in full
+    coordinates first; ``FixAtoms`` still constrain each image during the subsequent
+    NEB optimization because interior images are ``Atoms`` copies of the endpoints and
+    retain the same constraints.
     """
     validate_atoms(atoms1)
     validate_atoms(atoms2)
@@ -312,7 +324,9 @@ def interpolate_path(
     # Build images including endpoints (copies) and let ASE interpolate
     images = [a1_copy] + [a1_copy.copy() for _ in range(n_images)] + [a2_copy]
     neb = NEB(images, method=DEFAULT_NEB_TANGENT_METHOD)
-    neb.interpolate(method=method, mic=mic)
+    # Interpolate unconstrained positions first; endpoint/image constraints
+    # (e.g., fixed slab atoms) are enforced during subsequent optimization.
+    neb.interpolate(method=method, mic=mic, apply_constraint=False)
     images = neb.images
 
     # Optionally perturb interior images (endpoints unchanged)
@@ -385,7 +399,7 @@ def find_transition_state(
     verbosity: int = 1,
     use_torchsim: bool = False,
     torchsim_params: dict[str, Any] | None = None,
-    climb: bool = True,
+    climb: bool = False,
     interpolation_method: str = "idpp",
     align_endpoints: bool = True,
     perturb_sigma: float = 0.0,
@@ -497,6 +511,8 @@ def find_transition_state(
             logger.info(
                 f"Generating initial path with {interpolation_method} interpolation"
             )
+        # Initial band: interpolate_path uses neb.interpolate(..., apply_constraint=False)
+        # so FixAtoms on slab endpoints do not break path construction (see docstring).
         images = interpolate_path(
             atoms1,
             atoms2,
@@ -656,11 +672,16 @@ def find_transition_state(
                 ts_atoms = atoms
 
         # Ensure endpoint energies and TS energy are available for numeric operations
-        assert (
-            result.get("reactant_energy") is not None
-            and result.get("product_energy") is not None
-        )
-        assert ts_energy is not None
+        if (
+            result.get("reactant_energy") is None
+            or result.get("product_energy") is None
+        ):
+            raise RuntimeError(
+                f"Missing endpoint energies after NEB for pair {pair_id}: "
+                f"reactant={result.get('reactant_energy')}, product={result.get('product_energy')}"
+            )
+        if ts_energy is None:
+            raise RuntimeError(f"No TS energy found after NEB for pair {pair_id}")
 
         reactant_energy_result: float = float(cast(float, result["reactant_energy"]))
         product_energy_result: float = float(cast(float, result["product_energy"]))
@@ -782,7 +803,6 @@ def find_transition_state(
                 if retry_res.get("status") == "success" and retry_res.get(
                     "ts_image_index"
                 ) not in (0, attempt["n_images"] + 1):
-                    retry_res["n_images"] = n_images
                     retry_res["retry_attempted"] = True
                     retry_res["retry_success"] = True
                     retry_res["retry_history"] = result["retry_history"]

@@ -43,7 +43,6 @@ from scgo.surface.config import SurfaceSystemConfig
 from scgo.surface.constraints import attach_slab_constraints
 from scgo.utils.fitness_strategies import FitnessStrategy, validate_fitness_strategy
 from scgo.utils.helpers import (
-    canonicalize_storage_frame,
     extract_minima_from_database,
     perform_local_relaxation,
 )
@@ -219,8 +218,7 @@ def ga_go(
         if surface_config is not None
         else range(n_to_optimize)
     )
-    top_atomic_numbers = [int(atoms_template.numbers[i]) for i in idx_top]
-    all_atom_types = get_all_atom_types(atoms_template, top_atomic_numbers)
+    all_atom_types = get_all_atom_types(atoms_template, idx_top)
     blmin = closest_distances_generator(all_atom_types, ratio_of_covalent_radii=0.7)
 
     operators_list, name_map = create_mutation_operators(
@@ -347,7 +345,6 @@ def ga_go(
                 fmax,
                 niter_local_relaxation,
                 center_after_relax=center_after_relax,
-                n_slab=n_slab if surface_config is not None else 0,
             )
             add_metadata(
                 cand,
@@ -355,12 +352,6 @@ def ga_go(
                 run_id=run_id,
                 **slab_ga_metadata_extras(surface_config, n_slab),
             )
-            if surface_config is None:
-                canonicalize_storage_frame(cand)
-            else:
-                canonicalize_storage_frame(
-                    cand, pbc_aware=True, center=False, n_slab=n_slab
-                )
 
             retry_with_backoff(
                 lambda _a=cand: da.add_relaxed_step(_a),
@@ -486,7 +477,6 @@ def ga_go(
                     fmax,
                     niter_local_relaxation,
                     center_after_relax=center_after_relax,
-                    n_slab=n_slab if surface_config is not None else 0,
                 )
 
                 add_metadata(
@@ -495,12 +485,6 @@ def ga_go(
                     run_id=run_id,
                     **slab_ga_metadata_extras(surface_config, n_slab),
                 )
-                if surface_config is None:
-                    canonicalize_storage_frame(a3)
-                else:
-                    canonicalize_storage_frame(
-                        a3, pbc_aware=True, center=False, n_slab=n_slab
-                    )
                 retry_with_backoff(
                     lambda _a3=a3: da.add_relaxed_step(_a3),
                     max_retries=5,

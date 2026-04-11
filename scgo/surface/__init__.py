@@ -3,7 +3,11 @@
 from __future__ import annotations
 
 from scgo.surface.config import SurfaceSystemConfig
-from scgo.surface.constraints import attach_slab_constraints
+from scgo.surface.constraints import (
+    attach_slab_constraints,
+    attach_slab_constraints_from_surface_config,
+    surface_slab_constraint_summary,
+)
 from scgo.surface.deposition import (
     combine_slab_adsorbate,
     create_deposited_cluster,
@@ -11,15 +15,23 @@ from scgo.surface.deposition import (
     slab_surface_extreme,
 )
 from scgo.surface.objectives import adsorption_energy
-from scgo.surface.validation import validate_supported_cluster_deposit
+from scgo.surface.validation import (
+    validate_stored_slab_adsorbate_metadata,
+    validate_supported_cluster_deposit,
+    validate_surface_config_slab_prefix,
+)
 
 __all__ = [
     "SurfaceSystemConfig",
     "adsorption_energy",
     "attach_slab_constraints",
+    "attach_slab_constraints_from_surface_config",
+    "surface_slab_constraint_summary",
     "combine_slab_adsorbate",
     "create_deposited_cluster",
     "create_deposited_cluster_batch",
     "slab_surface_extreme",
+    "validate_stored_slab_adsorbate_metadata",
     "validate_supported_cluster_deposit",
+    "validate_surface_config_slab_prefix",
 ]

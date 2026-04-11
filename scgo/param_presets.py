@@ -14,6 +14,7 @@ from scgo.constants import (
     DEFAULT_NEB_TANGENT_METHOD,
     DEFAULT_PAIR_COR_MAX,
 )
+from scgo.surface.config import SurfaceSystemConfig
 
 # Available MACE model names for use in calculator_kwargs["model_name"]
 AVAILABLE_MACE_MODELS = [
@@ -261,6 +262,7 @@ def get_ts_search_params(
     calculator_kwargs: dict[str, Any] | None = None,
     *,
     regime: TsSearchRegime = "gas",
+    surface_config: SurfaceSystemConfig | None = None,
 ) -> dict[str, Any]:
     """Return TS search parameters (NEB settings and thresholds).
 
@@ -269,10 +271,18 @@ def get_ts_search_params(
     regime:
         ``"gas"`` (nanoparticle / non-periodic): defaults tuned for isolated clusters.
         ``"surface"`` (slab + adsorbate, periodic in-plane): MIC interpolation,
-        ``neb_n_images=5``, ``neb_climb=True``, strict ``fmax`` (0.05 eV/Å).
+        ``neb_n_images=5``, ``neb_climb=False``, and ``fmax=0.1 eV/Å``.
         Endpoint alignment stays off by default for fixed-slab/PBC (tuned for
         supported Pt5-on-NiO MACE NEB sweeps). Other surfaces (e.g. graphene Cu4)
         can pass ``neb_climb=False`` / ``neb_n_images=3`` via explicit kwargs.
+    surface_config:
+        The same :class:`scgo.surface.config.SurfaceSystemConfig` instance wired into
+        ``optimizer_params["ga"]["surface_config"]``. Stored on the returned dict
+        and forwarded by :func:`get_ts_run_kwargs` so
+        :func:`run_transition_state_search` reapplies
+        ``attach_slab_constraints`` on NEB endpoints (frozen vs partially relaxed
+        slab stays consistent with global optimization). Omit for gas-phase or when
+        minima already carry the intended constraints.
     """
     if regime not in ("gas", "surface"):
         msg = f"regime must be 'gas' or 'surface', got {regime!r}"
@@ -293,16 +303,14 @@ def get_ts_search_params(
             "similarity_tolerance": DEFAULT_COMPARATOR_TOL,
             # Match ``run_transition_state_search`` default (0.1 Å), not DEFAULT_PAIR_COR_MAX.
             "similarity_pair_cor_max": 0.1,
-            # Physics-ranked pair capping improves max_pairs hit-rate versus scan-order truncation.
-            "pair_priority_mode": "physics",
             # Pt5 gas sweep on prioritized top-50 pairs (`benchmark/neb_pt5_mace_clean.jsonl`,
             # MACE/TorchSim, 100 NEB-step benchmark budget): `neb_climb=False` outperformed
             # `neb_climb=True` on convergence (26/50 vs 20/50) with comparable final_fmax.
             "neb_n_images": 3,
-            "neb_k": 0.1,
+            "neb_spring_constant": 0.1,
             "neb_fmax": 0.05,
             # Allow automatic scaling for NEB iterations (uses auto_niter_ts via runner)
-            "neb_maxsteps": "auto",
+            "neb_steps": "auto",
             "neb_align_endpoints": True,
             # Disable default perturbation (perturb_sigma) — sweep showed 0.0 performed
             # better than 0.03 on Pt4.
@@ -314,7 +322,7 @@ def get_ts_search_params(
             "torchsim_batch_size": 5,
             "torchsim_fmax": 0.05,
             # TorchSim max-steps may also be auto-resolved to match cluster size
-            "torchsim_maxsteps": "auto",
+            "torchsim_max_steps": "auto",
             # Whether to run multiple NEBs together using `ParallelNEBBatch`.
             # Default: False (opt-in).
             "use_parallel_neb": False,
@@ -331,21 +339,26 @@ def get_ts_search_params(
     )
 
     if regime == "surface":
-        # Supported nanoparticle-on-slab (e.g. Pt5 on NiO): ``benchmark/neb_sweep_mace.py``
-        # proxy ranking on MACE/TorchSim favors ``n_images=5`` + ``neb_climb=True`` over
-        # smaller bands / non-climbing for fewer endpoint-as-TS failures; keep MIC + no
-        # endpoint alignment for PBC.
+        # Supported nanoparticle-on-slab (e.g. Pt5 on NiO): recent ASE/MACE benchmark
+        # sweeps favor linear interpolation with MIC and non-climbing NEB at
+        # ``n_images=5`` and ``fmax=0.1`` for better success/step tradeoff.
         params.update(
             {
                 "neb_interpolation_mic": True,
                 "neb_n_images": 5,
-                "neb_k": 0.1,
-                "neb_fmax": 0.05,
-                "torchsim_fmax": 0.05,
-                "neb_climb": True,
+                "neb_spring_constant": 0.1,
+                "neb_fmax": 0.1,
+                "torchsim_fmax": 0.1,
+                "neb_steps": 500,
+                "torchsim_max_steps": 500,
+                "neb_climb": False,
+                "neb_interpolation_method": "linear",
                 "neb_align_endpoints": False,
             }
         )
+
+    if surface_config is not None:
+        params["surface_config"] = surface_config
 
     return params
 
@@ -371,11 +384,10 @@ def get_ts_run_kwargs(ts_params: dict[str, Any] | None = None) -> dict[str, Any]
         "energy_gap_threshold": ts_params.get("energy_gap_threshold"),
         "similarity_tolerance": ts_params.get("similarity_tolerance"),
         "similarity_pair_cor_max": ts_params.get("similarity_pair_cor_max"),
-        "pair_priority_mode": ts_params.get("pair_priority_mode", "physics"),
         "neb_n_images": ts_params.get("neb_n_images"),
-        "neb_spring_constant": ts_params.get("neb_k"),
+        "neb_spring_constant": ts_params.get("neb_spring_constant"),
         "neb_fmax": ts_params.get("neb_fmax"),
-        "neb_steps": ts_params.get("neb_maxsteps"),
+        "neb_steps": ts_params.get("neb_steps"),
         "neb_align_endpoints": ts_params.get("neb_align_endpoints"),
         "neb_perturb_sigma": ts_params.get("neb_perturb_sigma"),
         "neb_interpolation_mic": ts_params.get("neb_interpolation_mic", False),
@@ -389,14 +401,15 @@ def get_ts_run_kwargs(ts_params: dict[str, Any] | None = None) -> dict[str, Any]
         "torchsim_params": {
             # Map user-facing ts params to TorchSimBatchRelaxer-compatible keys
             "force_tol": ts_params.get("torchsim_fmax"),
-            "max_steps": ts_params.get("torchsim_maxsteps"),
+            "max_steps": ts_params.get("torchsim_max_steps"),
         },
         "use_parallel_neb": ts_params.get("use_parallel_neb", False),
-        "neb_climb": ts_params.get("neb_climb", True),
+        "neb_climb": ts_params.get("neb_climb", False),
         "neb_interpolation_method": ts_params.get("neb_interpolation_method", "idpp"),
         "neb_tangent_method": ts_params.get(
             "neb_tangent_method", DEFAULT_NEB_TANGENT_METHOD
         ),
         "validate_ts_by_frequency": ts_params.get("validate_ts_by_frequency", False),
         "imag_freq_threshold": ts_params.get("imag_freq_threshold", 50.0),
+        "surface_config": ts_params.get("surface_config"),
     }

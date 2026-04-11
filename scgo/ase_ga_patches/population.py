@@ -259,8 +259,12 @@ class Population:
         if isinstance(indecies, int):
             indecies = [indecies]
 
-        f = [0.5 * (1. - tanh(2. * (scores[i] - max_s) / T - 1.))
-             for i in indecies]
+        if abs(T) < 1e-12:
+            # All candidates have the same score; assign uniform fitness
+            f = [1.0 for _ in indecies]
+        else:
+            f = [0.5 * (1. - tanh(2. * (scores[i] - max_s) / T - 1.))
+                 for i in indecies]
         if with_history:
             M = [float(self.pop[i].info["n_paired"]) for i in indecies]
             L = [float(self.pop[i].info["looks_like"]) for i in indecies]
@@ -284,6 +288,10 @@ class Population:
 
         fit = self.__get_fitness__(range(len(self.pop)), with_history)
         fmax = max(fit)
+        if fmax < 1e-12:
+            # All fitness values are near-zero; fall back to uniform random selection
+            idx = self.rng.choice(len(self.pop), size=2, replace=False)
+            return (self.pop[idx[0]].copy(), self.pop[idx[1]].copy())
         c1 = self.pop[0]
         c2 = self.pop[0]
         used_before = False
@@ -322,6 +330,10 @@ class Population:
 
         fit = self.__get_fitness__(range(len(self.pop)), with_history)
         fmax = max(fit)
+        if fmax < 1e-12:
+            # All fitness values are near-zero; fall back to uniform random selection
+            t = self.rng.integers(len(self.pop))
+            return self.pop[t].copy()
         nnf = True
         while nnf:
             t = self.rng.integers(len(self.pop))

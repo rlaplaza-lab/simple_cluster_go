@@ -2,9 +2,14 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import numpy as np
 from ase import Atoms
 from ase.constraints import FixAtoms
+
+from scgo.surface.config import SurfaceSystemConfig
+from scgo.surface.validation import validate_surface_config_slab_prefix
 
 
 def _distinct_layers_along_axis(
@@ -68,6 +73,11 @@ def attach_slab_constraints(
             set, fix all slab atoms except those in the top N distinct layers.
         surface_normal_axis: Cartesian axis for layer grouping.
     """
+    if n_slab > len(atoms):
+        raise ValueError(
+            f"attach_slab_constraints: n_slab={n_slab} exceeds len(atoms)={len(atoms)}"
+        )
+
     atoms.constraints = []
     if n_slab <= 0:
         return
@@ -105,3 +115,34 @@ def attach_slab_constraints(
         n_fix_bottom_slab_layers,
     )
     atoms.set_constraint(FixAtoms(indices=sorted(layer_idx)))
+
+
+def attach_slab_constraints_from_surface_config(
+    atoms: Atoms, config: SurfaceSystemConfig
+) -> None:
+    """Apply the same ``FixAtoms`` policy as global optimization on ``SurfaceSystemConfig``.
+
+    Use this (or pass ``surface_config`` into :func:`run_transition_state_search`) so
+    NEB endpoints match the slab freezing used during GA / local relaxation
+    (``fix_all_slab_atoms``, layer-relax modes, ``surface_normal_axis``).
+    """
+    validate_surface_config_slab_prefix(atoms, config)
+    attach_slab_constraints(
+        atoms,
+        len(config.slab),
+        fix_all_slab_atoms=config.fix_all_slab_atoms,
+        n_fix_bottom_slab_layers=config.n_fix_bottom_slab_layers,
+        n_relax_top_slab_layers=config.n_relax_top_slab_layers,
+        surface_normal_axis=config.surface_normal_axis,
+    )
+
+
+def surface_slab_constraint_summary(config: SurfaceSystemConfig) -> dict[str, Any]:
+    """JSON-safe snapshot of slab fixing (no embedded :class:`~ase.Atoms` slab)."""
+    return {
+        "n_slab_atoms": len(config.slab),
+        "surface_normal_axis": config.surface_normal_axis,
+        "fix_all_slab_atoms": config.fix_all_slab_atoms,
+        "n_fix_bottom_slab_layers": config.n_fix_bottom_slab_layers,
+        "n_relax_top_slab_layers": config.n_relax_top_slab_layers,
+    }

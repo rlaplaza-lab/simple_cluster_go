@@ -36,6 +36,9 @@ benchmark/results/
 benchmark_output.log
 benchmark/neb_mace*.jsonl
 benchmark/neb_tight*.jsonl
+# Ad-hoc NEB experiment dumps (keep tracked suites under benchmark_files_*)
+benchmark/neb_*.json
+benchmark/neb_*.log
 
 # Coverage reports
 .coverage

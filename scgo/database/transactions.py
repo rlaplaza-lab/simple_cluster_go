@@ -13,6 +13,9 @@ from scgo.utils.logging import get_logger
 logger = get_logger(__name__)
 
 
+_VALID_ISOLATION_LEVELS = frozenset({"DEFERRED", "IMMEDIATE", "EXCLUSIVE"})
+
+
 @contextmanager
 def database_transaction(
     db: DataConnection,
@@ -26,10 +29,16 @@ def database_transaction(
     if not hasattr(db, "c") or db.c is None:
         raise ValueError("Invalid database connection")
 
+    if isolation_level.upper() not in _VALID_ISOLATION_LEVELS:
+        raise ValueError(
+            f"Invalid isolation level: {isolation_level!r}. "
+            f"Must be one of {sorted(_VALID_ISOLATION_LEVELS)}"
+        )
+
     # Use managed_connection() to get actual SQLite connection
     with db.c.managed_connection() as conn:
         try:
-            conn.execute(f"BEGIN {isolation_level}")
+            conn.execute(f"BEGIN {isolation_level.upper()}")
             logger.debug(f"Started {isolation_level} transaction")
 
             yield conn  # Yield connection instead of db

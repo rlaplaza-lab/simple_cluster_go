@@ -69,6 +69,7 @@ def _sanitize_global_optimizer_kwargs_for_metadata(
         gok["surface_config"] = {
             "present": True,
             "n_slab_atoms": n_slab,
+            "slab_chemical_symbols": list(slab.get_chemical_symbols()),
             "surface_normal_axis": surface_config.surface_normal_axis,
             "fix_all_slab_atoms": surface_config.fix_all_slab_atoms,
             "n_fix_bottom_slab_layers": surface_config.n_fix_bottom_slab_layers,

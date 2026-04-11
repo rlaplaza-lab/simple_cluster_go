@@ -22,6 +22,9 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
+import numpy as np
+from ase import Atoms
+
 from scgo.calculators.torchsim_helpers import TorchSimBatchRelaxer
 from scgo.constants import (
     DEFAULT_COMPARATOR_TOL,
@@ -29,6 +32,11 @@ from scgo.constants import (
     DEFAULT_NEB_TANGENT_METHOD,
 )
 from scgo.database.metadata import add_metadata, get_metadata
+from scgo.surface.config import SurfaceSystemConfig
+from scgo.surface.constraints import (
+    attach_slab_constraints_from_surface_config,
+    surface_slab_constraint_summary,
+)
 from scgo.utils.helpers import (
     auto_niter_ts,
     filter_unique_minima,
@@ -66,6 +74,20 @@ from .ts_network import (
 def _try_cleanup_cuda(logger: Any) -> None:
     """Release CUDA caches between pairs; ``cleanup_torch_cuda`` does not raise."""
     cleanup_torch_cuda(logger=logger)
+
+
+def _neb_endpoint_copies(
+    atoms_i: Atoms,
+    atoms_j: Atoms,
+    surface_config: SurfaceSystemConfig | None,
+) -> tuple[Atoms, Atoms]:
+    """Copy minima endpoints and, when requested, match GO slab ``FixAtoms`` policy."""
+    react = atoms_i.copy()
+    prod = atoms_j.copy()
+    if surface_config is not None:
+        attach_slab_constraints_from_surface_config(react, surface_config)
+        attach_slab_constraints_from_surface_config(prod, surface_config)
+    return react, prod
 
 
 def _attach_minima_traceability(
@@ -111,17 +133,28 @@ def _build_failed_ts_result(
         "product_energy": float(energy_j) if energy_j is not None else None,
         "ts_energy": None,
         "barrier_height": None,
+        "barrier_forward": None,
+        "barrier_reverse": None,
+        "transition_state": None,
+        "ts_image_index": None,
         "error": str(error),
         "use_torchsim": use_torchsim,
         "use_parallel_neb": False,
         "fmax": neb_fmax,
-        "neb_steps": int(neb_steps) if isinstance(neb_steps, int) else neb_steps,
+        "neb_steps": int(neb_steps)
+        if isinstance(neb_steps, (int, np.integer))
+        else neb_steps,
         "interpolation_method": neb_interpolation_method,
         "climb": neb_climb,
         "align_endpoints": neb_align_endpoints,
         "perturb_sigma": neb_perturb_sigma,
         "neb_interpolation_mic": neb_interpolation_mic,
         "neb_tangent_method": neb_tangent_method,
+        "retry_attempted": False,
+        "retry_success": False,
+        "retry_history": [],
+        "final_fmax": None,
+        "steps_taken": None,
     }
 
 
@@ -135,12 +168,11 @@ def run_transition_state_search(
     energy_gap_threshold: float | None = 1.0,
     similarity_tolerance: float = DEFAULT_COMPARATOR_TOL,
     similarity_pair_cor_max: float = 0.1,
-    pair_priority_mode: str = "physics",
     neb_n_images: int = 3,
     neb_spring_constant: float = 0.1,
     neb_fmax: float = 0.05,
     neb_steps: int | str = "auto",
-    neb_climb: bool = True,
+    neb_climb: bool = False,
     neb_interpolation_method: str = "idpp",
     neb_align_endpoints: bool = True,
     neb_perturb_sigma: float = 0.0,
@@ -158,6 +190,7 @@ def run_transition_state_search(
     dedupe_ts: bool = True,
     tag_ts_in_db: bool = True,
     ts_energy_tolerance: float = DEFAULT_ENERGY_TOLERANCE,
+    surface_config: SurfaceSystemConfig | None = None,
 ) -> list[dict[str, Any]]:
     """Run transition state search for clusters of given composition.
 
@@ -185,15 +218,11 @@ def run_transition_state_search(
             Default `DEFAULT_COMPARATOR_TOL`.
         similarity_pair_cor_max: Maximum single distance difference tolerance for similarity.
             Default 0.1 Å.
-        pair_priority_mode: Pair-capping strategy when ``max_pairs`` is set.
-            Default ``"physics"`` ranks candidates using energy/structure-aware
-            scoring before taking top-N. The scan-order mode keeps first-N in
-            traversal order for deterministic baseline comparisons.
         neb_n_images: Number of intermediate NEB images. Default 3 (recommended).
         neb_spring_constant: Spring constant for NEB band (eV/Ų). Default 0.1 (MACE gas sweep).
         neb_fmax: Maximum force convergence for NEB (eV/Å). Default 0.05.
         neb_steps: Maximum NEB optimization steps. Default 'auto' (resolved with auto_niter_ts).
-        neb_climb: Use climbing image NEB for better TS convergence. Default True.
+        neb_climb: Use climbing image NEB for better TS convergence. Default False.
         neb_interpolation_method: Path interpolation method ('idpp' or 'linear'). Default 'idpp'.
         neb_interpolation_mic: If True, use minimum-image convention for NEB path
             interpolation (ASE ``NEB.interpolate(mic=True)``). Use for periodic cells
@@ -203,6 +232,12 @@ def run_transition_state_search(
         use_torchsim: Use TorchSim for GPU-efficient batched force evaluation. Default False.
         torchsim_params: Optional parameters for TorchSimBatchRelaxer when use_torchsim=True. If
             `torchsim_params['max_steps']` is 'auto', it will be resolved the same way as `neb_steps`.
+        surface_config: When set, the same :class:`scgo.surface.config.SurfaceSystemConfig`
+            used for GA (``optimizer_params["ga"]["surface_config"]``). Endpoint structures
+            are copied per pair and :func:`attach_slab_constraints_from_surface_config`
+            is applied so NEB slab fixing matches global optimization (fully frozen slab,
+            bottom-N layers fixed, or fully mobile slab per config). Default None leaves
+            constraints on loaded minima unchanged.
 
     Returns:
         List of result dictionaries from find_transition_state(). Each contains:
@@ -285,8 +320,11 @@ def run_transition_state_search(
         "neb_perturb_sigma": neb_perturb_sigma,
         "neb_interpolation_mic": neb_interpolation_mic,
         "neb_tangent_method": neb_tangent_method,
-        "pair_priority_mode": pair_priority_mode,
     }
+    if surface_config is not None:
+        run_context["surface_slab_constraints"] = surface_slab_constraint_summary(
+            surface_config
+        )
 
     if not minima_by_formula:
         logger.error(f"No minima found in {ts_output_dir}")
@@ -321,7 +359,6 @@ def run_transition_state_search(
         energy_gap_threshold=energy_gap_threshold,
         similarity_tolerance=similarity_tolerance,
         similarity_pair_cor_max=similarity_pair_cor_max,
-        pair_priority_mode=pair_priority_mode,
         surface_aware=bool(neb_interpolation_mic),
     )
 
@@ -351,8 +388,9 @@ def run_transition_state_search(
         endpoints = []
         pair_end_idx = []  # (start_idx, end_idx) per pair in endpoints list
         for i, j in pairs:
-            endpoints.append(minima[i][1].copy())
-            endpoints.append(minima[j][1].copy())
+            ri, rj = _neb_endpoint_copies(minima[i][1], minima[j][1], surface_config)
+            endpoints.append(ri)
+            endpoints.append(rj)
             pair_end_idx.append((len(endpoints) - 2, len(endpoints)))
 
         # Compute endpoint single-point energies with the shared relaxer
@@ -373,9 +411,10 @@ def run_transition_state_search(
             energy_i, atoms_i = minima[i]
             energy_j, atoms_j = minima[j]
             pair_id = f"{i}_{j}"
+            react_ep, prod_ep = _neb_endpoint_copies(atoms_i, atoms_j, surface_config)
             images = interpolate_path(
-                atoms_i,
-                atoms_j,
+                react_ep,
+                prod_ep,
                 n_images=neb_n_images,
                 method=neb_interpolation_method,
                 mic=neb_interpolation_mic,
@@ -462,8 +501,25 @@ def run_transition_state_search(
                     else None
                 )
 
-            # Final status: only treat as success if NEB converged and TS energy is available.
-            if result["neb_converged"] and result.get("ts_energy") is not None:
+            # Endpoint-as-TS is considered non-converged/failed for consistency
+            # with the serial find_transition_state() path.
+            endpoint_ts = (
+                max_idx in (0, len(images) - 1) if max_idx is not None else False
+            )
+            if endpoint_ts:
+                result["neb_converged"] = False
+                result["error"] = (
+                    f"NEB returned endpoint as TS (image {max_idx}); "
+                    "no interior saddle located"
+                )
+
+            # Final status: only treat as success if NEB converged, TS energy exists,
+            # and the TS is interior to the band.
+            if (
+                result["neb_converged"]
+                and result.get("ts_energy") is not None
+                and not endpoint_ts
+            ):
                 result["status"] = "success"
             else:
                 # If NEB reports converged but no TS energy was extracted, mark failed
@@ -528,17 +584,20 @@ def run_transition_state_search(
                     f"{energy_j:.6f}" if energy_j is not None else "None",
                 )
 
-            if not use_torchsim:
-                calculator = calculator_class(**calculator_kwargs)
-                atoms_i.calc = calculator
-                atoms_j.calc = calculator
-
             result: dict[str, Any] | None = None
+            calculator: Any = None
             for attempt in range(2):
+                react_ep, prod_ep = _neb_endpoint_copies(
+                    atoms_i, atoms_j, surface_config
+                )
+                if not use_torchsim:
+                    calculator = calculator_class(**calculator_kwargs)
+                    react_ep.calc = calculator
+                    prod_ep.calc = calculator
                 try:
                     result = find_transition_state(
-                        atoms_i,
-                        atoms_j,
+                        react_ep,
+                        prod_ep,
                         calculator if not use_torchsim else None,
                         output_dir=str(result_dir),
                         pair_id=pair_id,
@@ -621,7 +680,7 @@ def run_transition_state_search(
             # Save result
             save_neb_result(result, str(result_dir), pair_id)
 
-            if not use_torchsim:
+            if not use_torchsim and calculator is not None:
                 del calculator
 
             _try_cleanup_cuda(logger)
@@ -940,19 +999,21 @@ def run_transition_state_campaign(
         params: Global optimization parameters with "calculator" field.
         seed: Random seed. Default None.
         verbosity: Logging verbosity (0, 1, or 2). Default 1.
-        neb_params: Dictionary of NEB-specific parameters:
+        neb_params: Dictionary of NEB-specific parameters forwarded to
+            :func:`run_transition_state_search` (same keys as that function's kwargs),
+            including ``surface_config`` to align slab ``FixAtoms`` with GA.
 
             The TS results for each composition will have calculators detached
             before being stored in the returned mapping to prevent memory leaks
             when running many compositions in sequence.
             - "max_pairs": Maximum structure pairs to evaluate
             - "energy_gap_threshold": Energy cutoff for pairing
-            - "pair_priority_mode": Pair ranking mode used during capping
             - "neb_n_images": Number of intermediate images
             - "neb_spring_constant": Spring constant
             - "neb_fmax": Force convergence criterion
             - "neb_steps": Maximum optimization steps
             - "neb_tangent_method": ASE NEB tangent method (e.g. ``improvedtangent``)
+            - "surface_config": Optional :class:`scgo.surface.config.SurfaceSystemConfig`
 
     Returns:
         Dictionary mapping formula strings to lists of TS result dictionaries.

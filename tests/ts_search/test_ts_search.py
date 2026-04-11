@@ -505,7 +505,7 @@ def test_find_ts_saves_trajectory(h2_reactant, h2_product, temp_output_dir):
 def test_find_transition_state_defaults_reflect_promoted_retry(
     h2_reactant, h2_product, temp_output_dir
 ):
-    """Defaults align with MACE-tuned TS presets (spring k=0.1, climb True, etc.)."""
+    """Defaults align with tuned TS presets (spring k=0.1, climb False, etc.)."""
     result = find_transition_state(
         h2_reactant,
         h2_product,
@@ -519,7 +519,7 @@ def test_find_transition_state_defaults_reflect_promoted_retry(
     )
 
     assert result.get("spring_constant") == pytest.approx(0.1)
-    assert result.get("climb") is True
+    assert result.get("climb") is False
     assert result.get("perturb_sigma") == pytest.approx(0.0)
 
 
@@ -698,8 +698,8 @@ def test_select_structure_pairs_energy_gap():
     assert (1, 2) not in pairs
 
 
-def test_select_structure_pairs_physics_mode_reorders_capped_pairs(monkeypatch):
-    """Physics mode should rank capped pairs, not keep scan order."""
+def test_select_structure_pairs_physics_ranking_when_capped(monkeypatch):
+    """Capped pair lists use physics-guided ranking (score + stable tie-break)."""
     atoms0 = Atoms("H2", positions=[[0.0, 0, 0], [1.0, 0, 0]])
     atoms1 = Atoms("H2", positions=[[1.0, 0, 0], [1.5, 0, 0]])
     atoms2 = Atoms("H2", positions=[[2.0, 0, 0], [2.5, 0, 0]])
@@ -731,11 +731,8 @@ def test_select_structure_pairs_physics_mode_reorders_capped_pairs(monkeypatch):
         _fake_similarity,
     )
 
-    legacy = select_structure_pairs(minima, max_pairs=2, pair_priority_mode="legacy")
-    physics = select_structure_pairs(minima, max_pairs=2, pair_priority_mode="physics")
-
-    assert legacy == [(0, 1), (0, 2)]
-    assert physics == [(1, 2), (0, 2)]
+    ranked = select_structure_pairs(minima, max_pairs=2)
+    assert ranked == [(1, 2), (0, 2)]
 
 
 def test_find_ts_emt_basic(cu3_triangle, cu3_linear, temp_output_dir):
@@ -759,7 +756,11 @@ def test_find_ts_emt_basic(cu3_triangle, cu3_linear, temp_output_dir):
 
     # Verify EMT path was used (not TorchSim)
     assert result["use_torchsim"] is False
-    assert result["n_images"] == 3
+    # n_images may be 3 (original) or 5 (if the retry mechanism was triggered)
+    if result.get("retry_attempted") and result.get("retry_success"):
+        assert result["n_images"] >= 3
+    else:
+        assert result["n_images"] == 3
     # Either converged or failed gracefully with error
     assert result["status"] in ["success", "failed"]
     # If successful, check key outputs
@@ -803,7 +804,10 @@ def test_find_ts_mace_cpu(cu3_triangle, cu3_linear, temp_output_dir):
 
     # Verify MACE CPU path was used
     assert result["use_torchsim"] is False
-    assert result["n_images"] == 3
+    if result.get("retry_attempted") and result.get("retry_success"):
+        assert result["n_images"] >= 3
+    else:
+        assert result["n_images"] == 3
     assert result["status"] in ["success", "failed"]
     if result["status"] == "success":
         assert "transition_state" in result

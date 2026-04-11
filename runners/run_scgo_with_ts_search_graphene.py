@@ -70,8 +70,10 @@ def main() -> None:
     full_composition = read_full_composition_from_first_xyz(final_minima_dir)
     logger.info("Detected full surface composition for TS search: %s", full_composition)
 
-    ts_params = get_ts_search_params(regime="surface")
-    ts_params.update({"neb_climb": False, "neb_n_images": 3})
+    ts_params = get_ts_search_params(regime="surface", surface_config=surface_config)
+    # Keep a smaller band for this graphene workflow; other surface TS defaults
+    # come from param presets.
+    ts_params.update({"neb_n_images": 3})
     ts_kwargs = get_ts_run_kwargs(ts_params)
     ts_kwargs["max_pairs"] = 15
     ts_results = run_transition_state_search(

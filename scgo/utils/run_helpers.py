@@ -149,6 +149,7 @@ def validate_algorithm_params(
             "max_mutation_probability",
             "vacuum",
             "energy_tolerance",
+            "use_torchsim",
             "use_adaptive_mutations",
             "stagnation_trigger",
             "stagnation_full_trigger",
@@ -299,12 +300,18 @@ def resolve_diversity_params(
         )
 
     diversity_params["diversity_reference_db"] = algo_reference_db
-    diversity_params["diversity_max_references"] = algo_params.get(
-        "diversity_max_references"
-    ) or params.get("diversity_max_references", 100)
-    diversity_params["diversity_update_interval"] = algo_params.get(
-        "diversity_update_interval"
-    ) or params.get("diversity_update_interval", 5)
+    max_refs = algo_params.get("diversity_max_references")
+    diversity_params["diversity_max_references"] = (
+        max_refs
+        if max_refs is not None
+        else params.get("diversity_max_references", 100)
+    )
+    update_interval = algo_params.get("diversity_update_interval")
+    diversity_params["diversity_update_interval"] = (
+        update_interval
+        if update_interval is not None
+        else params.get("diversity_update_interval", 5)
+    )
 
     return diversity_params
 
@@ -386,15 +393,7 @@ def log_configuration(
 
     calculator_kwargs = params.get("calculator_kwargs", {})
     if calculator_kwargs:
-        if verbosity >= 2:
-            logger.info("SCGO config: calculator_kwargs=%s", calculator_kwargs)
-        else:
-            kwarg_keys = sorted(str(k) for k in calculator_kwargs)
-            logger.info(
-                "SCGO config: calculator_kwargs_keys=%s (n=%d)",
-                kwarg_keys,
-                len(kwarg_keys),
-            )
+        logger.info("SCGO config: calculator_kwargs=%s", calculator_kwargs)
 
     logger.info(
         "SCGO config: validate_with_hessian=%s check_hessian=%s fmax_threshold=%s imag_freq_threshold=%s",
@@ -424,7 +423,11 @@ def log_configuration(
 
 def cleanup_torch_cuda(logger: Any | None = None) -> None:
     """Release PyTorch CUDA caches when available, then run GC."""
-    import torch
+    try:
+        import torch
+    except ImportError:
+        gc.collect()
+        return
 
     if torch.cuda.is_available():
         with contextlib.suppress(RuntimeError):

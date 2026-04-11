@@ -270,7 +270,7 @@ ts_results = run_transition_state_search(
 - `max_pairs`: Maximum number of structure pairs to evaluate
 - `energy_gap_threshold`: Only pair structures with energy gap below threshold (eV)
 - `neb_n_images`: Number of NEB images (default: 3)
-- `neb_spring_constant` / `neb_k`: Spring constant for NEB band (default: 0.05)
+- `neb_spring_constant`: Spring constant for NEB band (default: 0.1)
 - `neb_perturb_sigma`: Interior-image perturbation (Å) applied after interpolation (default: 0.0)
 - `neb_fmax`: Force convergence criterion (default: 0.05 eV/Å)
 - `neb_steps`: Max optimization steps (default: 500)

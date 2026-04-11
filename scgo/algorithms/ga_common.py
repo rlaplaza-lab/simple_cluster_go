@@ -14,6 +14,7 @@ from numpy.random import Generator
 
 if typing.TYPE_CHECKING:
     from scgo.utils.diversity_scorer import DiversityScorer
+    from scgo.utils.fitness_strategies import FitnessStrategy
 from ase import Atoms
 from ase.calculators.calculator import Calculator
 from ase_ga.offspring_creator import OperationSelector
@@ -282,8 +283,7 @@ def create_ga_pairing(
             )
         idx_top = range(n_to_optimize)
 
-    top_atomic_numbers = [int(atoms_template.numbers[i]) for i in idx_top]
-    all_atom_types = get_all_atom_types(atoms_template, top_atomic_numbers)
+    all_atom_types = get_all_atom_types(atoms_template, idx_top)
     blmin = closest_distances_generator(all_atom_types, ratio_of_covalent_radii=0.7)
 
     if slab_atoms is not None and len(slab_atoms) > 0:
@@ -325,7 +325,7 @@ def create_mutation_operators(
     operators = []
     name_map = {}
 
-    rattle: RattleMutation[dict, int] = RattleMutation(
+    rattle: RattleMutation = RattleMutation(
         blmin,
         n_to_optimize,
         rattle_strength=0.8,
@@ -336,14 +336,14 @@ def create_mutation_operators(
     name_map["rattle"] = 0
 
     if len(set(composition)) > 1:
-        permutation: CustomPermutationMutation[int] = CustomPermutationMutation(
+        permutation: CustomPermutationMutation = CustomPermutationMutation(
             n_to_optimize, rng=create_child_rng(rng) if rng is not None else None
         )  # type: ignore[arg-type]
         operators.append(permutation)
         name_map["permutation"] = len(operators) - 1
 
     if use_adaptive:
-        flattening: FlatteningMutation[dict, int] = FlatteningMutation(
+        flattening: FlatteningMutation = FlatteningMutation(
             blmin,
             n_to_optimize,
             thickness_factor=0.5,
@@ -352,7 +352,7 @@ def create_mutation_operators(
         operators.append(flattening)
         name_map["flattening"] = len(operators) - 1
 
-        rotational: RotationalMutation[dict] = RotationalMutation(
+        rotational: RotationalMutation = RotationalMutation(
             blmin,
             n_to_optimize,
             rng=create_child_rng(rng) if rng is not None else None,  # type: ignore[arg-type]
@@ -360,7 +360,7 @@ def create_mutation_operators(
         operators.append(rotational)
         name_map["rotational"] = len(operators) - 1
 
-        mirror: MirrorMutation[dict, int] = MirrorMutation(
+        mirror: MirrorMutation = MirrorMutation(
             blmin,
             n_to_optimize,
             rng=create_child_rng(rng) if rng is not None else None,  # type: ignore[arg-type]
@@ -368,7 +368,7 @@ def create_mutation_operators(
         operators.append(mirror)
         name_map["mirror"] = len(operators) - 1
 
-        anisotropic: AnisotropicRattleMutation[dict, int] = AnisotropicRattleMutation(
+        anisotropic: AnisotropicRattleMutation = AnisotropicRattleMutation(
             blmin,
             n_to_optimize,
             in_plane_strength=1.0,
@@ -508,7 +508,7 @@ def update_early_stopping_state(
 
 def update_early_stopping_state_unified(
     population: Population,
-    fitness_strategy: str,
+    fitness_strategy: str | FitnessStrategy,
     best_value: float | None,
     generations_without_improvement: int,
     early_stopping_niter: int,
@@ -569,7 +569,7 @@ def update_early_stopping_state_unified(
 
 
 def setup_diversity_scorer(
-    fitness_strategy: str,
+    fitness_strategy: str | FitnessStrategy,
     diversity_reference_db: str | None,
     composition: list[str],
     n_to_optimize: int,
@@ -640,7 +640,7 @@ def setup_diversity_scorer(
 
 
 def select_population_class(
-    fitness_strategy: str,
+    fitness_strategy: str | FitnessStrategy,
     diversity_scorer: DiversityScorer | None,
     diversity_update_interval: int,
     logger,
@@ -682,7 +682,7 @@ def select_population_class(
 
 def log_early_stopping_info(
     verbosity: int,
-    fitness_strategy: str,
+    fitness_strategy: str | FitnessStrategy,
     early_stopping_niter: int,
     niter: int,
     logger,
@@ -719,7 +719,7 @@ def log_early_stopping_info(
 
 def sort_minima_by_fitness(
     all_minima: list[tuple[float, Atoms]],
-    fitness_strategy: str,
+    fitness_strategy: str | FitnessStrategy,
     logger,
 ) -> None:
     """Sort minima by fitness for non-low_energy strategies.

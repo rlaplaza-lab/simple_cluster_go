@@ -201,6 +201,10 @@ def parse_composition_arg(comp_str: str) -> list[str]:
     if not matches:
         raise ValueError(f"Unable to parse composition string: {comp_str}")
 
+    reconstructed = "".join(elem + count for elem, count in matches)
+    if reconstructed.lower() != comp_str.lower():
+        raise ValueError(f"Unable to parse composition string: {comp_str}")
+
     composition: list[str] = []
     for elem, count_str in matches:
         # Normalize capitalization: first letter uppercase, rest lowercase
