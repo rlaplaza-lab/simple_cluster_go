@@ -376,6 +376,8 @@ def test_find_ts_simple(h2_reactant, h2_product, temp_output_dir):
         fmax=0.05,
         neb_steps=200,
         verbosity=0,
+        # Retry bumps n_images to >=5; keep a single attempt so result matches n_images=3.
+        neb_retry_on_endpoint=False,
     )
 
     # Accept either a successful NEB or a correctly-detected endpoint case
