@@ -946,7 +946,7 @@ def test_find_ts_allows_missing_endpoint_energies_when_use_torchsim(
             return results
 
     monkeypatch.setattr(
-        "scgo.ts_search.transition_state.TorchSimBatchRelaxer",
+        "scgo.calculators.torchsim_helpers.TorchSimBatchRelaxer",
         FakeRelaxer,
     )
 

@@ -15,6 +15,7 @@ from ase.calculators.calculator import Calculator, all_changes
 from mace.calculators import mace_mp
 
 from scgo.utils.logging import get_logger
+from scgo.utils.mlip_extras import ensure_mace_uma_not_both_installed
 
 
 class MaceUrls(StrEnum):
@@ -66,6 +67,7 @@ class MACE(Calculator):
             **kwargs: Additional keyword arguments passed to the base ASE
                 Calculator class.
         """
+        ensure_mace_uma_not_both_installed()
         if device is None:
             if torch.cuda.is_available():
                 selected_device = "cuda"

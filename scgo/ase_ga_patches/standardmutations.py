@@ -415,12 +415,13 @@ class MirrorMutation(OffspringCreator):
     """
 
     def __init__(self, blmin, n_top, reflect=False, rng=None,
-                 verbose=False):
+                 verbose=False, max_tries: int = 1000):
         rng = _ensure_rng(rng)
         OffspringCreator.__init__(self, verbose, rng=rng)
         self.blmin = blmin
         self.n_top = n_top
         self.reflect = reflect
+        self.max_tries = max_tries
 
         self.descriptor = "MirrorMutation"
         self.min_inputs = 1
@@ -446,7 +447,7 @@ class MirrorMutation(OffspringCreator):
         num = top.numbers
         unique_types = list(set(num))
         nu = {u: sum(num == u) for u in unique_types}
-        n_tries = 1000
+        n_tries = self.max_tries
         counter = 0
         changed = False
 
@@ -497,16 +498,16 @@ class MirrorMutation(OffspringCreator):
 
             # In the case of an uneven number of
             # atoms we need to add one extra
-            for n in nu:
-                if nu[n] % 2 == 0:
+            for z in nu:
+                if nu[z] % 2 == 0:
                     continue
-                while n_use.count(n) > nu[n]:
+                while n_use.count(z) > nu[z]:
                     for i in range(int(len(n_use) / 2), len(n_use)):
-                        if n_use[i] == n:
+                        if n_use[i] == z:
                             del p_use[i]
                             del n_use[i]
                             break
-                assert n_use.count(n) == nu[n]
+                assert n_use.count(z) == nu[z]
 
             # Make sure we have the correct number of atoms
             # and rearrange the atoms so they are in the right order
@@ -587,7 +588,7 @@ class RotationalMutation(OffspringCreator):
 
     def __init__(self, blmin, n_top=None, fraction=0.33, tags=None,
                  min_angle=1.57, test_dist_to_slab=True, rng=None,
-                 verbose=False):
+                 verbose=False, max_inner_attempts: int = 10000):
         rng = _ensure_rng(rng)
         OffspringCreator.__init__(self, verbose, rng=rng)
         self.blmin = blmin
@@ -596,6 +597,7 @@ class RotationalMutation(OffspringCreator):
         self.tags = tags
         self.min_angle = min_angle
         self.test_dist_to_slab = test_dist_to_slab
+        self.max_inner_attempts = max_inner_attempts
         self.descriptor = "RotationalMutation"
         self.min_inputs = 1
 
@@ -635,7 +637,7 @@ class RotationalMutation(OffspringCreator):
 
         too_close = True
         count = 0
-        maxcount = 10000
+        maxcount = self.max_inner_attempts
         while too_close and count < maxcount:
             newpos = np.copy(pos)
             for tag in chosen_tags:
@@ -698,13 +700,15 @@ class FlatteningMutation(OffspringCreator):
     """
 
     def __init__(self, blmin, n_top, thickness_factor=0.5,
-                 test_dist_to_slab=True, rng=None, verbose=False):
+                 test_dist_to_slab=True, rng=None, verbose=False,
+                 max_inner_attempts: int = 5000):
         rng = _ensure_rng(rng)
         OffspringCreator.__init__(self, verbose, rng=rng)
         self.blmin = blmin
         self.n_top = n_top
         self.thickness_factor = thickness_factor
         self.test_dist_to_slab = test_dist_to_slab
+        self.max_inner_attempts = max_inner_attempts
 
         self.descriptor = "FlatteningMutation"
         self.min_inputs = 1
@@ -735,7 +739,7 @@ class FlatteningMutation(OffspringCreator):
         thickness = avg_blmin * self.thickness_factor
 
         count = 0
-        maxcount = 5000
+        maxcount = self.max_inner_attempts
         too_close = True
         while too_close and count < maxcount:
             count += 1

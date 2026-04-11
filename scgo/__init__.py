@@ -6,6 +6,7 @@ from __future__ import annotations
 # fragmenting; recommended for long-running TS campaigns. Set unconditionally so
 # callers do not need to export it in the shell.
 import os
+from typing import Any
 
 os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 
@@ -13,7 +14,6 @@ os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 from scgo.algorithms import (
     bh_go,
     ga_go,
-    ga_go_torchsim,
 )
 
 # Cluster + adsorbate (composable local relax)
@@ -48,12 +48,15 @@ from scgo.initialization import (
 # Parameter presets
 from scgo.param_presets import (
     AVAILABLE_MACE_MODELS,
+    AVAILABLE_UMA_MODELS,
     get_default_params,
+    get_default_uma_params,
     get_diversity_params,
     get_high_energy_params,
     get_minimal_ga_params,
     get_testing_params,
     get_ts_run_kwargs,
+    get_ts_search_params_uma,
 )
 
 # Main run functions
@@ -90,10 +93,29 @@ from scgo.utils.logging import (
 
 __version__ = "0.1.0"
 
+
+def __getattr__(name: str) -> Any:
+    if name == "ga_go_torchsim":
+        try:
+            from scgo.algorithms.geneticalgorithm_go_torchsim import ga_go_torchsim
+        except ImportError as e:
+            raise ImportError(
+                "TorchSim GA requires the MACE stack. Install with: pip install 'scgo[mace]'"
+            ) from e
+        return ga_go_torchsim
+    msg = f"module {__name__!r} has no attribute {name!r}"
+    raise AttributeError(msg)
+
+
+def __dir__() -> list[str]:
+    return sorted(__all__)
+
+
 __all__ = [
     # Version and capabilities
     "__version__",
     "AVAILABLE_MACE_MODELS",
+    "AVAILABLE_UMA_MODELS",
     # Algorithms (for advanced users)
     "bh_go",
     "ga_go",
@@ -131,6 +153,8 @@ __all__ = [
     "get_minimal_ga_params",
     "get_testing_params",
     "get_ts_run_kwargs",
+    "get_default_uma_params",
+    "get_ts_search_params_uma",
     # Main run API
     "run_scgo_campaign_arbitrary_compositions",
     "run_scgo_campaign_one_element",

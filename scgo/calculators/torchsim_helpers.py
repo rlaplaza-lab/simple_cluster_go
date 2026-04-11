@@ -1,5 +1,8 @@
 """Utilities for integrating TorchSim batched relaxations with SCGO.
 
+Requires the ``scgo[mace]`` extra. UMA (fairchem) workflows use ASE relaxation
+and ASE NEB instead; see :mod:`scgo.utils.torchsim_policy`.
+
 This module wraps the TorchSim high-level optimization API so that SCGO can
 relax multiple candidate structures in a single batched call.
 """

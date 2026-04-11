@@ -25,7 +25,6 @@ from typing import Any
 import numpy as np
 from ase import Atoms
 
-from scgo.calculators.torchsim_helpers import TorchSimBatchRelaxer
 from scgo.constants import (
     DEFAULT_COMPARATOR_TOL,
     DEFAULT_ENERGY_TOLERANCE,
@@ -47,6 +46,7 @@ from scgo.utils.helpers import (
 from scgo.utils.logging import configure_logging, get_logger
 from scgo.utils.rng_helpers import ensure_rng
 from scgo.utils.run_helpers import cleanup_torch_cuda, get_calculator_class
+from scgo.utils.torchsim_policy import resolve_ts_torchsim_flags
 from scgo.utils.ts_provenance import is_cuda_oom_error
 from scgo.utils.validation import validate_composition
 
@@ -54,6 +54,7 @@ from .parallel_neb import ParallelNEBBatch
 from .transition_state import (
     TorchSimNEB,
     _detach_calc,
+    _make_torchsim_relaxer,
     find_transition_state,
     interpolate_path,
     save_neb_result,
@@ -229,7 +230,9 @@ def run_transition_state_search(
             (e.g. slabs). Default False (gas-phase clusters).
         neb_tangent_method: ASE NEB tangent method (``ase.mep.neb.NEB`` ``method``).
             Default ``improvedtangent``.
-        use_torchsim: Use TorchSim for GPU-efficient batched force evaluation. Default False.
+        use_torchsim: Use TorchSim for GPU-efficient batched force evaluation (MACE only).
+            For ``calculator="UMA"`` (or without ``scgo[mace]``), this is coerced to
+            ``False`` and ASE NEB with the selected calculator is used instead.
         torchsim_params: Optional parameters for TorchSimBatchRelaxer when use_torchsim=True. If
             `torchsim_params['max_steps']` is 'auto', it will be resolved the same way as `neb_steps`.
         surface_config: When set, the same :class:`scgo.surface.config.SurfaceSystemConfig`
@@ -262,6 +265,9 @@ def run_transition_state_search(
     validate_composition(composition, allow_empty=False)
     rng = ensure_rng(seed)
 
+    if use_parallel_neb and not use_torchsim:
+        raise ValueError("use_parallel_neb requires use_torchsim=True")
+
     formula = get_cluster_formula(composition)
     if base_dir is not None:
         ts_output_dir = str(Path(base_dir))
@@ -278,6 +284,13 @@ def run_transition_state_search(
     # growth when a single calculator is reused across many NEBs.
     calculator_name = params.get("calculator", "EMT")
     calculator_kwargs = params.get("calculator_kwargs", {})
+
+    use_torchsim, use_parallel_neb = resolve_ts_torchsim_flags(
+        calculator_name,
+        use_torchsim,
+        use_parallel_neb,
+        logger=logger,
+    )
 
     try:
         calculator_class = get_calculator_class(calculator_name)
@@ -380,9 +393,8 @@ def run_transition_state_search(
         if not use_torchsim:
             raise ValueError("use_parallel_neb requires use_torchsim=True")
 
-        # Instantiate a single shared relaxer for all NEBs
         ts_params = torchsim_params or {}
-        relaxer = TorchSimBatchRelaxer(**ts_params)
+        relaxer = _make_torchsim_relaxer(**ts_params)
 
         # Prepare endpoint batch (collect reactant/product images for all pairs)
         endpoints = []

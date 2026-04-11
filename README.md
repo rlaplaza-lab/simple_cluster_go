@@ -6,7 +6,14 @@ A compact toolkit for global optimization of small atomic clusters using ASE. SC
 
 ## Install (minimal)
 
-Conda (recommended):
+SCGO has a **small core** (`ase`, `numpy`, …) and two **mutually exclusive** optional MLIP stacks:
+
+- **`[mace]`** — MACE + TorchSim + `nvalchemi-toolkit-ops` (GPU batched relaxation and NEB).
+- **`[uma]`** — `fairchem-core` (UMA checkpoints via `FAIRChemCalculator`).
+
+Do **not** install `[mace]` and `[uma]` in the same environment; dependency pins conflict. If you need both for experiments, use two separate virtualenvs or conda envs.
+
+Conda (recommended; default env uses the MACE stack):
 
 ```bash
 git clone https://github.com/rlaplaza-lab/simple_cluster_go.git
@@ -15,9 +22,9 @@ conda env create -f environment.yml
 conda activate scgo
 ```
 
-`environment.yml` installs the package editable with **dev** extras (`pytest`, `ruff`, `pre-commit`, etc.) via `pip install -e ".[dev]"`. For a runtime-only editable install, use `pip install -e .` instead.
+`environment.yml` installs the package editable with **`[mace,dev]`** (MACE stack plus `pytest`, `ruff`, `pre-commit`, etc.). For UMA-only work: `pip install -e ".[uma,dev]"` in a fresh env. For core only: `pip install -e .`.
 
-The conda env uses `torch-sim-atomistic[mace]` with `nvalchemi-toolkit-ops` for TorchSim neighbor lists. Do not install `vesin` or `vesin-torch`—they conflict with the TorchSim stack we use.
+The MACE conda env uses `torch-sim-atomistic[mace]` with `nvalchemi-toolkit-ops` for TorchSim neighbor lists. Do not install `vesin` or `vesin-torch`—they conflict with the TorchSim stack we use.
 
 Note: SCGO requires SQLite with the JSON1 extension (for `json_extract` and related functions). If you installed using conda, ensure `sqlite` from `conda-forge` is available in your environment (e.g., `conda install -c conda-forge sqlite`). If you use pip-only installs, consider installing `pysqlite3-binary` (e.g., `pip install pysqlite3-binary`) so that the Python `sqlite3` module exposes JSON1. This repository's CI enforces JSON1 availability.
 
@@ -28,15 +35,15 @@ pip (alternative):
 ```bash
 git clone https://github.com/rlaplaza-lab/simple_cluster_go.git
 cd simple_cluster_go
-pip install -e .
+pip install -e ".[mace]"   # or: pip install -e ".[uma]"
 ```
 
-For pip installs, the same TorchSim stack applies: ensure `nvalchemi-toolkit-ops` is available; uninstall `vesin` and `vesin-torch` if you see TorchSim-related errors.
+For the MACE stack, ensure `nvalchemi-toolkit-ops` is available; uninstall `vesin` and `vesin-torch` if you see TorchSim-related errors.
 
-For development with tests and linting (after a **runtime-only** `pip install -e .`):
+For development with tests and linting:
 
 ```bash
-pip install -e ".[dev]"
+pip install -e ".[mace,dev]"   # or UMA: pip install -e ".[uma,dev]"
 pre-commit install
 ```
 

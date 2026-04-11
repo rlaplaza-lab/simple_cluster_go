@@ -307,6 +307,11 @@ def create_mutation_operators(
     blmin: dict,
     rng: np.random.Generator | None = None,
     use_adaptive: bool = True,
+    *,
+    flattening_thickness_factor: float = 0.5,
+    flattening_max_inner_attempts: int = 5000,
+    rotational_max_inner_attempts: int = 10000,
+    mirror_max_tries: int = 1000,
 ) -> tuple[list, dict[str, int]]:
     """Create mutation operators once at start of GA.
 
@@ -318,6 +323,11 @@ def create_mutation_operators(
         blmin: Bond length minimums dictionary.
         rng: Random number generator.
         use_adaptive: Whether to include adaptive mutation operators.
+        flattening_thickness_factor: Passed to :class:`FlatteningMutation`
+            (larger values relax post-projection thickness, helping large clusters).
+        flattening_max_inner_attempts: Max random-plane trials per flattening call.
+        rotational_max_inner_attempts: Max trials per rotational mutation call.
+        mirror_max_tries: Max cutting-plane trials per mirror mutation call.
 
     Returns:
         Tuple of (operators_list, operator_name_to_index_map).
@@ -337,8 +347,11 @@ def create_mutation_operators(
 
     if len(set(composition)) > 1:
         permutation: CustomPermutationMutation = CustomPermutationMutation(
-            n_to_optimize, rng=create_child_rng(rng) if rng is not None else None
-        )  # type: ignore[arg-type]
+            n_to_optimize,
+            rng=create_child_rng(rng) if rng is not None else None,  # type: ignore[arg-type]
+            blmin=blmin,
+            test_dist_to_slab=True,
+        )
         operators.append(permutation)
         name_map["permutation"] = len(operators) - 1
 
@@ -346,8 +359,9 @@ def create_mutation_operators(
         flattening: FlatteningMutation = FlatteningMutation(
             blmin,
             n_to_optimize,
-            thickness_factor=0.5,
+            thickness_factor=flattening_thickness_factor,
             rng=create_child_rng(rng) if rng is not None else None,  # type: ignore[arg-type]
+            max_inner_attempts=flattening_max_inner_attempts,
         )
         operators.append(flattening)
         name_map["flattening"] = len(operators) - 1
@@ -356,6 +370,7 @@ def create_mutation_operators(
             blmin,
             n_to_optimize,
             rng=create_child_rng(rng) if rng is not None else None,  # type: ignore[arg-type]
+            max_inner_attempts=rotational_max_inner_attempts,
         )
         operators.append(rotational)
         name_map["rotational"] = len(operators) - 1
@@ -364,6 +379,7 @@ def create_mutation_operators(
             blmin,
             n_to_optimize,
             rng=create_child_rng(rng) if rng is not None else None,  # type: ignore[arg-type]
+            max_tries=mirror_max_tries,
         )
         operators.append(mirror)
         name_map["mirror"] = len(operators) - 1

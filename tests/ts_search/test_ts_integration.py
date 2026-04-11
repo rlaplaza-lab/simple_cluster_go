@@ -274,7 +274,7 @@ def test_run_transition_state_search_parallel_neb_executes(
             return results
 
     monkeypatch.setattr(
-        "scgo.ts_search.transition_state_run.TorchSimBatchRelaxer", FakeRelaxer
+        "scgo.calculators.torchsim_helpers.TorchSimBatchRelaxer", FakeRelaxer
     )
 
     params = {"calculator": "MACE", "calculator_kwargs": {}}
@@ -324,7 +324,7 @@ def test_run_transition_state_search_parallel_neb_forwards_rng_and_perturb(
             return results
 
     monkeypatch.setattr(
-        "scgo.ts_search.transition_state_run.TorchSimBatchRelaxer", FakeRelaxer
+        "scgo.calculators.torchsim_helpers.TorchSimBatchRelaxer", FakeRelaxer
     )
 
     # Wrap the interpolate_path used by the run() routine so we can inspect kwargs
@@ -849,7 +849,7 @@ def test_run_transition_state_search_torchsim(mock_database_dir):
     results = run_transition_state_search(
         composition=["Cu", "Cu"],
         base_dir=mock_database_dir,
-        params={},  # No calculator needed with TorchSim
+        params={"calculator": "MACE", "calculator_kwargs": {}},
         verbosity=1,
         max_pairs=1,
         neb_n_images=3,

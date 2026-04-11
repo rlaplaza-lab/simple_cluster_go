@@ -3,15 +3,17 @@
 from __future__ import annotations
 
 import contextlib
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 from ase.calculators.singlepoint import SinglePointCalculator
 from ase.optimize import FIRE
 
-from scgo.calculators.torchsim_helpers import TorchSimBatchRelaxer
 from scgo.ts_search.transition_state import TorchSimNEB
 from scgo.utils.logging import get_logger
+
+if TYPE_CHECKING:
+    from scgo.calculators.torchsim_helpers import TorchSimBatchRelaxer
 
 logger = get_logger(__name__)
 

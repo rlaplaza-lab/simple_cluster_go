@@ -8,7 +8,7 @@ import logging
 import os
 import sys
 from copy import deepcopy
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import numpy as np
 from ase import Atoms
@@ -23,7 +23,6 @@ from ase.optimize.optimize import Optimizer
 from ase.vibrations import Vibrations
 from scipy.optimize import linear_sum_assignment
 
-from scgo.calculators.torchsim_helpers import TorchSimBatchRelaxer
 from scgo.constants import (
     DEFAULT_COMPARATOR_TOL,
     DEFAULT_NEB_TANGENT_METHOD,
@@ -32,8 +31,12 @@ from scgo.constants import (
 from scgo.utils.helpers import extract_energy_from_atoms
 from scgo.utils.logging import get_logger
 from scgo.utils.run_helpers import cleanup_torch_cuda
+from scgo.utils.torchsim_policy import coerce_find_transition_state_torchsim
 from scgo.utils.ts_provenance import is_cuda_oom_error, ts_output_provenance
 from scgo.utils.validation import validate_atoms, validate_calculator_attached
+
+if TYPE_CHECKING:
+    from scgo.calculators.torchsim_helpers import TorchSimBatchRelaxer
 
 # ---------------------------------------------------------------------------
 # Helper utilities
@@ -46,6 +49,13 @@ def _detach_calc(atoms: Atoms | None) -> None:
         return
     with contextlib.suppress(AttributeError, TypeError):
         atoms.calc = None
+
+
+def _make_torchsim_relaxer(**kwargs: Any) -> Any:
+    """Build a TorchSim relaxer; resolve the class via module attribute for monkeypatching."""
+    from scgo.calculators import torchsim_helpers as _tsh
+
+    return _tsh.TorchSimBatchRelaxer(**kwargs)
 
 
 def _attach_calculator_to_images(
@@ -426,6 +436,13 @@ def find_transition_state(
     validate_atoms(atoms1)
     validate_atoms(atoms2)
 
+    use_torchsim = coerce_find_transition_state_torchsim(
+        use_torchsim=use_torchsim,
+        calculator=calculator,
+        pair_id=pair_id,
+        logger=logger,
+    )
+
     if not use_torchsim:
         validate_calculator_attached(atoms1, "NEB reactant")
         validate_calculator_attached(atoms2, "NEB product")
@@ -553,9 +570,8 @@ def find_transition_state(
 
         neb: NEB
         if use_torchsim:
-            # Initialize TorchSim relaxer with batching for GPU efficiency
             ts_params = torchsim_params or {}
-            relaxer = TorchSimBatchRelaxer(**ts_params)
+            relaxer = _make_torchsim_relaxer(**ts_params)
 
             # Compute endpoint energies with TorchSim (single-point calculation)
             endpoints = [images[0], images[-1]]

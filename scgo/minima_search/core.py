@@ -18,7 +18,7 @@ from ase.calculators.calculator import Calculator
 from ase.calculators.emt import EMT
 from ase.io import write
 
-from scgo.algorithms import bh_go, ga_go, ga_go_torchsim, simple_go
+from scgo.algorithms import bh_go, ga_go, simple_go
 from scgo.database import SCGODatabaseManager
 from scgo.database.metadata import (
     add_metadata,
@@ -144,13 +144,30 @@ def _validate_calculator_compatibility(
 
 
 def _is_ml_calculator_for_torchsim(calculator: Calculator) -> bool:
-    """True if the calculator looks like an MLIP (TorchSim GA is appropriate)."""
+    """True if the calculator looks like an MLIP served by TorchSim+MACE."""
     calculator_class_name = calculator.__class__.__name__
+    if calculator_class_name in ("UMA", "FAIRChemCalculator"):
+        return False
     model = getattr(calculator, "model", None)
     return hasattr(model, "forward") or calculator_class_name in (
         "MACECalculator",
         "MACE",
     )
+
+
+def _get_ga_go_torchsim():
+    try:
+        from scgo.algorithms.geneticalgorithm_go_torchsim import ga_go_torchsim as _impl
+    except ImportError as e:
+        raise ImportError(
+            "TorchSim GA requires the MACE stack. Install with: pip install 'scgo[mace]'"
+        ) from e
+    return _impl
+
+
+def ga_go_torchsim(*args, **kwargs):
+    """TorchSim GA entry point; lazy-imports MACE deps (allows tests to monkeypatch)."""
+    return _get_ga_go_torchsim()(*args, **kwargs)
 
 
 def _filter_ga_kwargs_for_torchsim(

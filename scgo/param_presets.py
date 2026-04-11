@@ -4,9 +4,6 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-import torch
-
-from scgo.calculators.torchsim_helpers import TorchSimBatchRelaxer
 from scgo.constants import (
     BOLTZMANN_K_EV_PER_K,
     DEFAULT_COMPARATOR_TOL,
@@ -15,6 +12,7 @@ from scgo.constants import (
     DEFAULT_PAIR_COR_MAX,
 )
 from scgo.surface.config import SurfaceSystemConfig
+from scgo.utils.torchsim_policy import resolve_ts_torchsim_flags
 
 # Available MACE model names for use in calculator_kwargs["model_name"]
 AVAILABLE_MACE_MODELS = [
@@ -24,10 +22,18 @@ AVAILABLE_MACE_MODELS = [
     "mace_off_small",  # Small MACE-OFF
 ]
 
+# Common fairchem pretrained names (see fairchem.core.calculate.pretrained_mlip)
+AVAILABLE_UMA_MODELS = [
+    "uma-s-1",
+    "uma-s-1p1",
+    "uma-m-1p1",
+]
+
 TsSearchRegime = Literal["gas", "surface"]
 
 __all__ = [
     "AVAILABLE_MACE_MODELS",
+    "AVAILABLE_UMA_MODELS",
     "TsSearchRegime",
     "get_default_params",
     "get_minimal_ga_params",
@@ -37,6 +43,8 @@ __all__ = [
     "get_high_energy_params",
     "get_ts_search_params",
     "get_ts_run_kwargs",
+    "get_default_uma_params",
+    "get_ts_search_params_uma",
 ]
 
 
@@ -192,37 +200,38 @@ def _get_base_ga_benchmark_params(seed: int) -> dict[str, Any]:
     return params
 
 
-def get_torchsim_ga_params(seed: int) -> dict[str, Any]:
-    """Return GA params using TorchSim relaxer."""
-    params = _get_base_ga_benchmark_params(seed)
+def get_default_uma_params() -> dict[str, Any]:
+    """Default SCGO parameters using the UMA calculator (fairchem-core)."""
+    params = get_default_params()
+    params["calculator"] = "UMA"
+    params["calculator_kwargs"] = {
+        "model_name": "uma-s-1",
+        "task_name": "omat",
+    }
+    return params
 
-    # Keep GA relaxation settings consistent across both modes
-    fmax_val = params["optimizer_params"]["ga"]["fmax"]
-    niter_local = params["optimizer_params"]["ga"]["niter_local_relaxation"]
 
-    # Extract the same settings for TorchSim relaxer
-    params["optimizer_params"]["ga"].update(
-        {
-            # TorchSim optimized for GPU: float32, no autobatching overhead for tiny batches
-            "relaxer": TorchSimBatchRelaxer(
-                force_tol=fmax_val,
-                optimizer_name="fire",
-                mace_model_name="mace_matpes_0",
-                seed=seed,
-                # Match baseline GA's max steps
-                max_steps=niter_local,
-                # Use float32 for ~10-30x faster GPU inference
-                dtype=torch.float32,
-                # Use binning strategy for optimal batch sizes
-                autobatch_strategy="binning",
-                # Optional: enable torch.compile for faster MACE (adds startup cost)
-                compile_model=False,
-            ),
-            # Leave batch_size unset so all unrelaxed candidates are batched together
-        },
+def get_ts_search_params_uma(
+    *,
+    regime: TsSearchRegime = "gas",
+    surface_config: SurfaceSystemConfig | None = None,
+    model_name: str = "uma-s-1",
+    task_name: str | None = "omat",
+) -> dict[str, Any]:
+    """TS preset for UMA: ASE NEB (no TorchSim); use with ``scgo[uma]`` only."""
+    return get_ts_search_params(
+        calculator="UMA",
+        calculator_kwargs={"model_name": model_name, "task_name": task_name},
+        regime=regime,
+        surface_config=surface_config,
     )
 
-    return params
+
+def get_torchsim_ga_params(seed: int) -> dict[str, Any]:
+    """Return GA params using TorchSim relaxer (requires ``scgo[mace]``)."""
+    from scgo.param_presets_torchsim import get_torchsim_ga_params_impl
+
+    return get_torchsim_ga_params_impl(seed)
 
 
 def get_diversity_params(
@@ -268,6 +277,10 @@ def get_ts_search_params(
 
     Parameters
     ----------
+    calculator:
+        ``"MACE"`` enables TorchSim batched NEB when ``scgo[mace]`` is installed.
+        ``"UMA"`` (and other non-MACE calculators) automatically use ASE NEB
+        (``use_torchsim=False``) regardless of defaults below.
     regime:
         ``"gas"`` (nanoparticle / non-periodic): ``neb_n_images=5`` for a thicker
         initial band (fewer false endpoint-TS bands than 3 images on metals),
@@ -365,6 +378,15 @@ def get_ts_search_params(
     if surface_config is not None:
         params["surface_config"] = surface_config
 
+    us, up = resolve_ts_torchsim_flags(
+        str(params["calculator"]),
+        params.get("use_torchsim"),
+        params.get("use_parallel_neb"),
+        logger=None,
+    )
+    params["use_torchsim"] = us
+    params["use_parallel_neb"] = up
+
     return params
 
 
@@ -379,6 +401,14 @@ def get_ts_run_kwargs(ts_params: dict[str, Any] | None = None) -> dict[str, Any]
     """
     if ts_params is None:
         ts_params = get_ts_search_params()
+
+    calc_name = str(ts_params["calculator"])
+    use_ts, use_pn = resolve_ts_torchsim_flags(
+        calc_name,
+        ts_params.get("use_torchsim"),
+        ts_params.get("use_parallel_neb"),
+        logger=None,
+    )
 
     return {
         "params": {
@@ -397,7 +427,7 @@ def get_ts_run_kwargs(ts_params: dict[str, Any] | None = None) -> dict[str, Any]
         "neb_perturb_sigma": ts_params.get("neb_perturb_sigma"),
         "neb_interpolation_mic": ts_params.get("neb_interpolation_mic", False),
         "neb_retry_on_endpoint": ts_params.get("neb_retry_on_endpoint", True),
-        "use_torchsim": ts_params.get("use_torchsim"),
+        "use_torchsim": use_ts,
         # TS-specific post-processing knobs
         "dedupe_minima": ts_params.get("dedupe_minima", True),
         "minima_energy_tolerance": ts_params.get(
@@ -408,7 +438,7 @@ def get_ts_run_kwargs(ts_params: dict[str, Any] | None = None) -> dict[str, Any]
             "force_tol": ts_params.get("torchsim_fmax"),
             "max_steps": ts_params.get("torchsim_max_steps"),
         },
-        "use_parallel_neb": ts_params.get("use_parallel_neb", False),
+        "use_parallel_neb": use_pn,
         "neb_climb": ts_params.get("neb_climb", False),
         "neb_interpolation_method": ts_params.get("neb_interpolation_method", "idpp"),
         "neb_tangent_method": ts_params.get(

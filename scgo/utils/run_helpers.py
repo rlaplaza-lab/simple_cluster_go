@@ -13,7 +13,6 @@ from typing import Any
 import numpy as np
 from ase.calculators.emt import EMT
 
-from scgo.calculators.mace_helpers import MACE
 from scgo.constants import BOLTZMANN_K_EV_PER_K
 from scgo.param_presets import get_default_params
 from scgo.utils.fitness_strategies import validate_fitness_strategy
@@ -27,10 +26,29 @@ from scgo.utils.helpers import (
 from scgo.utils.logging import get_logger
 from scgo.utils.optimizer_utils import get_optimizer_class
 
-_CALCULATORS = {
-    "EMT": EMT,
-    "MACE": MACE,
-}
+_CALCULATORS_CACHE: dict[str, Any] | None = None
+
+
+def _get_calculators() -> dict[str, Any]:
+    """ASE calculator registry; MACE/UMA entries are None if extras are not installed."""
+    global _CALCULATORS_CACHE
+    if _CALCULATORS_CACHE is not None:
+        return _CALCULATORS_CACHE
+    calcs: dict[str, Any] = {"EMT": EMT}
+    try:
+        from scgo.calculators.mace_helpers import MACE
+
+        calcs["MACE"] = MACE
+    except ImportError:
+        calcs["MACE"] = None
+    try:
+        from scgo.calculators.uma_helpers import UMA
+
+        calcs["UMA"] = UMA
+    except ImportError:
+        calcs["UMA"] = None
+    _CALCULATORS_CACHE = calcs
+    return calcs
 
 
 def initialize_params(params: dict[str, Any] | None) -> dict[str, Any]:
@@ -63,13 +81,14 @@ def get_calculator_class(calculator_name: str) -> type:
     Raises:
         ValueError: If calculator name is unknown or not available.
     """
-    if calculator_name not in _CALCULATORS:
+    calculators = _get_calculators()
+    if calculator_name not in calculators:
         raise ValueError(
             f"Unknown calculator: {calculator_name}. "
-            f"Available calculators: {list(_CALCULATORS.keys())}",
+            f"Available calculators: {list(calculators.keys())}",
         )
 
-    calculator_class = _CALCULATORS[calculator_name]
+    calculator_class = calculators[calculator_name]
 
     return calculator_class
 
@@ -87,7 +106,7 @@ def validate_calculator(
     Raises:
         ValueError: If calculator name is unknown or not available.
     """
-    calculators_dict = calculators_dict or _CALCULATORS
+    calculators_dict = calculators_dict or _get_calculators()
 
     if calculator_name not in calculators_dict:
         raise ValueError(
