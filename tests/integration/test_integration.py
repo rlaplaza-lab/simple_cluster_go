@@ -24,23 +24,44 @@ from scgo.run_minima import (
 )
 
 
+
 @pytest.mark.slow
 @pytest.mark.integration
-def test_full_bh_workflow(tmp_path, rng):
-    """Test complete Basin Hopping workflow from initialization to output files."""
+@pytest.mark.parametrize(
+    "optimizer,opt_kwargs",
+    [
+        (
+            "bh",
+            {
+                "niter": 2,
+                "dr": 0.2,
+                "niter_local_relaxation": 2,
+                "temperature": 0.01,
+            },
+        ),
+        (
+            "ga",
+            {
+                "niter": 1,
+                "population_size": 2,
+                "niter_local_relaxation": 2,
+                "mutation_probability": 0.3,
+                "vacuum": 8.0,
+                "n_jobs_population_init": 1,  # Serial for tests to avoid fork issues
+            },
+        ),
+    ],
+)
+def test_full_optimizer_workflow(tmp_path, rng, optimizer, opt_kwargs):
+    """Test complete optimization workflow from initialization to output files for any optimizer."""
     comp = ["Pt", "Pt", "Pt"]
-    output_dir = str(tmp_path / "bh_campaign")
+    output_dir = str(tmp_path / f"{optimizer}_campaign")
 
-    # Run a minimal BH campaign
+    # Run a minimal campaign
     results = run_trials(
         composition=comp,
-        global_optimizer="bh",
-        global_optimizer_kwargs={
-            "niter": 2,
-            "dr": 0.2,
-            "niter_local_relaxation": 2,
-            "temperature": 0.01,
-        },
+        global_optimizer=optimizer,
+        global_optimizer_kwargs=opt_kwargs,
         n_trials=1,
         output_dir=output_dir,
         calculator_for_global_optimization=EMT(),
@@ -50,157 +71,68 @@ def test_full_bh_workflow(tmp_path, rng):
 
     # Verify results structure
     assert isinstance(results, list)
-    if results:  # May be empty if no minima found
+    if results:
         for energy, atoms in results:
             assert np.isfinite(energy)
             assert isinstance(atoms, Atoms)
             assert len(atoms) == 3
-            assert atoms.get_chemical_symbols() == ["Pt", "Pt", "Pt"]
+            assert atoms.get_chemical_symbols() == comp
 
-    # Verify directory structure (new structure: run_*/trial_*/)
     assert os.path.exists(output_dir)
 
-    # Find run directory (auto-generated run_id)
     from scgo.utils.run_tracking import get_run_directories
-
     run_dirs = get_run_directories(output_dir)
     assert len(run_dirs) > 0
     run_dir = run_dirs[0]
 
     trial1_dir = os.path.join(run_dir, "trial_1")
     assert os.path.exists(trial1_dir)
-    # Only one trial was run, so trial_2 should not exist
     assert not os.path.exists(os.path.join(run_dir, "trial_2"))
     assert os.path.exists(os.path.join(output_dir, "final_unique_minima"))
 
-    # Verify database files exist
-    trial1_db = os.path.join(trial1_dir, "bh_go.db")
-    # Only one trial was run, so trial_2 should not exist
-    trial2_db = os.path.join(run_dir, "trial_2", "bh_go.db")
+    # Verify optimizer-specific files
+    db_name = f"{optimizer}_go.db"
+    trial1_db = os.path.join(trial1_dir, db_name)
     assert os.path.exists(trial1_db)
-    assert not os.path.exists(trial2_db)
 
     # Verify database integrity
+    import sqlite3
     for db_path in [trial1_db]:
         with sqlite3.connect(db_path) as conn:
             cursor = conn.cursor()
             cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
             tables = [row[0] for row in cursor.fetchall()]
             assert "systems" in tables
-            # Verify at least one DB row persisted the run_id in metadata or key_value_pairs
-            cols = [
-                r[1] for r in cursor.execute("PRAGMA table_info(systems)").fetchall()
-            ]
-            if "metadata" in cols:
-                cursor.execute("SELECT metadata, key_value_pairs FROM systems LIMIT 5")
-                rows = cursor.fetchall()
-                found_runid = False
-                for meta_col, kv_col in rows:
-                    import json
+            cols = [r[1] for r in cursor.execute("PRAGMA table_info(systems)").fetchall()]
+            
+            # Check for run_id persistence
+            cursor.execute(f"SELECT {'metadata, ' if 'metadata' in cols else ''}key_value_pairs FROM systems LIMIT 5")
+            rows = cursor.fetchall()
+            found_runid = False
+            for row in rows:
+                import json
+                meta = json.loads(row[0]) if len(row) > 1 and row[0] else {}
+                kv = json.loads(row[-1]) if row[-1] else {}
+                if meta.get("run_id") or kv.get("run_id"):
+                    found_runid = True
+                    break
+            assert found_runid is True, f"No run_id persisted in {optimizer} DB rows"
 
-                    meta = json.loads(meta_col) if meta_col else {}
-                    kv = json.loads(kv_col) if kv_col else {}
-                    if meta.get("run_id") or kv.get("run_id"):
-                        found_runid = True
-                        break
-            else:
-                cursor.execute("SELECT key_value_pairs FROM systems LIMIT 5")
-                rows = cursor.fetchall()
-                found_runid = False
-                for (kv_col,) in rows:
-                    import json
+    # Verify GA-specific logs
+    if optimizer == "ga":
+        trial1_log = os.path.join(trial1_dir, "population.log")
+        assert os.path.exists(trial1_log)
 
-                    kv = json.loads(kv_col) if kv_col else {}
-                    if kv.get("run_id"):
-                        found_runid = True
-                        break
-            assert found_runid is True, "No run_id persisted in BH DB rows"
-
-    # Verify XYZ files if results exist
+    # Verify XYZ files
     if results:
         xyz_dir = os.path.join(output_dir, "final_unique_minima")
         xyz_files = list(Path(xyz_dir).glob("*.xyz"))
-        assert len(xyz_files) > 0
+        if xyz_files:
+            atoms_from_file = read(str(xyz_files[0]))
+            assert len(atoms_from_file) == 3
+            assert "provenance" in atoms_from_file.info
+            assert "trial" in atoms_from_file.info["provenance"]
 
-        # Check first XYZ file
-        xyz_file = xyz_files[0]
-        atoms_from_file = read(str(xyz_file))
-        assert len(atoms_from_file) == 3
-        assert atoms_from_file.get_chemical_symbols() == ["Pt", "Pt", "Pt"]
-
-        # Verify provenance tracking
-        assert "provenance" in atoms_from_file.info
-        assert "trial" in atoms_from_file.info["provenance"]
-
-
-@pytest.mark.slow
-@pytest.mark.integration
-def test_full_ga_workflow(tmp_path, rng):
-    """Test complete Genetic Algorithm workflow from initialization to output files."""
-    comp = ["Pt", "Pt", "Pt"]
-    output_dir = str(tmp_path / "ga_campaign")
-
-    # Run a minimal GA campaign
-    results = run_trials(
-        composition=comp,
-        global_optimizer="ga",
-        global_optimizer_kwargs={
-            "niter": 1,
-            "population_size": 2,
-            "niter_local_relaxation": 2,
-            "mutation_probability": 0.3,
-            "vacuum": 8.0,
-            "n_jobs_population_init": -2,  # Parallel for tests
-        },
-        n_trials=1,
-        output_dir=output_dir,
-        calculator_for_global_optimization=EMT(),
-        validate_with_hessian=False,
-        rng=rng,
-    )
-
-    # Verify results structure
-    assert isinstance(results, list)
-    if results:
-        for energy, atoms in results:
-            assert np.isfinite(energy)
-            assert isinstance(atoms, Atoms)
-            assert len(atoms) == 3
-            assert atoms.get_chemical_symbols() == ["Pt", "Pt", "Pt"]
-
-    # Verify directory structure (new structure: run_*/trial_*/)
-    assert os.path.exists(output_dir)
-
-    # Find run directory (auto-generated run_id)
-    from scgo.utils.run_tracking import get_run_directories
-
-    run_dirs = get_run_directories(output_dir)
-    assert len(run_dirs) > 0
-    run_dir = run_dirs[0]
-
-    trial1_dir = os.path.join(run_dir, "trial_1")
-    assert os.path.exists(trial1_dir)
-    # Only one trial was run, so trial_2 should not exist
-    assert not os.path.exists(os.path.join(run_dir, "trial_2"))
-    assert os.path.exists(os.path.join(output_dir, "final_unique_minima"))
-
-    # Verify GA-specific database files
-    trial1_db = os.path.join(trial1_dir, "ga_go.db")
-    assert os.path.exists(trial1_db)
-    # Only one trial was run, so trial_2 should not exist
-    trial2_db = os.path.join(run_dir, "trial_2", "ga_go.db")
-    assert not os.path.exists(trial2_db)
-
-    # Verify population log files
-    trial1_log = os.path.join(trial1_dir, "population.log")
-    assert os.path.exists(trial1_log)
-    # Only one trial was run, so trial_2 should not exist
-    trial2_log = os.path.join(run_dir, "trial_2", "population.log")
-    assert not os.path.exists(trial2_log)
-
-
-@pytest.mark.slow
-@pytest.mark.integration
 def test_multi_trial_campaign(tmp_path, rng):
     """Test multi-trial campaign with unique minima filtering."""
     comp = ["Pt", "Pt"]

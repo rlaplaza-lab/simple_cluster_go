@@ -343,9 +343,7 @@ def ga_go_torchsim(
         use_adaptive=use_adaptive_mutations,
         n_slab=n_slab,
         surface_normal_axis=(
-            surface_config.surface_normal_axis
-            if surface_config is not None
-            else 2
+            surface_config.surface_normal_axis if surface_config is not None else 2
         ),
     )
 

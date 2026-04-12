@@ -33,8 +33,8 @@ def _fix_indices(combined: Atoms) -> list[int]:
 
 def test_attach_slab_constraints_nothing_frozen() -> None:
     pos = _three_layer_slab_positions()
-    slab = Atoms("Pt6", positions=pos, cell=[10, 10, 10], pbc=False)
-    ads = Atoms("Pt", positions=[[0.0, 0.0, 5.0]], cell=slab.cell, pbc=False)
+    slab = Atoms("Pt6", positions=pos, cell=[10, 10, 10], pbc=True)
+    ads = Atoms("Pt", positions=[[0.0, 0.0, 5.0]], cell=slab.cell, pbc=True)
     combined = slab + ads
     attach_slab_constraints(
         combined,
@@ -49,8 +49,8 @@ def test_attach_slab_constraints_nothing_frozen() -> None:
 
 def test_attach_slab_constraints_fix_bottom_two_layers() -> None:
     pos = _three_layer_slab_positions()
-    slab = Atoms("Pt6", positions=pos, cell=[10, 10, 10], pbc=False)
-    ads = Atoms("Pt", positions=[[0.0, 0.0, 5.0]], cell=slab.cell, pbc=False)
+    slab = Atoms("Pt6", positions=pos, cell=[10, 10, 10], pbc=True)
+    ads = Atoms("Pt", positions=[[0.0, 0.0, 5.0]], cell=slab.cell, pbc=True)
     combined = slab + ads
     attach_slab_constraints(
         combined,
@@ -64,8 +64,8 @@ def test_attach_slab_constraints_fix_bottom_two_layers() -> None:
 
 def test_attach_slab_constraints_relax_top_two_matches_fix_bottom_one() -> None:
     pos = _three_layer_slab_positions()
-    slab = Atoms("Pt6", positions=pos, cell=[10, 10, 10], pbc=False)
-    ads = Atoms("Pt", positions=[[0.0, 0.0, 5.0]], cell=slab.cell, pbc=False)
+    slab = Atoms("Pt6", positions=pos, cell=[10, 10, 10], pbc=True)
+    ads = Atoms("Pt", positions=[[0.0, 0.0, 5.0]], cell=slab.cell, pbc=True)
 
     c1 = slab + ads
     attach_slab_constraints(
@@ -93,8 +93,8 @@ def test_attach_slab_constraints_relax_top_two_matches_fix_bottom_one() -> None:
 
 def test_attach_slab_constraints_relax_top_all_layers_no_fixatoms() -> None:
     pos = _three_layer_slab_positions()
-    slab = Atoms("Pt6", positions=pos, cell=[10, 10, 10], pbc=False)
-    ads = Atoms("Pt", positions=[[0.0, 0.0, 5.0]], cell=slab.cell, pbc=False)
+    slab = Atoms("Pt6", positions=pos, cell=[10, 10, 10], pbc=True)
+    ads = Atoms("Pt", positions=[[0.0, 0.0, 5.0]], cell=slab.cell, pbc=True)
     combined = slab + ads
     attach_slab_constraints(
         combined,
@@ -109,8 +109,8 @@ def test_attach_slab_constraints_relax_top_all_layers_no_fixatoms() -> None:
 
 def test_attach_slab_constraints_both_layer_modes_rejected() -> None:
     pos = _three_layer_slab_positions()
-    slab = Atoms("Pt6", positions=pos, cell=[10, 10, 10], pbc=False)
-    combined = slab + Atoms("Pt", positions=[[0, 0, 5]], cell=slab.cell, pbc=False)
+    slab = Atoms("Pt6", positions=pos, cell=[10, 10, 10], pbc=True)
+    combined = slab + Atoms("Pt", positions=[[0, 0, 5]], cell=slab.cell, pbc=True)
     with pytest.raises(ValueError, match="at most one"):
         attach_slab_constraints(
             combined,
@@ -145,8 +145,8 @@ def test_surface_config_both_layer_specs_rejected() -> None:
 
 def test_attach_slab_constraints_from_surface_config_matches_explicit() -> None:
     pos = _three_layer_slab_positions()
-    slab = Atoms("Pt6", positions=pos, cell=[10, 10, 10], pbc=False)
-    ads = Atoms("Pt", positions=[[0.0, 0.0, 5.0]], cell=slab.cell, pbc=False)
+    slab = Atoms("Pt6", positions=pos, cell=[10, 10, 10], pbc=True)
+    ads = Atoms("Pt", positions=[[0.0, 0.0, 5.0]], cell=slab.cell, pbc=True)
     cfg = SurfaceSystemConfig(
         slab=slab,
         fix_all_slab_atoms=False,
@@ -168,7 +168,7 @@ def test_attach_slab_constraints_from_surface_config_matches_explicit() -> None:
 
 def test_surface_slab_constraint_summary_json_safe() -> None:
     pos = _three_layer_slab_positions()
-    slab = Atoms("Pt6", positions=pos, cell=[10, 10, 10], pbc=False)
+    slab = Atoms("Pt6", positions=pos, cell=[10, 10, 10], pbc=True)
     cfg = SurfaceSystemConfig(
         slab=slab,
         fix_all_slab_atoms=False,
@@ -184,8 +184,8 @@ def test_surface_slab_constraint_summary_json_safe() -> None:
 
 def test_torchsim_prepare_relaxed_copy_attaches_fixatoms() -> None:
     pos = _three_layer_slab_positions()
-    slab = Atoms("Pt6", positions=pos, cell=[10, 10, 10], pbc=False)
-    ads = Atoms("Pt", positions=[[0.0, 0.0, 5.0]], cell=slab.cell, pbc=False)
+    slab = Atoms("Pt6", positions=pos, cell=[10, 10, 10], pbc=True)
+    ads = Atoms("Pt", positions=[[0.0, 0.0, 5.0]], cell=slab.cell, pbc=True)
     cand = slab + ads
     cfg = SurfaceSystemConfig(
         slab=slab,

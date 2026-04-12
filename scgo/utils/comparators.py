@@ -46,14 +46,10 @@ def get_sorted_dist_list(atoms: Atoms, mic: bool = False) -> dict[int, np.ndarra
 
         # For non-periodic systems, use vectorized NumPy operations for better performance
         if not mic and not np.any(atoms.get_pbc()):
+            from scipy.spatial.distance import pdist
+
             positions = atoms.get_positions()[i_un]
-            # Compute all pairwise distances using broadcasting
-            # Shape: (n_atoms, n_atoms, 3) -> (n_atoms, n_atoms)
-            diff = positions[:, None, :] - positions[None, :, :]
-            distances = np.linalg.norm(diff, axis=2)
-            # Extract upper triangle (excluding diagonal) to get unique pairs
-            triu_indices = np.triu_indices(len(i_un), k=1)
-            d = distances[triu_indices].tolist()
+            d = pdist(positions).tolist()
         else:
             # For periodic systems or when mic=True, use original method
             # as get_distance handles PBC correctly

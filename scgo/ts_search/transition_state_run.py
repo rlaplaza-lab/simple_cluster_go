@@ -40,7 +40,6 @@ from scgo.utils.helpers import (
     auto_niter_ts,
     filter_unique_minima,
     get_cluster_formula,
-    get_optimizer_db_filename,
     validate_pair_id,
 )
 from scgo.utils.logging import configure_logging, get_logger
@@ -179,7 +178,6 @@ def run_transition_state_search(
     neb_perturb_sigma: float = 0.0,
     neb_interpolation_mic: bool = False,
     neb_tangent_method: str = DEFAULT_NEB_TANGENT_METHOD,
-    neb_retry_on_endpoint: bool = True,
     use_torchsim: bool = False,
     use_parallel_neb: bool = False,
     torchsim_params: dict | None = None,
@@ -623,7 +621,6 @@ def run_transition_state_search(
                         align_endpoints=neb_align_endpoints,
                         perturb_sigma=neb_perturb_sigma,
                         neb_interpolation_mic=neb_interpolation_mic,
-                        neb_retry_on_endpoint=neb_retry_on_endpoint,
                         neb_tangent_method=neb_tangent_method,
                         use_torchsim=use_torchsim,
                         torchsim_params=torchsim_params,
@@ -779,40 +776,6 @@ def run_transition_state_search(
                         db_candidate = basename_to_path[src_db_i]
                     elif src_db_j and src_db_j in basename_to_path:
                         db_candidate = basename_to_path[src_db_j]
-                    else:
-                        # Try to infer DB by optimizer name in metadata (e.g. 'bh' -> 'bh_go.db')
-                        meta_i = minima[i][1].info.get("metadata", {})
-                        meta_j = minima[j][1].info.get("metadata", {})
-                        opt_i = meta_i.get("optimizer")
-                        opt_j = meta_j.get("optimizer")
-
-                        for opt in (opt_i, opt_j):
-                            if opt:
-                                mapped = get_optimizer_db_filename(opt)
-                                if mapped in basename_to_path:
-                                    db_candidate = basename_to_path[mapped]
-                                    break
-
-                        # Next try to match by run_id/trial info in metadata
-                        if db_candidate is None:
-                            run_id_i = meta_i.get("run_id")
-                            trial_i = meta_i.get("trial") or meta_i.get("trial_id")
-                            run_id_j = meta_j.get("run_id")
-                            trial_j = meta_j.get("trial") or meta_j.get("trial_id")
-
-                            def _find_by_run_trial(run_id, trial):
-                                if not run_id:
-                                    return None
-                                for full in basename_to_path.values():
-                                    if run_id in full and (
-                                        trial is None or f"trial_{trial}" in full
-                                    ):
-                                        return full
-                                return None
-
-                            db_candidate = _find_by_run_trial(
-                                run_id_i, trial_i
-                            ) or _find_by_run_trial(run_id_j, trial_j)
 
                     if db_candidate is None:
                         logger.warning(

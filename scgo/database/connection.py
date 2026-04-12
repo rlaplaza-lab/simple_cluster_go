@@ -23,25 +23,46 @@ from scgo.utils.logging import get_logger
 logger = get_logger(__name__)
 
 
+def apply_sqlite_pragmas(
+    conn: sqlite3.Connection,
+    *,
+    wal_mode: bool = False,
+    busy_timeout: int = 30000,
+    cache_size_mb: int = 64,
+) -> None:
+    """Apply PRAGMAs appropriate for SQLite databases in SCGO.
+
+    Modes:
+      wal_mode=False (HPC default): rollback journal, memory temp, delete on close.
+      wal_mode=True: write-ahead-logging, normal sync, autocheckpoint.
+    """
+    if wal_mode:
+        with contextlib.suppress(sqlite3.OperationalError):
+            conn.execute("PRAGMA journal_mode=WAL;")
+            conn.execute("PRAGMA synchronous=NORMAL;")
+            conn.execute(f"PRAGMA busy_timeout={busy_timeout};")
+            conn.execute("PRAGMA temp_store=MEMORY;")
+            conn.execute(f"PRAGMA cache_size=-{cache_size_mb * 1024};")
+            conn.execute("PRAGMA wal_autocheckpoint=1000;")
+    else:
+        with contextlib.suppress(sqlite3.OperationalError):
+            conn.execute(f"PRAGMA busy_timeout={busy_timeout};")
+        with contextlib.suppress(sqlite3.OperationalError):
+            conn.execute("PRAGMA journal_mode=DELETE;")
+        with contextlib.suppress(sqlite3.OperationalError):
+            conn.execute("PRAGMA temp_store=MEMORY;")
+        with contextlib.suppress(sqlite3.OperationalError):
+            conn.execute(f"PRAGMA cache_size=-{cache_size_mb * 1024};")
+
+
 def apply_shared_filesystem_sqlite_pragmas(
     conn: sqlite3.Connection,
     *,
     cache_size_mb: int = 64,
     wal_mode: bool = False,
 ) -> None:
-    """Apply PRAGMAs appropriate for SQLite on shared cluster filesystems.
-
-    When ``wal_mode`` is False (HPC default), uses rollback journal and avoids WAL
-    sidecar files. ``busy_timeout`` is applied separately via ``_apply_busy_timeout``.
-    """
-    if wal_mode:
-        return
-    with contextlib.suppress(sqlite3.OperationalError):
-        conn.execute("PRAGMA journal_mode=DELETE;")
-    with contextlib.suppress(sqlite3.OperationalError):
-        conn.execute("PRAGMA temp_store=MEMORY;")
-    with contextlib.suppress(sqlite3.OperationalError):
-        conn.execute(f"PRAGMA cache_size=-{cache_size_mb * 1024};")
+    """[DEPRECATED] Use apply_sqlite_pragmas instead."""
+    apply_sqlite_pragmas(conn, wal_mode=wal_mode, cache_size_mb=cache_size_mb)
 
 
 @contextmanager
@@ -61,12 +82,12 @@ def get_connection(
     if wal_mode and os.path.exists(db_path):
         try:
             with sqlite3.connect(db_path, timeout=busy_timeout / 1000.0) as conn:
-                conn.execute("PRAGMA journal_mode=WAL;")
-                conn.execute("PRAGMA synchronous=NORMAL;")
-                conn.execute(f"PRAGMA busy_timeout={busy_timeout};")
-                conn.execute("PRAGMA temp_store=MEMORY;")
-                conn.execute(f"PRAGMA cache_size=-{cache_size_mb * 1024};")
-                conn.execute("PRAGMA wal_autocheckpoint=1000;")
+                apply_sqlite_pragmas(
+                    conn,
+                    wal_mode=True,
+                    busy_timeout=busy_timeout,
+                    cache_size_mb=cache_size_mb,
+                )
                 conn.commit()
         except sqlite3.OperationalError as e:
             logger.warning(f"Failed to configure SQLite for {db_path}: {e}")

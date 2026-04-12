@@ -286,9 +286,19 @@ class CutAndSplicePairing(OffspringCreator):
                 ]
             )
             shifts = [0.0]
-            if len(projections) > 0:
-                for quantile in (0.35, 0.5, 0.65):
-                    shifts.append(float(np.quantile(projections, quantile)))
+            if len(projections) > 1:
+                proj_sorted = np.sort(projections)
+                gaps = proj_sorted[1:] - proj_sorted[:-1]
+                midpoints = proj_sorted[:-1] + gaps / 2.0
+
+                # Use the midpoints of the 3 largest gaps
+                largest_gap_indices = np.argsort(gaps)[-3:]
+                shifts.extend([float(midpoints[idx]) for idx in largest_gap_indices])
+
+                # Still include the median as a robust central fallback
+                shifts.append(float(np.median(projections)))
+            elif len(projections) == 1:
+                shifts.append(float(projections[0]))
 
             cut_normal = np.linalg.solve(cell_array.T, cut_normal_cart)
             for shift in shifts:
@@ -339,8 +349,8 @@ class CutAndSplicePairing(OffspringCreator):
         if indi is None:
             return indi, desc
         indi = self.initialize_individual(f, indi)
-        indi.info["data"]["parents"] = [f.info["confid"],
-                                        m.info["confid"]]
+        indi.info["data"]["parents"] = [f.info.get("confid"),
+                                        m.info.get("confid")]
 
         return self.finalize_individual(indi), desc
 

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import contextlib
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
@@ -19,16 +18,8 @@ logger = get_logger(__name__)
 
 
 def _pes_forces_from_relaxed(relaxed_atoms: Any) -> np.ndarray | None:
-    """Return PES forces from TorchSim-relaxed atoms, or None if unavailable."""
-    forces = relaxed_atoms.arrays.get("forces")
-    if forces is not None and getattr(forces, "size", 0) > 0:
-        return np.asarray(forces)
-    if relaxed_atoms.calc is not None:
-        with contextlib.suppress(AttributeError, NotImplementedError):
-            f = relaxed_atoms.get_forces()
-            if f is not None and getattr(f, "size", 0) > 0:
-                return np.asarray(f)
-    return None
+    """Return PES forces from TorchSim-relaxed atoms."""
+    return relaxed_atoms.get_forces() if relaxed_atoms.calc is not None else None
 
 
 class ParallelNEBBatch:

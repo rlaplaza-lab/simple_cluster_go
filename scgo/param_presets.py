@@ -335,7 +335,6 @@ def get_ts_search_params(
             "neb_perturb_sigma": 0.0,
             "neb_interpolation_mic": False,
             # Enable retry/fallback when band slides to an endpoint (recommended).
-            "neb_retry_on_endpoint": True,
             "use_torchsim": True,
             "torchsim_batch_size": 5,
             "torchsim_fmax": 0.05,
@@ -410,41 +409,46 @@ def get_ts_run_kwargs(ts_params: dict[str, Any] | None = None) -> dict[str, Any]
         logger=None,
     )
 
-    return {
+    kwargs = {
         "params": {
             "calculator": ts_params["calculator"],
             "calculator_kwargs": ts_params["calculator_kwargs"],
         },
-        "max_pairs": ts_params.get("max_pairs"),
-        "energy_gap_threshold": ts_params.get("energy_gap_threshold"),
-        "similarity_tolerance": ts_params.get("similarity_tolerance"),
-        "similarity_pair_cor_max": ts_params.get("similarity_pair_cor_max"),
-        "neb_n_images": ts_params.get("neb_n_images"),
-        "neb_spring_constant": ts_params.get("neb_spring_constant"),
-        "neb_fmax": ts_params.get("neb_fmax"),
-        "neb_steps": ts_params.get("neb_steps"),
-        "neb_align_endpoints": ts_params.get("neb_align_endpoints"),
-        "neb_perturb_sigma": ts_params.get("neb_perturb_sigma"),
-        "neb_interpolation_mic": ts_params.get("neb_interpolation_mic", False),
-        "neb_retry_on_endpoint": ts_params.get("neb_retry_on_endpoint", True),
         "use_torchsim": use_ts,
-        # TS-specific post-processing knobs
-        "dedupe_minima": ts_params.get("dedupe_minima", True),
-        "minima_energy_tolerance": ts_params.get(
-            "minima_energy_tolerance", DEFAULT_ENERGY_TOLERANCE
-        ),
+        "use_parallel_neb": use_pn,
         "torchsim_params": {
-            # Map user-facing ts params to TorchSimBatchRelaxer-compatible keys
             "force_tol": ts_params.get("torchsim_fmax"),
             "max_steps": ts_params.get("torchsim_max_steps"),
         },
-        "use_parallel_neb": use_pn,
-        "neb_climb": ts_params.get("neb_climb", False),
-        "neb_interpolation_method": ts_params.get("neb_interpolation_method", "idpp"),
-        "neb_tangent_method": ts_params.get(
-            "neb_tangent_method", DEFAULT_NEB_TANGENT_METHOD
-        ),
-        "validate_ts_by_frequency": ts_params.get("validate_ts_by_frequency", False),
-        "imag_freq_threshold": ts_params.get("imag_freq_threshold", 50.0),
-        "surface_config": ts_params.get("surface_config"),
     }
+
+    direct_keys = [
+        "max_pairs",
+        "energy_gap_threshold",
+        "similarity_tolerance",
+        "similarity_pair_cor_max",
+        "neb_n_images",
+        "neb_spring_constant",
+        "neb_fmax",
+        "neb_steps",
+        "neb_align_endpoints",
+        "neb_perturb_sigma",
+        "surface_config",
+    ]
+    for key in direct_keys:
+        kwargs[key] = ts_params.get(key)
+
+    default_keys = {
+        "neb_interpolation_mic": False,
+        "dedupe_minima": True,
+        "minima_energy_tolerance": DEFAULT_ENERGY_TOLERANCE,
+        "neb_climb": False,
+        "neb_interpolation_method": "idpp",
+        "neb_tangent_method": DEFAULT_NEB_TANGENT_METHOD,
+        "validate_ts_by_frequency": False,
+        "imag_freq_threshold": 50.0,
+    }
+    for key, def_val in default_keys.items():
+        kwargs[key] = ts_params.get(key, def_val)
+
+    return kwargs

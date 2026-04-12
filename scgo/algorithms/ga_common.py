@@ -520,10 +520,11 @@ def update_mutation_weights(
         Updated OperationSelector with new weights.
     """
     operator_weights = adaptive_config["operator_weights"]
+    index_to_name = {idx: name for name, idx in name_map.items()}
 
     weights: list[float] = []
     for i in range(len(operators_list)):
-        name: str | None = next((k for k, v in name_map.items() if v == i), None)
+        name = index_to_name.get(i)
         if name and name in operator_weights:
             weights.append(operator_weights[name])
         else:

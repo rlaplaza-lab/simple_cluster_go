@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import numpy as np
-from ase import Atoms
 from numpy.random import Generator
 
 
@@ -19,11 +18,10 @@ def random_unit_vector(rng: Generator) -> np.ndarray:
 
 
 def outermost_point_along_normal(
-    core: Atoms, com: np.ndarray, n: np.ndarray
+    pos: np.ndarray, relative_pos: np.ndarray, n: np.ndarray
 ) -> np.ndarray:
-    """Return the core atom position with largest projection along ``n`` from ``com``."""
-    pos = core.get_positions()
-    dots = (pos - com) @ n
+    """Return the core atom position with largest projection along ``n`` from center."""
+    dots = relative_pos @ n
     i = int(np.argmax(dots))
     return pos[i].copy()
 

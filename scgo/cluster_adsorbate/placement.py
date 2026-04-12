@@ -83,18 +83,23 @@ def place_fragment_on_cluster(
         if not (0 <= i < n_frag and 0 <= j < n_frag) or i == j:
             raise ValueError(f"bond_axis={bond_axis} invalid for this fragment")
 
-    com = np.mean(core.get_positions(), axis=0)
+    core_pos = core.get_positions()
+    com = np.mean(core_pos, axis=0)
+    relative_core_pos = core_pos - com
     blmin = blmin_for_core_and_fragment(core, fragment_template, config.blmin_ratio)
     symbols = fragment_template.get_chemical_symbols()
 
+    # Precompute base geometry relative to anchor
+    base_frag_pos = fragment_template.get_positions().astype(float).copy()
+    base_frag_pos -= base_frag_pos[anchor_index]
+
     for _ in range(config.max_placement_attempts):
         n_dir = random_unit_vector(rng)
-        anchor_surf = outermost_point_along_normal(core, com, n_dir)
+        anchor_surf = outermost_point_along_normal(core_pos, relative_core_pos, n_dir)
         h_off = float(rng.uniform(config.height_min, config.height_max))
         target = anchor_surf + h_off * n_dir
 
-        pos = fragment_template.get_positions().astype(float).copy()
-        pos -= pos[anchor_index]
+        pos = base_frag_pos.copy()
 
         if n_frag > 1:
             if bond_axis is not None:

@@ -30,15 +30,12 @@ from tests.test_utils import (
 )
 
 
-def test_bh_go_reproducibility(tmp_path):
-    comp = ["Pt", "Pt", "Pt"]
-    seed = 123
+import pytest
 
-    minima1, minima2 = run_algorithm_reproducibility_test(
+@pytest.mark.parametrize("algorithm,seed,kwargs", [
+    (
         bh_go,
-        comp,
-        seed,
-        tmp_path,
+        123,
         {
             "optimizer": LBFGS,
             "temperature": 0.01,
@@ -47,21 +44,11 @@ def test_bh_go_reproducibility(tmp_path):
             "niter_local_relaxation": 8,
             "dr": 0.2,
             "move_fraction": 0.5,
-        },
-    )
-
-    assert compare_minima_lists(minima1, minima2)
-
-
-def test_ga_go_reproducibility(tmp_path):
-    comp = ["Pt", "Pt", "Pt"]
-    seed = 456
-
-    minima1, minima2 = run_algorithm_reproducibility_test(
+        }
+    ),
+    (
         ga_go,
-        comp,
-        seed,
-        tmp_path,
+        456,
         {
             "population_size": 4,
             "niter": 2,
@@ -72,7 +59,18 @@ def test_ga_go_reproducibility(tmp_path):
             "energy_tolerance": 0.1,
             "n_jobs_population_init": -2,  # Parallel for tests
             "mutation_probability": 0.2,
-        },
+        }
+    )
+])
+def test_algorithm_reproducibility(tmp_path, algorithm, seed, kwargs):
+    comp = ["Pt", "Pt", "Pt"]
+
+    minima1, minima2 = run_algorithm_reproducibility_test(
+        algorithm,
+        comp,
+        seed,
+        tmp_path,
+        kwargs,
     )
 
     assert compare_minima_lists(minima1, minima2)

@@ -18,7 +18,6 @@ from scgo.ts_search.transition_state import (
     find_transition_state,
     interpolate_path,
     save_neb_result,
-    setup_neb_path,
 )
 from scgo.ts_search.transition_state_io import (
     select_structure_pairs,
@@ -289,81 +288,6 @@ def test_select_structure_pairs_ignores_fixed_slab_atom_differences():
     assert (0, 2) in pairs
 
 
-def test_setup_neb_path(h2_reactant, h2_product):
-    """Test NEB path setup with calculator attachment."""
-    calc = EMT()
-    neb = setup_neb_path(h2_reactant, h2_product, calculator=calc, n_images=3)
-
-    # Check NEB object created
-    assert neb is not None
-    assert len(neb.images) == 5  # 3 intermediate + 2 endpoints
-
-    # Check calculators attached
-    for img in neb.images:
-        assert img.calc is not None
-
-    # Ensure calculators are not the same object across images (avoid shared state)
-    ids = [id(img.calc) for img in neb.images]
-    assert len(set(ids)) == len(ids)
-
-
-def test_setup_neb_path_deepcopy_behavior(h2_reactant, h2_product):
-    """Verify that calculators are deep-copied for NEB images.
-
-    This ensures safe behavior with ML calculators which may be unsafe to
-    reuse across multiple Atoms instances concurrently. Matches the policy
-    used in GA (direct assignment for sequential use) vs NEB (deepcopy for
-    concurrent use).
-    """
-
-    class DummyCalc(EMT):
-        def __init__(self):
-            super().__init__()
-            self.uid = id(self)
-
-        def __deepcopy__(self, memo):
-            # Return a new instance with a different uid
-            new = DummyCalc()
-            return new
-
-    calc = DummyCalc()
-
-    neb = setup_neb_path(h2_reactant, h2_product, calculator=calc, n_images=3)
-
-    # Calculators were attached
-    for img in neb.images:
-        assert img.calc is not None
-        assert isinstance(img.calc, DummyCalc)
-
-    # Ensure each calc is a distinct object and not the original instance
-    ids = [id(img.calc) for img in neb.images]
-    assert len(set(ids)) == len(ids)
-    assert all(id(calc) != cid for cid in ids)
-
-
-def test_setup_neb_path_no_calculator(h2_reactant, h2_product):
-    """Test NEB path setup without calculator."""
-    neb = setup_neb_path(h2_reactant, h2_product, calculator=None, n_images=3)
-
-    assert neb is not None
-    assert len(neb.images) == 5
-
-
-def test_setup_neb_path_passes_k_and_climb(h2_reactant, h2_product):
-    """Ensure `k` and `climb` are forwarded to the ASE NEB created by setup_neb_path."""
-    neb = setup_neb_path(
-        h2_reactant, h2_product, calculator=None, n_images=3, k=5.0, climb=True
-    )
-
-    # ASE NEB may store `k` as a scalar or a per-spring sequence; accept both
-    k_val = getattr(neb, "k", None)
-    if hasattr(k_val, "__iter__") and not isinstance(k_val, (str, bytes)):
-        assert all(float(x) == 5.0 for x in k_val)
-    else:
-        assert float(k_val) == 5.0
-    assert getattr(neb, "climb", None) is True
-
-
 def test_find_ts_simple(h2_reactant, h2_product, temp_output_dir):
     """Test basic TS finding with EMT calculator."""
     result = find_transition_state(
@@ -377,7 +301,6 @@ def test_find_ts_simple(h2_reactant, h2_product, temp_output_dir):
         neb_steps=200,
         verbosity=0,
         # Retry bumps n_images to >=5; keep a single attempt so result matches n_images=3.
-        neb_retry_on_endpoint=False,
     )
 
     # Accept either a successful NEB or a correctly-detected endpoint case
@@ -435,7 +358,6 @@ def test_find_transition_state_auto_retry_recovers_cu3(
         neb_steps=200,
         verbosity=0,
         rng=np.random.default_rng(0),
-        # neb_retry_on_endpoint is True by default
     )
 
     # Expect the single conservative retry to have been attempted and to succeed
@@ -520,7 +442,6 @@ def test_find_transition_state_defaults_reflect_promoted_retry(
         verbosity=0,
         # Retry promotes climb=True on the second attempt; final `result` then
         # echoes retry params, which is environment-dependent and flaky in CI.
-        neb_retry_on_endpoint=False,
     )
 
     assert result.get("spring_constant") == pytest.approx(0.1)

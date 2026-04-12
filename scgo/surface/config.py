@@ -100,6 +100,25 @@ class SurfaceSystemConfig:
             )
         if len(self.slab) == 0:
             raise ValueError("slab must contain at least one atom")
+
+        if not any(self.slab.pbc):
+            raise ValueError("Slab must have at least one periodic dimension.")
+
+        if not all(self.slab.pbc):
+            import warnings
+
+            warnings.warn("Extending slab periodicity to 3D for VASP compatibility.", stacklevel=2)
+            self.slab.pbc = [True, True, True]
+
+        vacuum_length = self.slab.cell.lengths()[self.surface_normal_axis]
+        if vacuum_length < 10.0:
+            import warnings
+
+            warnings.warn(
+                f"Slab vacuum size ({vacuum_length:.2f} \u00c5) on axis {self.surface_normal_axis} "
+                "might be too small to prevent periodic interaction.", stacklevel=2
+            )
+
         if (
             self.n_fix_bottom_slab_layers is not None
             and self.n_fix_bottom_slab_layers < 1

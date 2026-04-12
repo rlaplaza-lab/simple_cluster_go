@@ -33,7 +33,7 @@ def count_looks_like(a, all_cand, comp):
     """Utility method for counting occurrences."""
     n = 0
     for b in all_cand:
-        if a.info["confid"] == b.info["confid"]:
+        if a.info.get("confid") == b.info.get("confid"):
             continue
         if comp.looks_like(a, b):
             n += 1
@@ -148,8 +148,8 @@ class Population:
         """
         (participation, pairs) = self.dc.get_participation_in_pairing()
         for a in self.pop:
-            if a.info["confid"] in participation:
-                a.info["n_paired"] = participation[a.info["confid"]]
+            if a.info.get("confid") in participation:
+                a.info["n_paired"] = participation[a.info.get("confid")]
             else:
                 a.info["n_paired"] = 0
         self.pairs = pairs
@@ -266,8 +266,8 @@ class Population:
             f = [0.5 * (1. - tanh(2. * (scores[i] - max_s) / T - 1.))
                  for i in indecies]
         if with_history:
-            M = [float(self.pop[i].info["n_paired"]) for i in indecies]
-            L = [float(self.pop[i].info["looks_like"]) for i in indecies]
+            M = [float(self.pop[i].info.get("n_paired", 0)) for i in indecies]
+            L = [float(self.pop[i].info.get("looks_like", 0)) for i in indecies]
             f = [f[i] * 1. / sqrt(1. + M[i]) * 1. / sqrt(1. + L[i])
                  for i in range(len(f))]
         return f
@@ -297,7 +297,7 @@ class Population:
         used_before = False
         _maxiter = 10000
         _outer_iter = 0
-        while c1.info["confid"] == c2.info["confid"] and not used_before:
+        while c1.info.get("confid") == c2.info.get("confid") or used_before:
             _outer_iter += 1
             if _outer_iter > _maxiter:
                 # Exhausted attempts; return best effort pair.
@@ -328,8 +328,8 @@ class Population:
                     c2 = self.pop[t]
                     nnf = False
 
-            c1id = c1.info["confid"]
-            c2id = c2.info["confid"]
+            c1id = c1.info.get("confid")
+            c2id = c2.info.get("confid")
             used_before = (min([c1id, c2id]), max([c1id, c2id])) in self.pairs
         return (c1.copy(), c2.copy())
 
@@ -541,8 +541,8 @@ class FitnessStrategyPopulation(Population):
 
         # Apply history-based penalties if requested
         if with_history:
-            M = [float(self.pop[i].info["n_paired"]) for i in indecies]
-            L = [float(self.pop[i].info["looks_like"]) for i in indecies]
+            M = [float(self.pop[i].info.get("n_paired", 0)) for i in indecies]
+            L = [float(self.pop[i].info.get("looks_like", 0)) for i in indecies]
             fitness_values = [
                 fitness_values[j] * 1. / sqrt(1. + M[j]) * 1. / sqrt(1. + L[j])
                 for j in range(len(fitness_values))

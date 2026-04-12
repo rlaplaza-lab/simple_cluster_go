@@ -352,47 +352,6 @@ def interpolate_path(
     return images
 
 
-def setup_neb_path(
-    atoms1: Atoms,
-    atoms2: Atoms,
-    calculator: Calculator | None = None,
-    n_images: int = 5,
-    method: str = "idpp",
-    *,
-    align_endpoints: bool = True,
-    perturb_sigma: float = 0.0,
-    rng: np.random.Generator | None = None,
-    k: float | list[float] = 0.1,
-    climb: bool = False,
-    neb_tangent_method: str = DEFAULT_NEB_TANGENT_METHOD,
-) -> NEB:
-    """Create NEB with interpolated images and optional calculator.
-
-    `align_endpoints` and `perturb_sigma` are forwarded to `interpolate_path()`.
-    New optional parameters `k` and `climb` are forwarded to the ASE `NEB`
-    constructor so callers can control spring strength and climbing-image.
-    ``neb_tangent_method`` sets the NEB tangent method (default ``improvedtangent``).
-    """
-    validate_atoms(atoms1)
-    validate_atoms(atoms2)
-
-    images = interpolate_path(
-        atoms1,
-        atoms2,
-        n_images=n_images,
-        method=method,
-        align_endpoints=align_endpoints,
-        perturb_sigma=perturb_sigma,
-        rng=rng,
-    )
-
-    _attach_calculator_to_images(images, calculator)
-
-    neb = NEB(images, k=k, climb=climb, method=neb_tangent_method)
-
-    return neb
-
-
 def find_transition_state(
     atoms1: Atoms,
     atoms2: Atoms,
@@ -414,7 +373,6 @@ def find_transition_state(
     align_endpoints: bool = True,
     perturb_sigma: float = 0.0,
     neb_interpolation_mic: bool = False,
-    neb_retry_on_endpoint: bool = True,
     validate_ts_by_frequency: bool = False,
     imag_freq_threshold: float = 50.0,
     neb_tangent_method: str = DEFAULT_NEB_TANGENT_METHOD,
@@ -727,110 +685,6 @@ def find_transition_state(
                     max_energy_idx,
                 )
 
-            if neb_retry_on_endpoint:
-                if verbosity >= 1:
-                    logger.info(
-                        "Attempting single conservative retry for pair %s to recover interior TS",
-                        pair_id,
-                    )
-
-                result["retry_history"].append(
-                    {
-                        "attempt": 0,
-                        "status": result["status"],
-                        "neb_converged": result["neb_converged"],
-                        "ts_image_index": result.get("ts_image_index"),
-                        "error": result.get("error"),
-                        "params": {
-                            "n_images": n_images,
-                            "spring_constant": spring_constant,
-                            "climb": climb,
-                            "perturb_sigma": perturb_sigma,
-                        },
-                    }
-                )
-
-                retry_climb = climb if neb_interpolation_mic else True
-                attempt = {
-                    "climb": retry_climb,
-                    "n_images": max(n_images, 5),
-                    "spring_constant": max(spring_constant, 0.1),
-                    "perturb_sigma": max(perturb_sigma, 0.01),
-                    "neb_steps": max(int(neb_steps), 500),
-                    "interpolation_method": "idpp",
-                }
-
-                if verbosity >= 1:
-                    logger.info(
-                        "Retry #1 for %s: n_images=%d, k=%.3g, climb=%s, perturb=%.3g, neb_steps=%d",
-                        pair_id,
-                        attempt["n_images"],
-                        attempt["spring_constant"],
-                        attempt["climb"],
-                        attempt["perturb_sigma"],
-                        attempt["neb_steps"],
-                    )
-
-                retry_res = find_transition_state(
-                    atoms1,
-                    atoms2,
-                    calculator,
-                    output_dir,
-                    pair_id,
-                    rng=rng,
-                    n_images=attempt["n_images"],
-                    spring_constant=attempt["spring_constant"],
-                    optimizer=optimizer,
-                    fmax=fmax,
-                    neb_steps=attempt["neb_steps"],
-                    trajectory=trajectory,
-                    verbosity=verbosity - 1 if verbosity > 0 else 0,
-                    use_torchsim=use_torchsim,
-                    torchsim_params=torchsim_params,
-                    climb=attempt["climb"],
-                    interpolation_method=attempt.get(
-                        "interpolation_method", interpolation_method
-                    ),
-                    align_endpoints=align_endpoints,
-                    perturb_sigma=attempt["perturb_sigma"],
-                    neb_interpolation_mic=neb_interpolation_mic,
-                    neb_retry_on_endpoint=False,
-                    validate_ts_by_frequency=validate_ts_by_frequency,
-                    imag_freq_threshold=imag_freq_threshold,
-                    neb_tangent_method=neb_tangent_method,
-                )
-
-                result["retry_history"].append(
-                    {
-                        "attempt": 1,
-                        "status": retry_res.get("status"),
-                        "neb_converged": retry_res.get("neb_converged"),
-                        "ts_image_index": retry_res.get("ts_image_index"),
-                        "error": retry_res.get("error"),
-                        "params": {
-                            "n_images": attempt["n_images"],
-                            "spring_constant": attempt["spring_constant"],
-                            "climb": attempt["climb"],
-                            "perturb_sigma": attempt["perturb_sigma"],
-                        },
-                    }
-                )
-
-                if retry_res.get("status") == "success" and retry_res.get(
-                    "ts_image_index"
-                ) not in (0, attempt["n_images"] + 1):
-                    retry_res["retry_attempted"] = True
-                    retry_res["retry_success"] = True
-                    retry_res["retry_history"] = result["retry_history"]
-                    return retry_res
-
-                result["retry_attempted"] = True
-                result["retry_success"] = False
-
-        else:
-            # Only mark overall status as success when the NEB actually converged.
-            if result["neb_converged"]:
-                result["status"] = "success"
             else:
                 result["status"] = "failed"
 

@@ -112,7 +112,7 @@ class RattleMutation(OffspringCreator):
             return indi, "mutation: rattle"
 
         indi = self.initialize_individual(f, indi)
-        indi.info["data"]["parents"] = [f.info["confid"]]
+        indi.info["data"]["parents"] = [f.info.get("confid")]
 
         return self.finalize_individual(indi), "mutation: rattle"
 
@@ -206,7 +206,7 @@ class AnisotropicRattleMutation(OffspringCreator):
             return indi, "mutation: anisotropic_rattle"
 
         indi = self.initialize_individual(f, indi)
-        indi.info["data"]["parents"] = [f.info["confid"]]
+        indi.info["data"]["parents"] = [f.info.get("confid")]
 
         return self.finalize_individual(indi), "mutation: anisotropic_rattle"
 
@@ -310,7 +310,7 @@ class OverlapReliefMutation(OffspringCreator):
             return indi, "mutation: overlap_relief"
 
         indi = self.initialize_individual(f, indi)
-        indi.info["data"]["parents"] = [f.info["confid"]]
+        indi.info["data"]["parents"] = [f.info.get("confid")]
 
         return self.finalize_individual(indi), "mutation: overlap_relief"
 
@@ -452,7 +452,7 @@ class PermutationMutation(OffspringCreator):
             return indi, "mutation: permutation"
 
         indi = self.initialize_individual(f, indi)
-        indi.info["data"]["parents"] = [f.info["confid"]]
+        indi.info["data"]["parents"] = [f.info.get("confid")]
 
         return self.finalize_individual(indi), "mutation: permutation"
 
@@ -589,7 +589,7 @@ class ShellSwapMutation(OffspringCreator):
             return indi, "mutation: shell_swap"
 
         indi = self.initialize_individual(f, indi)
-        indi.info["data"]["parents"] = [f.info["confid"]]
+        indi.info["data"]["parents"] = [f.info.get("confid")]
 
         return self.finalize_individual(indi), "mutation: shell_swap"
 
@@ -708,7 +708,7 @@ class MirrorMutation(OffspringCreator):
 
     """
 
-    def __init__(self, blmin, n_top, reflect=False, rng=None,
+    def __init__(self, blmin, n_top, reflect=True, rng=None,
                  verbose=False, max_tries=1000):
         rng = _ensure_rng(rng)
         OffspringCreator.__init__(self, verbose, rng=rng)
@@ -728,7 +728,7 @@ class MirrorMutation(OffspringCreator):
             return indi, "mutation: mirror"
 
         indi = self.initialize_individual(f, indi)
-        indi.info["data"]["parents"] = [f.info["confid"]]
+        indi.info["data"]["parents"] = [f.info.get("confid")]
 
         return self.finalize_individual(indi), "mutation: mirror"
 
@@ -903,7 +903,7 @@ class RotationalMutation(OffspringCreator):
             return indi, "mutation: rotational"
 
         indi = self.initialize_individual(f, indi)
-        indi.info["data"]["parents"] = [f.info["confid"]]
+        indi.info["data"]["parents"] = [f.info.get("confid")]
 
         return self.finalize_individual(indi), "mutation: rotational"
 
@@ -1077,6 +1077,8 @@ class FlatteningMutation(OffspringCreator):
         atomic_numbers,
         clearance_margin,
     ):
+        from scipy.spatial.distance import pdist, squareform
+
         n_atoms = len(projected_positions)
         if n_atoms <= 1:
             return np.zeros(n_atoms)
@@ -1086,32 +1088,30 @@ class FlatteningMutation(OffspringCreator):
         ordered_positions = projected_positions[order]
         ordered_numbers = atomic_numbers[order]
 
-        required_offsets = np.zeros((n_atoms, n_atoms), dtype=float)
+        # Vectorize lateral distance calculations
+        lateral_distances = squareform(pdist(ordered_positions))
+
+        # Vectorize blmin lookup
+        blmin_matrix = np.zeros((n_atoms, n_atoms), dtype=float)
         for i in range(n_atoms):
             for j in range(i + 1, n_atoms):
-                required = (
-                    _get_blmin_distance(
-                        self.blmin,
-                        ordered_numbers[i],
-                        ordered_numbers[j],
-                    )
-                    + clearance_margin
-                )
-                lateral_distance = np.linalg.norm(ordered_positions[j] - ordered_positions[i])
-                if lateral_distance + 1e-12 < required:
-                    required_offsets[i, j] = np.sqrt(
-                        max(required * required - lateral_distance * lateral_distance, 0.0)
-                    )
+                blmin_matrix[i, j] = _get_blmin_distance(self.blmin, ordered_numbers[i], ordered_numbers[j])
 
+        required_distances = blmin_matrix + clearance_margin
+
+        # Calculate required offsets only for upper triangle
+        required_offsets = np.zeros((n_atoms, n_atoms), dtype=float)
+        mask = lateral_distances + 1e-12 < required_distances
+        sq_diff = required_distances**2 - lateral_distances**2
+        required_offsets[mask] = np.sqrt(np.maximum(sq_diff[mask], 0.0))
+
+        # Sequential solve optimized with vectorized lookback
         solved_offsets = ordered_targets
         for i in range(1, n_atoms):
-            min_allowed = solved_offsets[i]
-            for j in range(i):
-                min_allowed = max(
-                    min_allowed,
-                    solved_offsets[j] + required_offsets[j, i],
-                )
-            solved_offsets[i] = min_allowed
+            solved_offsets[i] = max(
+                solved_offsets[i],
+                np.max(solved_offsets[:i] + required_offsets[:i, i])
+            )
 
         solved_offsets -= np.mean(solved_offsets)
         offsets = np.empty(n_atoms, dtype=float)
@@ -1165,7 +1165,7 @@ class FlatteningMutation(OffspringCreator):
             return indi, "mutation: flattening"
 
         indi = self.initialize_individual(f, indi)
-        indi.info["data"]["parents"] = [f.info["confid"]]
+        indi.info["data"]["parents"] = [f.info.get("confid")]
 
         return self.finalize_individual(indi), "mutation: flattening"
 
@@ -1257,19 +1257,29 @@ class BreathingMutation(OffspringCreator):
         self.min_inputs = 1
 
     def _minimum_feasible_scale(self, positions, atomic_numbers):
-        lower_bound = self.scale_min
-        for i in range(len(positions)):
-            for j in range(i + 1, len(positions)):
-                distance = np.linalg.norm(positions[j] - positions[i])
-                if distance <= 1e-12:
-                    return np.inf
-                required = _get_blmin_distance(
-                    self.blmin,
-                    atomic_numbers[i],
-                    atomic_numbers[j],
-                )
-                lower_bound = max(lower_bound, required / distance)
-        return lower_bound
+        from scipy.spatial.distance import pdist
+
+        n_atoms = len(positions)
+        if n_atoms <= 1:
+            return self.scale_min
+
+        # Compute pairwise distances
+        distances = pdist(positions)
+        if np.any(distances <= 1e-12):
+            return np.inf
+
+        # Compute pairwise blmin requirements
+        blmin_matrix = np.zeros((n_atoms, n_atoms), dtype=float)
+        for i in range(n_atoms):
+            for j in range(i + 1, n_atoms):
+                blmin_matrix[i, j] = _get_blmin_distance(self.blmin, atomic_numbers[i], atomic_numbers[j])
+
+        # We only need the condensed upper triangle for blmin
+        required_condensed = blmin_matrix[np.triu_indices(n_atoms, k=1)]
+
+        # Calculate minimum required scale to avoid clashes
+        lower_bound = np.max(required_condensed / distances)
+        return max(self.scale_min, lower_bound)
 
     def _candidate_scales(self, positions, atomic_numbers, slab):
         feasible_lower = self._minimum_feasible_scale(positions, atomic_numbers)
@@ -1335,7 +1345,7 @@ class BreathingMutation(OffspringCreator):
         if indi is None:
             return indi, "mutation: breathing"
         indi = self.initialize_individual(f, indi)
-        indi.info["data"]["parents"] = [f.info["confid"]]
+        indi.info["data"]["parents"] = [f.info.get("confid")]
         return self.finalize_individual(indi), "mutation: breathing"
 
     def mutate(self, atoms):
@@ -1356,8 +1366,7 @@ class BreathingMutation(OffspringCreator):
             cand = Atoms(num, positions=new_pos, cell=cell, pbc=pbc)
             if atoms_too_close(cand, self.blmin):
                 continue
-            if self.test_dist_to_slab and len(slab) > 0:
-                if atoms_too_close_two_sets(slab, cand, self.blmin):
+            if self.test_dist_to_slab and len(slab) > 0 and atoms_too_close_two_sets(slab, cand, self.blmin):
                     continue
             return slab + cand
         return None
@@ -1478,7 +1487,7 @@ class InPlaneSlideMutation(OffspringCreator):
         if indi is None:
             return indi, "mutation: in_plane_slide"
         indi = self.initialize_individual(f, indi)
-        indi.info["data"]["parents"] = [f.info["confid"]]
+        indi.info["data"]["parents"] = [f.info.get("confid")]
         return self.finalize_individual(indi), "mutation: in_plane_slide"
 
     def mutate(self, atoms):
@@ -1500,8 +1509,7 @@ class InPlaneSlideMutation(OffspringCreator):
             cand = Atoms(num, positions=new_pos, cell=cell, pbc=pbc)
             if atoms_too_close(cand, self.blmin):
                 continue
-            if len(slab) > 0:
-                if atoms_too_close_two_sets(slab, cand, self.blmin):
+            if len(slab) > 0 and atoms_too_close_two_sets(slab, cand, self.blmin):
                     continue
             return slab + cand
         return None

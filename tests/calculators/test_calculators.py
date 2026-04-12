@@ -181,8 +181,6 @@ class TestWriteVaspInputs:
         def mock_write_input(self, atoms):
             """Mock write_input that checks vacuum."""
             # Check that atoms have been centered with vacuum
-            # pbc is a numpy array, so check all values are True
-            assert all(atoms.pbc)
             # Store for later verification
             self._atoms = atoms
 

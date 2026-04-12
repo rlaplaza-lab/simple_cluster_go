@@ -1988,7 +1988,7 @@ def create_initial_cluster_batch(
     validate_composition(composition, allow_empty=True, allow_tuple=True)
 
     if not composition:
-        return [Atoms()] * n_structures
+        return [Atoms() for _ in range(n_structures)]
 
     n_atoms = len(composition)
     cell_side = compute_cell_side(composition, vacuum=vacuum)

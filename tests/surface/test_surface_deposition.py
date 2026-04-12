@@ -74,7 +74,10 @@ def test_create_ga_pairing_surface_requires_matching_template(pt_slab: Atoms) ->
     pairing = create_ga_pairing(
         tmpl, len(composition), default_rng(0), slab_atoms=pt_slab
     )
-    assert len(pairing.slab) == n_slab
+    if hasattr(pairing, "primary"):
+        assert len(pairing.primary.slab) == n_slab
+    else:
+        assert len(pairing.slab) == n_slab
 
 
 def test_attach_slab_constraints_fix_all(pt_slab: Atoms) -> None:

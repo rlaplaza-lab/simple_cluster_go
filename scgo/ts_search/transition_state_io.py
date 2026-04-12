@@ -323,7 +323,9 @@ def select_structure_pairs(
             # Energy gap filter
             gap = abs(energy_j - energy_i)
             if energy_gap_threshold is not None and gap > energy_gap_threshold:
-                continue
+                # Minima are energy-sorted; once the gap is too large, later j
+                # for this i can only increase it.
+                break
 
             # Permutation-invariant similarity filter
             try:

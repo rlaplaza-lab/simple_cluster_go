@@ -19,7 +19,7 @@ from ase_ga.data import DataConnection, PrepareDB
 
 from scgo.constants import PENALTY_ENERGY
 from scgo.database.connection import (
-    apply_shared_filesystem_sqlite_pragmas,
+    apply_sqlite_pragmas,
     close_data_connection,
     get_connection,
 )
@@ -256,12 +256,9 @@ def setup_database(
     if enable_wal_mode:
         try:
             with sqlite3.connect(db_file, timeout=30.0) as conn:
-                conn.execute("PRAGMA journal_mode=WAL;")
-                conn.execute("PRAGMA synchronous=NORMAL;")
-                conn.execute("PRAGMA busy_timeout=30000;")
-                conn.execute("PRAGMA temp_store=MEMORY;")
-                conn.execute("PRAGMA cache_size=-64000;")  # 64MB cache
-                conn.execute("PRAGMA wal_autocheckpoint=1000;")
+                apply_sqlite_pragmas(
+                    conn, wal_mode=True, busy_timeout=30000, cache_size_mb=64
+                )
                 conn.commit()
         except sqlite3.OperationalError as e:
             logger.warning(
@@ -271,11 +268,8 @@ def setup_database(
         # HPC / shared FS: keep rollback journal; still tune cache and temp store.
         try:
             with sqlite3.connect(db_file, timeout=30.0) as conn:
-                conn.execute("PRAGMA busy_timeout=30000;")
-                apply_shared_filesystem_sqlite_pragmas(
-                    conn,
-                    cache_size_mb=64,
-                    wal_mode=False,
+                apply_sqlite_pragmas(
+                    conn, wal_mode=False, busy_timeout=30000, cache_size_mb=64
                 )
                 conn.commit()
         except sqlite3.OperationalError as e:
@@ -470,24 +464,24 @@ def extract_minima_from_database_file(
                     source_db=os.path.basename(db_path),
                 )
 
-                if persist:
-                    try:
-                        # Persist directly by stable systems row id emitted during streaming.
-                        row_id = get_metadata(atoms, "systems_row_id", None)
-                        if row_id is None:
-                            continue
-                        row_id = int(row_id)
+            if persist:
+                try:
+                    with da.c.managed_connection() as conn:
+                        cols = [
+                            r[1]
+                            for r in conn.execute(
+                                "PRAGMA table_info(systems)"
+                            ).fetchall()
+                        ]
+                        has_metadata_col = "metadata" in cols
+                        col = "metadata" if has_metadata_col else "key_value_pairs"
 
-                        with da.c.managed_connection() as conn:
-                            cols = [
-                                r[1]
-                                for r in conn.execute(
-                                    "PRAGMA table_info(systems)"
-                                ).fetchall()
-                            ]
-                            has_metadata_col = "metadata" in cols
+                        for _, atoms in use_minima:
+                            row_id = get_metadata(atoms, "systems_row_id", None)
+                            if row_id is None:
+                                continue
+                            row_id = int(row_id)
 
-                            col = "metadata" if has_metadata_col else "key_value_pairs"
                             conn.execute(
                                 f"UPDATE systems SET {col} = json_set(COALESCE({col}, '{{}}'), '$.run_id', ?) WHERE id = ?",
                                 (run_id, row_id),
@@ -501,17 +495,17 @@ def extract_minima_from_database_file(
                                     f"UPDATE systems SET {col} = json_set(COALESCE({col}, '{{}}'), '$.trial_id', ?) WHERE id = ?",
                                     (trial_id, row_id),
                                 )
-                            conn.commit()
-                    except (
-                        sqlite3.DatabaseError,
-                        sqlite3.OperationalError,
-                        OSError,
-                        ValueError,
-                        TypeError,
-                    ) as e:
-                        logger.debug(
-                            "Failed to persist provenance to DB %s: %s", db_path, e
-                        )
+                        conn.commit()
+                except (
+                    sqlite3.DatabaseError,
+                    sqlite3.OperationalError,
+                    OSError,
+                    ValueError,
+                    TypeError,
+                ) as e:
+                    logger.debug(
+                        "Failed to persist provenance to DB %s: %s", db_path, e
+                    )
 
             return use_minima
         except (sqlite3.DatabaseError, OSError, ValueError) as e:

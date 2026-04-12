@@ -55,31 +55,6 @@ def _final_kvp(raw_score: float) -> dict[str, float | bool]:
     return {"raw_score": raw_score, "final_unique_minimum": True}
 
 
-@contextmanager
-def _setup_test_db(
-    tmp_path: Path,
-    filename: str,
-    template: Atoms,
-    *,
-    initial_candidate: Atoms | None,
-    **setup_kwargs,
-):
-    da = setup_database(
-        tmp_path,
-        filename,
-        template,
-        initial_candidate=initial_candidate,
-        **setup_kwargs,
-    )
-    try:
-        yield da, (Path(tmp_path) / filename)
-    finally:
-        close_data_connection(da)
-        gc.collect()
-
-
-def _register_unrelaxed(da, atoms: Atoms, *, description: str = "test:insert") -> None:
-    atoms.info.setdefault("key_value_pairs", {})
     atoms.info.setdefault("data", {})
     da.add_unrelaxed_candidate(atoms, description=description)
 
@@ -122,9 +97,9 @@ def _write_to_database(args):
 class TestDatabaseSetupAndFlow:
     """Core database setup and integration workflows."""
 
-    def test_setup_database_schema(self, tmp_path, pt3_atoms):
+    def test_setup_database_schema(self, tmp_path, pt3_atoms, temp_db_ctx):
         """setup_database creates a valid SQLite database schema."""
-        with _setup_test_db(
+        with temp_db_ctx(
             tmp_path, "test.db", pt3_atoms, initial_candidate=pt3_atoms
         ) as (_, db_file):
             pass
@@ -143,9 +118,9 @@ class TestDatabaseSetupAndFlow:
 
         assert {"id", "energy", "fmax"}.issubset(systems_columns)
 
-    def test_database_error_handling(self, tmp_path, pt3_atoms):
+    def test_database_error_handling(self, tmp_path, pt3_atoms, temp_db_ctx):
         """Invalid candidates are handled gracefully."""
-        with _setup_test_db(tmp_path, "test.db", pt3_atoms, initial_candidate=None) as (
+        with temp_db_ctx(tmp_path, "test.db", pt3_atoms, initial_candidate=None) as (
             da,
             _,
         ):
@@ -192,11 +167,9 @@ class TestDatabaseSetupAndFlow:
             ),
         ],
     )
-    def test_add_relaxed_step_atomic_order_and_stoichiometry(
-        self, tmp_path, template, candidate, expected_symbols, should_raise
-    ):
+    def test_add_relaxed_step_atomic_order_and_stoichiometry(self, tmp_path, template, candidate, expected_symbols, should_raise, temp_db_ctx):
         """Atomic order can be permuted (including duplicates) but stoichiometry cannot."""
-        with _setup_test_db(tmp_path, "test.db", template, initial_candidate=None) as (
+        with temp_db_ctx(tmp_path, "test.db", template, initial_candidate=None) as (
             da,
             _,
         ):
@@ -212,10 +185,10 @@ class TestDatabaseSetupAndFlow:
             inserted = rows[0]
             assert Counter(inserted.get_chemical_symbols()) == Counter(expected_symbols)
 
-    def test_add_relaxed_step_missing_raw_score_assigns_penalty(self, tmp_path):
+    def test_add_relaxed_step_missing_raw_score_assigns_penalty(self, tmp_path, temp_db_ctx):
         """If raw_score is missing and energy can't be computed, add_relaxed_step should
         assign PENALTY_ENERGY and legacy raw_score so GA runs continue instead of failing."""
-        with _setup_test_db(
+        with temp_db_ctx(
             tmp_path, "test.db", Atoms("Pt2"), initial_candidate=None
         ) as (da, _):
             a = Atoms("Pt2", positions=[[0, 0, 0], [2.5, 0, 0]])
@@ -373,8 +346,8 @@ class TestDatabaseSetupAndFlow:
 class TestDatabaseConnections:
     """Connection interfaces."""
 
-    def test_get_database_basic(self, tmp_path, pt2_atoms):
-        with _setup_test_db(
+    def test_get_database_basic(self, tmp_path, pt2_atoms, temp_db_ctx):
+        with temp_db_ctx(
             tmp_path, "test.db", pt2_atoms, initial_candidate=pt2_atoms
         ) as (_da, _db_path):
             pass
@@ -393,10 +366,8 @@ class TestTransactions:
             pytest.param(True, 0, id="rollback"),
         ],
     )
-    def test_transaction_commit_or_rollback(
-        self, tmp_path, pt2_atoms, raise_inside, expected_delta
-    ):
-        with _setup_test_db(tmp_path, "test.db", pt2_atoms, initial_candidate=None) as (
+    def test_transaction_commit_or_rollback(self, tmp_path, pt2_atoms, raise_inside, expected_delta, temp_db_ctx):
+        with temp_db_ctx(tmp_path, "test.db", pt2_atoms, initial_candidate=None) as (
             _da,
             _db_path,
         ):
@@ -439,8 +410,8 @@ class TestTransactions:
 
         assert count == initial + expected_delta
 
-    def test_retry_transaction_context(self, tmp_path, pt2_atoms):
-        with _setup_test_db(tmp_path, "test.db", pt2_atoms, initial_candidate=None) as (
+    def test_retry_transaction_context(self, tmp_path, pt2_atoms, temp_db_ctx):
+        with temp_db_ctx(tmp_path, "test.db", pt2_atoms, initial_candidate=None) as (
             _da,
             _db_path,
         ):
@@ -466,8 +437,8 @@ class TestTransactions:
 class TestSchemaVersioning:
     """Schema versioning and migration."""
 
-    def test_get_set_schema_version(self, tmp_path, pt2_atoms):
-        with _setup_test_db(
+    def test_get_set_schema_version(self, tmp_path, pt2_atoms, temp_db_ctx):
+        with temp_db_ctx(
             tmp_path, "test.db", pt2_atoms, initial_candidate=pt2_atoms
         ) as (_da, _db_path):
             pass
@@ -479,8 +450,8 @@ class TestSchemaVersioning:
             set_schema_version(db, 5)
             assert get_schema_version(db) == 5
 
-    def test_ensure_schema_version(self, tmp_path, pt2_atoms):
-        with _setup_test_db(
+    def test_ensure_schema_version(self, tmp_path, pt2_atoms, temp_db_ctx):
+        with temp_db_ctx(
             tmp_path, "test.db", pt2_atoms, initial_candidate=pt2_atoms
         ) as (_da, _db_path):
             pass
@@ -655,12 +626,12 @@ class TestDiscovery:
 
         assert any(Path(str(f)).name == "ga_go.db" for f in db_files)
 
-    def test_discovery_statistics(self, tmp_path):
+    def test_discovery_statistics(self, tmp_path, temp_db_ctx):
         run_dir = tmp_path / "run_20260204_120000" / "trial_0"
         run_dir.mkdir(parents=True)
 
         atoms = Atoms("Pt3")
-        with _setup_test_db(run_dir, "ga_go.db", atoms, initial_candidate=atoms) as (
+        with temp_db_ctx(run_dir, "ga_go.db", atoms, initial_candidate=atoms) as (
             _da,
             _db_path,
         ):
@@ -671,12 +642,12 @@ class TestDiscovery:
 
         assert stats["total_databases"] >= 1
 
-    def test_find_databases_simple(self, tmp_path):
+    def test_find_databases_simple(self, tmp_path, temp_db_ctx):
         run_dir = tmp_path / "run_20260204_120000" / "trial_0"
         run_dir.mkdir(parents=True)
 
         atoms = Atoms("Pt3")
-        with _setup_test_db(run_dir, "ga_go.db", atoms, initial_candidate=atoms) as (
+        with temp_db_ctx(run_dir, "ga_go.db", atoms, initial_candidate=atoms) as (
             _da,
             _db_path,
         ):
@@ -689,8 +660,8 @@ class TestDiscovery:
 class TestRobustness:
     """Robustness, concurrency, and retry behavior."""
 
-    def test_context_manager_exception_cleanup(self, tmp_path, pt2_atoms):
-        with _setup_test_db(
+    def test_context_manager_exception_cleanup(self, tmp_path, pt2_atoms, temp_db_ctx):
+        with temp_db_ctx(
             tmp_path, "test.db", pt2_atoms, initial_candidate=pt2_atoms
         ) as (_da, _db_path):
             pass
@@ -706,15 +677,13 @@ class TestRobustness:
             assert isinstance(db.get_all_relaxed_candidates(), list)
 
     @pytest.mark.slow
-    def test_no_file_handle_leak_many_connections(
-        self, tmp_path, pt2_atoms, monkeypatch
-    ):
+    def test_no_file_handle_leak_many_connections(self, tmp_path, pt2_atoms, monkeypatch, temp_db_ctx):
         initial_fd_count = _count_open_files()
         if initial_fd_count < 0:
             pytest.skip("Cannot count file descriptors on this system")
 
         for i in range(100):
-            with _setup_test_db(
+            with temp_db_ctx(
                 tmp_path,
                 f"test_{i}.db",
                 pt2_atoms,
@@ -749,8 +718,8 @@ class TestRobustness:
         assert fd_increase < 20
 
     @pytest.mark.slow
-    def test_concurrent_write_stress(self, tmp_path, pt2_atoms):
-        with _setup_test_db(
+    def test_concurrent_write_stress(self, tmp_path, pt2_atoms, temp_db_ctx):
+        with temp_db_ctx(
             tmp_path,
             "concurrent.db",
             pt2_atoms,
@@ -797,8 +766,8 @@ class TestRobustness:
             )
         assert n_relaxed >= expected_min
 
-    def test_setup_database_wal_mode(self, tmp_path, pt2_atoms):
-        with _setup_test_db(
+    def test_setup_database_wal_mode(self, tmp_path, pt2_atoms, temp_db_ctx):
+        with temp_db_ctx(
             tmp_path,
             "test.db",
             pt2_atoms,

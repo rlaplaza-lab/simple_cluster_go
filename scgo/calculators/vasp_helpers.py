@@ -51,7 +51,6 @@ def write_vasp_inputs(
     atoms_for_vasp = atoms.copy()
     if center_structure:
         atoms_for_vasp.center(vacuum=vacuum)
-    atoms_for_vasp.pbc = True
 
     # Save the final, best structure for easy viewing
     cluster_formula = get_cluster_formula(atoms.get_chemical_symbols())

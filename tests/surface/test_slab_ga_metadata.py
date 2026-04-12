@@ -12,7 +12,7 @@ from scgo.surface.config import SurfaceSystemConfig
 def test_slab_ga_metadata_extras_empty_without_surface() -> None:
     assert slab_ga_metadata_extras(None, 4) == {}
     slab = Atoms(
-        "Pt2", positions=[[0, 0, 0], [2.0, 0, 0]], cell=[20, 20, 20], pbc=False
+        "Pt2", positions=[[0, 0, 0], [2.0, 0, 0]], cell=[20, 20, 20], pbc=True
     )
     cfg = SurfaceSystemConfig(slab=slab)
     assert slab_ga_metadata_extras(cfg, 0) == {}
