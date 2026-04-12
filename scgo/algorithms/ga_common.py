@@ -7,6 +7,7 @@ implementations to reduce duplication.
 from __future__ import annotations
 
 import logging
+import math
 import typing
 
 import numpy as np
@@ -26,15 +27,22 @@ from ase_ga.standard_comparators import (
 from ase_ga.startgenerator import StartGenerator
 from ase_ga.utilities import closest_distances_generator, get_all_atom_types
 
-from scgo.ase_ga_patches.cutandsplicepairing import CutAndSplicePairing
+from scgo.ase_ga_patches.cutandsplicepairing import (
+    CutAndSplicePairing,
+    DualCutAndSplicePairing,
+)
 from scgo.ase_ga_patches.population import Population
 from scgo.ase_ga_patches.standardmutations import (
     AnisotropicRattleMutation,
+    BreathingMutation,
     CustomPermutationMutation,
     FlatteningMutation,
+    InPlaneSlideMutation,
     MirrorMutation,
+    OverlapReliefMutation,
     RattleMutation,
     RotationalMutation,
+    ShellSwapMutation,
 )
 from scgo.constants import (
     DEFAULT_COMPARATOR_TOL,
@@ -251,8 +259,11 @@ def create_ga_pairing(
     n_to_optimize: int,
     rng: np.random.Generator | None = None,
     slab_atoms: Atoms | None = None,
-) -> CutAndSplicePairing:
-    """Create a CutAndSplicePairing operator for GA evolution.
+    *,
+    exploratory_crossover_probability: float = 0.2,
+    exploratory_minfrac: float | None = None,
+) -> CutAndSplicePairing | DualCutAndSplicePairing:
+    """Create a cut-and-splice pairing operator for GA evolution.
 
     Accepts an optional RNG; if provided it will be used as a parent RNG
     for creating child RNGs for internal operators.
@@ -263,9 +274,15 @@ def create_ga_pairing(
         rng: Random number generator.
         slab_atoms: If provided, real slab atoms for adsorbate GA (non-empty).
             If None, an empty slab with the template cell/pbc is used (gas-phase GA).
+        exploratory_crossover_probability: When > 0 and exploratory ``minfrac``
+            differs from the primary, a dual wrapper uses this probability to
+            pick the more asymmetric cut-and-splice variant.
+        exploratory_minfrac: Lower ``minfrac`` for the exploratory variant.
+            Default ``max(0.1, primary_minfrac - 0.15)``.
 
     Returns:
-        Configured CutAndSplicePairing operator.
+        :class:`~scgo.ase_ga_patches.cutandsplicepairing.CutAndSplicePairing` or
+        :class:`~scgo.ase_ga_patches.cutandsplicepairing.DualCutAndSplicePairing`.
     """
     n_template = len(atoms_template)
     if slab_atoms is not None and len(slab_atoms) > 0:
@@ -291,12 +308,49 @@ def create_ga_pairing(
     else:
         slab = Atoms(cell=atoms_template.get_cell(), pbc=atoms_template.get_pbc())
     min_parent_fraction: float = min(0.5, max(0.3, 2.0 / max(1, n_to_optimize)))
+    child_rng_primary = create_child_rng(rng) if rng is not None else None
 
-    return CutAndSplicePairing(  # type: ignore[arg-type]
+    if exploratory_crossover_probability <= 0.0:
+        return CutAndSplicePairing(  # type: ignore[arg-type]
+            slab,
+            n_to_optimize,
+            blmin,
+            minfrac=min_parent_fraction,
+            rng=child_rng_primary,
+        )
+
+    expl_minfrac = (
+        float(exploratory_minfrac)
+        if exploratory_minfrac is not None
+        else max(0.1, min_parent_fraction - 0.15)
+    )
+    if math.isclose(expl_minfrac, min_parent_fraction):
+        return CutAndSplicePairing(  # type: ignore[arg-type]
+            slab,
+            n_to_optimize,
+            blmin,
+            minfrac=min_parent_fraction,
+            rng=child_rng_primary,
+        )
+
+    primary = CutAndSplicePairing(  # type: ignore[arg-type]
         slab,
         n_to_optimize,
         blmin,
         minfrac=min_parent_fraction,
+        rng=child_rng_primary,
+    )
+    exploratory = CutAndSplicePairing(  # type: ignore[arg-type]
+        slab,
+        n_to_optimize,
+        blmin,
+        minfrac=expl_minfrac,
+        rng=create_child_rng(rng) if rng is not None else None,
+    )
+    return DualCutAndSplicePairing(
+        primary,
+        exploratory,
+        exploratory_crossover_probability,
         rng=create_child_rng(rng) if rng is not None else None,
     )
 
@@ -308,10 +362,16 @@ def create_mutation_operators(
     rng: np.random.Generator | None = None,
     use_adaptive: bool = True,
     *,
+    n_slab: int = 0,
+    surface_normal_axis: int = 2,
     flattening_thickness_factor: float = 0.5,
     flattening_max_inner_attempts: int = 5000,
     rotational_max_inner_attempts: int = 10000,
     mirror_max_tries: int = 1000,
+    breathing_max_inner_attempts: int = 1000,
+    in_plane_slide_max_inner_attempts: int = 1000,
+    breathing_scale_min: float = 0.82,
+    breathing_scale_max: float = 1.22,
 ) -> tuple[list, dict[str, int]]:
     """Create mutation operators once at start of GA.
 
@@ -323,11 +383,17 @@ def create_mutation_operators(
         blmin: Bond length minimums dictionary.
         rng: Random number generator.
         use_adaptive: Whether to include adaptive mutation operators.
+        n_slab: Number of fixed slab atoms; when > 0, registers in-plane slide.
+        surface_normal_axis: Slab normal (0, 1, or 2) for in-plane slide.
         flattening_thickness_factor: Passed to :class:`FlatteningMutation`
             (larger values relax post-projection thickness, helping large clusters).
         flattening_max_inner_attempts: Max random-plane trials per flattening call.
         rotational_max_inner_attempts: Max trials per rotational mutation call.
         mirror_max_tries: Max cutting-plane trials per mirror mutation call.
+        breathing_max_inner_attempts: Max radial-scale trials per breathing call.
+        in_plane_slide_max_inner_attempts: Max slide trials per slide call.
+        breathing_scale_min: Lower bound for radial scale factors (about the fragment CoM).
+        breathing_scale_max: Upper bound for radial scale factors.
 
     Returns:
         Tuple of (operators_list, operator_name_to_index_map).
@@ -345,6 +411,14 @@ def create_mutation_operators(
     operators.append(rattle)
     name_map["rattle"] = 0
 
+    overlap_relief: OverlapReliefMutation = OverlapReliefMutation(
+        blmin,
+        n_to_optimize,
+        rng=create_child_rng(rng) if rng is not None else None,  # type: ignore[arg-type]
+    )
+    operators.append(overlap_relief)
+    name_map["overlap_relief"] = len(operators) - 1
+
     if len(set(composition)) > 1:
         permutation: CustomPermutationMutation = CustomPermutationMutation(
             n_to_optimize,
@@ -354,6 +428,15 @@ def create_mutation_operators(
         )
         operators.append(permutation)
         name_map["permutation"] = len(operators) - 1
+
+        shell_swap: ShellSwapMutation = ShellSwapMutation(
+            n_to_optimize,
+            rng=create_child_rng(rng) if rng is not None else None,  # type: ignore[arg-type]
+            blmin=blmin,
+            test_dist_to_slab=True,
+        )
+        operators.append(shell_swap)
+        name_map["shell_swap"] = len(operators) - 1
 
     if use_adaptive:
         flattening: FlatteningMutation = FlatteningMutation(
@@ -378,6 +461,7 @@ def create_mutation_operators(
         mirror: MirrorMutation = MirrorMutation(
             blmin,
             n_to_optimize,
+            reflect=True,
             rng=create_child_rng(rng) if rng is not None else None,  # type: ignore[arg-type]
             max_tries=mirror_max_tries,
         )
@@ -394,6 +478,28 @@ def create_mutation_operators(
         )
         operators.append(anisotropic)
         name_map["anisotropic_rattle"] = len(operators) - 1
+
+        breathing: BreathingMutation = BreathingMutation(
+            blmin,
+            n_to_optimize,
+            scale_min=breathing_scale_min,
+            scale_max=breathing_scale_max,
+            rng=create_child_rng(rng) if rng is not None else None,  # type: ignore[arg-type]
+            max_inner_attempts=breathing_max_inner_attempts,
+        )
+        operators.append(breathing)
+        name_map["breathing"] = len(operators) - 1
+
+        if n_slab > 0:
+            slide: InPlaneSlideMutation = InPlaneSlideMutation(
+                blmin,
+                n_to_optimize,
+                surface_normal_axis=surface_normal_axis,
+                rng=create_child_rng(rng) if rng is not None else None,  # type: ignore[arg-type]
+                max_inner_attempts=in_plane_slide_max_inner_attempts,
+            )
+            operators.append(slide)
+            name_map["in_plane_slide"] = len(operators) - 1
 
     return operators, name_map
 

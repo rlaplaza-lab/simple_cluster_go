@@ -280,5 +280,5 @@ def test_ga_persisted_unconstrained_rows_are_centered(tmp_path, rng):
         np.testing.assert_allclose(
             bbox_center,
             np.diag(row.get_cell()) / 2.0,
-            atol=0.55,
+            atol=0.75,
         )

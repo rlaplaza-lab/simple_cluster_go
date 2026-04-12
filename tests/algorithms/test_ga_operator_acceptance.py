@@ -15,9 +15,9 @@ between slab and adsorbate when ``n_slab > 0``.
   geometry within their attempt budgets; we still require **rattle**,
   **rotational**, and **anisotropic_rattle** to succeed.
 - *Random spherical* (55 Pt): looser cluster shape. All factory operators are
-  exercised, including **flattening**, using a larger ``flattening_thickness_factor``
-  (see :func:`~scgo.algorithms.ga_common.create_mutation_operators`) so the
-  projection can succeed—production GA still uses the default 0.5 thickness.
+    exercised, including **flattening**, at the production
+    ``flattening_thickness_factor`` because the bounded flattening construction
+    no longer needs an acceptance-only thickness override.
 
 ``create_initial_cluster`` may return an ASE ``Cluster`` subclass whose
 ``copy()`` breaks inside crossover; helpers coerce to plain :class:`~ase.Atoms`.
@@ -37,6 +37,8 @@ cases still cover this operator.
 
 from __future__ import annotations
 
+from typing import Any
+
 import numpy as np
 import pytest
 from ase import Atoms
@@ -53,17 +55,21 @@ from scgo.initialization import create_initial_cluster
 from scgo.surface.config import SurfaceSystemConfig
 from scgo.surface.deposition import create_deposited_cluster
 
-# Flattening uses up to 5000 inner trials; keep outer retries modest.
-MAX_MUTATION_ATTEMPTS = 55
-MAX_CROSSOVER_ATTEMPTS = 400
+# The active mirror and bounded cut selection make crossover acceptance fast
+# enough that large legacy outer retry caps are unnecessary here.
+MAX_MUTATION_ATTEMPTS = 20
+MAX_CROSSOVER_ATTEMPTS = 12
 
-# Default production flattening thickness (0.5) is too tight for ~20–55 atom
-# clusters in acceptance tests; match operator capability at scale.
-_LARGE_CLUSTER_FLATTENING_THICKNESS = 12.0
-# Cap inner trials so surface + gas acceptance stays CI-bounded (prod defaults higher).
+# Flattening now succeeds at the production default thickness in these
+# acceptance cases; keep the tests aligned with the real operator setting.
+_ACCEPTANCE_FLATTENING_THICKNESS = 0.5
+# Cap inner trials so surface + gas acceptance stays CI-bounded while matching
+# the bounded candidate sets used by the operators.
 _ACCEPTANCE_FLATTEN_MAX_INNER = 900
 _ACCEPTANCE_ROT_MAX_INNER = 900
 _ACCEPTANCE_MIRROR_TRIES = 280
+_ACCEPTANCE_BREATHING_MAX_INNER = 5
+_ACCEPTANCE_SLIDE_MAX_INNER = 12
 
 _TEMPLATE_CORE_OPERATOR_NAMES = ("rattle", "rotational", "anisotropic_rattle")
 
@@ -213,9 +219,14 @@ def _mutation_operator_succeeds(
     n_slab: int,
     *,
     flattening_thickness_factor: float,
+    surface_normal_axis: int = 2,
     flattening_max_inner_attempts: int = _ACCEPTANCE_FLATTEN_MAX_INNER,
     rotational_max_inner_attempts: int = _ACCEPTANCE_ROT_MAX_INNER,
     mirror_max_tries: int = _ACCEPTANCE_MIRROR_TRIES,
+    breathing_max_inner_attempts: int = _ACCEPTANCE_BREATHING_MAX_INNER,
+    in_plane_slide_max_inner_attempts: int = _ACCEPTANCE_SLIDE_MAX_INNER,
+    breathing_scale_min: float = 0.82,
+    breathing_scale_max: float = 1.22,
 ) -> bool:
     adsorbate_use_tags = op_name == "rotational"
     for attempt in range(MAX_MUTATION_ATTEMPTS):
@@ -226,10 +237,16 @@ def _mutation_operator_succeeds(
             blmin,
             rng=op_rng,
             use_adaptive=True,
+            n_slab=n_slab,
+            surface_normal_axis=surface_normal_axis,
             flattening_thickness_factor=flattening_thickness_factor,
             flattening_max_inner_attempts=flattening_max_inner_attempts,
             rotational_max_inner_attempts=rotational_max_inner_attempts,
             mirror_max_tries=mirror_max_tries,
+            breathing_max_inner_attempts=breathing_max_inner_attempts,
+            in_plane_slide_max_inner_attempts=in_plane_slide_max_inner_attempts,
+            breathing_scale_min=breathing_scale_min,
+            breathing_scale_max=breathing_scale_max,
         )
         assert nm == name_map
         op = ops[nm[op_name]]
@@ -286,7 +303,7 @@ def test_mutations_gas_pt55_random_spherical_all_factory_operators() -> None:
         blmin,
         rng=np.random.default_rng(0),
         use_adaptive=True,
-        flattening_thickness_factor=_LARGE_CLUSTER_FLATTENING_THICKNESS,
+        flattening_thickness_factor=_ACCEPTANCE_FLATTENING_THICKNESS,
     )
     assert "permutation" not in name_map
 
@@ -299,7 +316,7 @@ def test_mutations_gas_pt55_random_spherical_all_factory_operators() -> None:
             55,
             blmin,
             0,
-            flattening_thickness_factor=_LARGE_CLUSTER_FLATTENING_THICKNESS,
+            flattening_thickness_factor=_ACCEPTANCE_FLATTENING_THICKNESS,
         )
         assert ok, f"mutation {op_name!r} failed after {MAX_MUTATION_ATTEMPTS} attempts"
 
@@ -317,7 +334,7 @@ def test_mutations_gas_bimetallic_55_permutation_and_rest() -> None:
         blmin,
         rng=np.random.default_rng(0),
         use_adaptive=True,
-        flattening_thickness_factor=_LARGE_CLUSTER_FLATTENING_THICKNESS,
+        flattening_thickness_factor=_ACCEPTANCE_FLATTENING_THICKNESS,
     )
     assert "permutation" in name_map
 
@@ -330,7 +347,7 @@ def test_mutations_gas_bimetallic_55_permutation_and_rest() -> None:
             55,
             blmin,
             0,
-            flattening_thickness_factor=_LARGE_CLUSTER_FLATTENING_THICKNESS,
+            flattening_thickness_factor=_ACCEPTANCE_FLATTENING_THICKNESS,
         )
         assert ok, f"mutation {op_name!r} failed after {MAX_MUTATION_ATTEMPTS} attempts"
 
@@ -349,9 +366,12 @@ def test_mutations_surface_pt20_all_factory_operators() -> None:
         blmin,
         rng=np.random.default_rng(0),
         use_adaptive=True,
-        flattening_thickness_factor=_LARGE_CLUSTER_FLATTENING_THICKNESS,
+        n_slab=n_slab,
+        surface_normal_axis=2,
+        flattening_thickness_factor=_ACCEPTANCE_FLATTENING_THICKNESS,
     )
     assert "permutation" not in name_map
+    assert "in_plane_slide" in name_map
 
     for op_name in sorted(name_map.keys(), key=lambda k: name_map[k]):
         # RotationalMutation centers the adsorbate fragment; with periodic in-plane
@@ -368,7 +388,7 @@ def test_mutations_surface_pt20_all_factory_operators() -> None:
             len(composition),
             blmin,
             n_slab,
-            flattening_thickness_factor=_LARGE_CLUSTER_FLATTENING_THICKNESS,
+            flattening_thickness_factor=_ACCEPTANCE_FLATTENING_THICKNESS,
         )
         assert ok, f"mutation {op_name!r} failed after {MAX_MUTATION_ATTEMPTS} attempts"
 
@@ -381,11 +401,16 @@ def _crossover_child(
     n_slab: int,
     slab_atoms: Atoms | None,
     template_atoms: Atoms,
+    **pairing_kwargs: Any,
 ) -> Atoms | None:
     for attempt in range(MAX_CROSSOVER_ATTEMPTS):
         prng = np.random.default_rng(80_000 + attempt)
         pairing = create_ga_pairing(
-            template_atoms, n_top, rng=prng, slab_atoms=slab_atoms
+            template_atoms,
+            n_top,
+            rng=prng,
+            slab_atoms=slab_atoms,
+            **pairing_kwargs,
         )
         cand, _desc = pairing.get_new_individual([p1, p2])
         if cand is None:
@@ -432,7 +457,7 @@ def test_crossover_gas_pt55_random_spherical_then_rattle_mutate() -> None:
             blmin,
             rng=op_rng,
             use_adaptive=True,
-            flattening_thickness_factor=_LARGE_CLUSTER_FLATTENING_THICKNESS,
+            flattening_thickness_factor=_ACCEPTANCE_FLATTENING_THICKNESS,
             flattening_max_inner_attempts=_ACCEPTANCE_FLATTEN_MAX_INNER,
             rotational_max_inner_attempts=_ACCEPTANCE_ROT_MAX_INNER,
             mirror_max_tries=_ACCEPTANCE_MIRROR_TRIES,
@@ -470,7 +495,7 @@ def test_crossover_surface_pt20_then_rattle_mutate() -> None:
             blmin,
             rng=op_rng,
             use_adaptive=True,
-            flattening_thickness_factor=_LARGE_CLUSTER_FLATTENING_THICKNESS,
+            flattening_thickness_factor=_ACCEPTANCE_FLATTENING_THICKNESS,
             flattening_max_inner_attempts=_ACCEPTANCE_FLATTEN_MAX_INNER,
             rotational_max_inner_attempts=_ACCEPTANCE_ROT_MAX_INNER,
             mirror_max_tries=_ACCEPTANCE_MIRROR_TRIES,
@@ -485,3 +510,38 @@ def test_crossover_surface_pt20_then_rattle_mutate() -> None:
         mut_ok = True
         break
     assert mut_ok, "rattle.mutate after surface crossover did not yield accepted geometry"
+
+
+@pytest.mark.slow
+def test_crossover_gas_pt55_dual_pairing_accepts_offspring() -> None:
+    """Dual minfrac pairing should still yield valid gas-phase children."""
+    p1_raw, composition, blmin = _gas_pt55_random_spherical_parent(11)
+    p2_raw, _, _ = _gas_pt55_random_spherical_parent(22)
+    p1 = _prepare_ga_parent(p1_raw, confid=1)
+    p2 = _prepare_ga_parent(p2_raw, confid=2)
+    rng_pert = np.random.default_rng(5)
+    for p, _subseed in ((p1, 1), (p2, 2)):
+        for _trial in range(30):
+            delta = rng_pert.normal(0, 0.06, size=p.positions.shape)
+            trial_pos = p.positions + delta
+            probe = p.copy()
+            probe.positions[:] = trial_pos
+            if not atoms_too_close(probe, blmin):
+                p.positions[:] = trial_pos
+                break
+        else:
+            pytest.fail(
+                f"could not apply small diversity perturbation (confid={p.info['confid']})"
+            )
+
+    child = _crossover_child(
+        p1,
+        p2,
+        55,
+        blmin,
+        0,
+        None,
+        p1.copy(),
+        exploratory_crossover_probability=0.25,
+    )
+    assert child is not None, f"dual crossover failed after {MAX_CROSSOVER_ATTEMPTS} attempts"

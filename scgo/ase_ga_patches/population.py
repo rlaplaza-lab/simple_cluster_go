@@ -295,15 +295,34 @@ class Population:
         c1 = self.pop[0]
         c2 = self.pop[0]
         used_before = False
+        _maxiter = 10000
+        _outer_iter = 0
         while c1.info["confid"] == c2.info["confid"] and not used_before:
+            _outer_iter += 1
+            if _outer_iter > _maxiter:
+                # Exhausted attempts; return best effort pair.
+                break
             nnf = True
+            _inner = 0
             while nnf:
+                _inner += 1
+                if _inner > _maxiter:
+                    # Fall back to uniform random selection.
+                    t = self.rng.integers(len(self.pop))
+                    c1 = self.pop[t]
+                    break
                 t = self.rng.integers(len(self.pop))
                 if fit[t] > self.rng.random() * fmax:
                     c1 = self.pop[t]
                     nnf = False
             nnf = True
+            _inner = 0
             while nnf:
+                _inner += 1
+                if _inner > _maxiter:
+                    t = self.rng.integers(len(self.pop))
+                    c2 = self.pop[t]
+                    break
                 t = self.rng.integers(len(self.pop))
                 if fit[t] > self.rng.random() * fmax:
                     c2 = self.pop[t]
@@ -335,7 +354,14 @@ class Population:
             t = self.rng.integers(len(self.pop))
             return self.pop[t].copy()
         nnf = True
+        _inner = 0
+        _maxiter = 10000
         while nnf:
+            _inner += 1
+            if _inner > _maxiter:
+                t = self.rng.integers(len(self.pop))
+                c1 = self.pop[t]
+                break
             t = self.rng.integers(len(self.pop))
             if fit[t] > self.rng.random() * fmax:
                 c1 = self.pop[t]

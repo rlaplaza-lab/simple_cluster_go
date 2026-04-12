@@ -128,8 +128,9 @@ def test_ga_mutation_operators_child_rngs_reproducible():
     )
     assert "anisotropic_rattle" in map1
 
-    # Record the first few integers from each operator RNG
-    draws1 = [op.rng.integers(0, 2**31 - 1) for op in ops1]
+    # Compare a stable operator; factory list grows over time.
+    rattle_idx = map1["rattle"]
+    draws1 = ops1[rattle_idx].rng.integers(0, 2**31 - 1, size=5).tolist()
 
     # Repeat with a freshly seeded parent RNG
     ops2, map2 = create_mutation_operators(
@@ -140,7 +141,8 @@ def test_ga_mutation_operators_child_rngs_reproducible():
         use_adaptive=True,
     )
     assert "anisotropic_rattle" in map2
-    draws2 = [op.rng.integers(0, 2**31 - 1) for op in ops2]
+    rattle_idx2 = map2["rattle"]
+    draws2 = ops2[rattle_idx2].rng.integers(0, 2**31 - 1, size=5).tolist()
 
     assert draws1 == draws2, "Child RNGs derived from parent RNG should be reproducible"
 

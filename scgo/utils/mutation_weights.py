@@ -58,6 +58,12 @@ def _apply_stagnation_boost(
         boosted["flattening"] *= factor * 1.15
     if "mirror" in boosted:
         boosted["mirror"] *= factor * 1.10
+    if "breathing" in boosted:
+        boosted["breathing"] *= factor * 1.08
+    if "overlap_relief" in boosted:
+        boosted["overlap_relief"] *= factor * 1.12
+    if "shell_swap" in boosted:
+        boosted["shell_swap"] *= factor * 1.08
 
     return _renormalize_weights(boosted)
 
@@ -82,11 +88,14 @@ def calculate_composition_weights(
         # Pure metallic cluster - focus on structural exploration
         weights = _renormalize_weights(
             {
-                "rattle": 0.30,
-                "flattening": 0.24,
-                "rotational": 0.18,
-                "mirror": 0.08,
-                "anisotropic_rattle": 0.20,
+                "rattle": 0.23,
+                "overlap_relief": 0.17,
+                "flattening": 0.17,
+                "rotational": 0.13,
+                "mirror": 0.07,
+                "anisotropic_rattle": 0.14,
+                "breathing": 0.06,
+                "in_plane_slide": 0.03,
             }
         )
         use_permutation = False
@@ -101,24 +110,32 @@ def calculate_composition_weights(
             # Core-shell biased (one element dominates)
             weights = _renormalize_weights(
                 {
-                    "rattle": 0.22,
-                    "permutation": 0.24,
-                    "flattening": 0.16,
-                    "rotational": 0.12,
-                    "mirror": 0.08,
-                    "anisotropic_rattle": 0.18,
+                    "rattle": 0.14,
+                    "overlap_relief": 0.14,
+                    "permutation": 0.18,
+                    "shell_swap": 0.12,
+                    "flattening": 0.11,
+                    "rotational": 0.07,
+                    "mirror": 0.05,
+                    "anisotropic_rattle": 0.11,
+                    "breathing": 0.05,
+                    "in_plane_slide": 0.03,
                 }
             )
         else:
             # Well-mixed composition
             weights = _renormalize_weights(
                 {
-                    "rattle": 0.18,
-                    "permutation": 0.27,
-                    "flattening": 0.16,
-                    "rotational": 0.12,
-                    "mirror": 0.07,
-                    "anisotropic_rattle": 0.20,
+                    "rattle": 0.13,
+                    "overlap_relief": 0.12,
+                    "permutation": 0.18,
+                    "shell_swap": 0.14,
+                    "flattening": 0.10,
+                    "rotational": 0.07,
+                    "mirror": 0.04,
+                    "anisotropic_rattle": 0.10,
+                    "breathing": 0.04,
+                    "in_plane_slide": 0.08,
                 }
             )
         use_permutation = True
@@ -234,7 +251,14 @@ def get_adaptive_mutation_config(
         if n_elements == 1:
             return {
                 "operator_weights": _renormalize_weights(
-                    {"rattle": 0.6, "flattening": 0.15, "anisotropic_rattle": 0.25}
+                    {
+                        "rattle": 0.42,
+                        "overlap_relief": 0.24,
+                        "flattening": 0.10,
+                        "anisotropic_rattle": 0.14,
+                        "breathing": 0.07,
+                        "in_plane_slide": 0.03,
+                    }
                 ),
                 "use_permutation": False,
                 "mutation_probability": 0.2,
@@ -247,10 +271,14 @@ def get_adaptive_mutation_config(
         return {
             "operator_weights": _renormalize_weights(
                 {
-                    "rattle": 0.3,
-                    "permutation": 0.35,
-                    "flattening": 0.1,
-                    "anisotropic_rattle": 0.25,
+                    "rattle": 0.20,
+                    "overlap_relief": 0.17,
+                    "permutation": 0.23,
+                    "shell_swap": 0.17,
+                    "flattening": 0.08,
+                    "anisotropic_rattle": 0.10,
+                    "breathing": 0.03,
+                    "in_plane_slide": 0.02,
                 }
             ),
             "use_permutation": True,

@@ -1,8 +1,12 @@
 import numpy as np
 import pytest
 from ase import Atoms
+from ase_ga.utilities import closest_distances_generator, get_all_atom_types
 
-from scgo.ase_ga_patches.cutandsplicepairing import CutAndSplicePairing
+from scgo.ase_ga_patches.cutandsplicepairing import (
+    CutAndSplicePairing,
+    DualCutAndSplicePairing,
+)
 from tests.test_utils import create_paired_rngs
 
 
@@ -35,6 +39,51 @@ def test_cut_and_splice_preserves_stoichiometry_and_is_deterministic(au2pt2_atom
 
     # Deterministic for identical seeds
     assert np.allclose(child1.get_positions(), child2.get_positions())
+
+
+def test_dual_cut_and_splice_returns_offspring(pt3_atoms):
+    n_top = len(pt3_atoms)
+    blmin = closest_distances_generator(
+        get_all_atom_types(pt3_atoms, range(n_top)),
+        ratio_of_covalent_radii=0.7,
+    )
+    slab = Atoms(cell=pt3_atoms.get_cell(), pbc=pt3_atoms.get_pbc())
+    primary = CutAndSplicePairing(
+        slab, n_top, blmin, minfrac=0.3, rng=np.random.default_rng(11)
+    )
+    exploratory = CutAndSplicePairing(
+        slab, n_top, blmin, minfrac=0.15, rng=np.random.default_rng(22)
+    )
+    dual = DualCutAndSplicePairing(
+        primary,
+        exploratory,
+        0.5,
+        rng=np.random.default_rng(99),
+    )
+    p1 = pt3_atoms.copy()
+    p2 = pt3_atoms.copy()
+    p1.info["confid"] = "a"
+    p2.info["confid"] = "b"
+    child, _desc = dual.get_new_individual([p1, p2])
+    assert child is not None
+    assert len(child) == n_top
+    assert child.get_chemical_symbols() == pt3_atoms.get_chemical_symbols()
+
+
+def test_create_ga_pairing_returns_single_operator_when_explore_probability_zero(
+    pt3_atoms,
+):
+    from numpy.random import default_rng
+
+    from scgo.algorithms.ga_common import create_ga_pairing
+
+    pairing = create_ga_pairing(
+        pt3_atoms,
+        len(pt3_atoms),
+        default_rng(0),
+        exploratory_crossover_probability=0.0,
+    )
+    assert isinstance(pairing, CutAndSplicePairing)
 
 
 def test_cut_and_splice_constructor_rejects_legacy_randomstate():

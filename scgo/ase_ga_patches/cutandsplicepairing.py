@@ -16,6 +16,28 @@ from ase_ga.utilities import (
 from scgo.utils.rng_helpers import ensure_rng_or_create as _ensure_rng
 
 
+def _random_unit_vector(rng, fallback=None):
+    vector = rng.normal(0.0, 1.0, 3)
+    norm = np.linalg.norm(vector)
+    if norm <= 1e-12:
+        if fallback is not None:
+            return np.array(fallback, dtype=float)
+        return np.array([1.0, 0.0, 0.0])
+    return vector / norm
+
+
+def _append_unique_unit_vector(candidates, vector, tol=0.995):
+    unit = np.asarray(vector, dtype=float)
+    norm = np.linalg.norm(unit)
+    if norm <= 1e-12:
+        return
+    unit /= norm
+    for existing in candidates:
+        if float(np.dot(unit, existing)) > tol:
+            return
+    candidates.append(unit)
+
+
 class Positions:
     """Helper object to simplify the pairing process.
 
@@ -162,10 +184,127 @@ class CutAndSplicePairing(OffspringCreator):
         self.cellbounds = cellbounds
         self.test_dist_to_slab = test_dist_to_slab
         self.use_tags = use_tags
+        self.last_attempt_count = 0
+        self.last_cell_attempt_count = 0
 
         self.scaling_volume = None
         self.descriptor = "CutAndSplicePairing"
         self.min_inputs = 2
+
+    def _group_centers_and_weights(self, atoms):
+        tags = atoms.get_tags() if self.use_tags else np.arange(len(atoms))
+        centers = []
+        weights = []
+        for tag in np.unique(tags):
+            indices = np.where(tags == tag)[0]
+            centers.append(np.mean(atoms.positions[indices], axis=0))
+            weights.append(len(indices))
+        return np.asarray(centers, dtype=float), np.asarray(weights, dtype=int)
+
+    def _candidate_cut_normals(self, a1, a2):
+        combined = np.vstack([a1.get_positions(), a2.get_positions()])
+        centered = combined - np.mean(combined, axis=0)
+        candidates = []
+
+        _append_unique_unit_vector(
+            candidates,
+            np.mean(a2.get_positions(), axis=0) - np.mean(a1.get_positions(), axis=0),
+        )
+
+        if len(centered) > 1:
+            covariance = np.dot(centered.T, centered)
+            eigenvalues, eigenvectors = np.linalg.eigh(covariance)
+            order = np.argsort(eigenvalues)[::-1]
+            axes = [eigenvectors[:, index] for index in order]
+            for axis in axes:
+                _append_unique_unit_vector(candidates, axis)
+            if len(axes) >= 2:
+                _append_unique_unit_vector(candidates, axes[0] + axes[-1])
+
+        parent_delta = a2.get_positions() - a1.get_positions()
+        if len(parent_delta) > 0:
+            _append_unique_unit_vector(
+                candidates,
+                parent_delta[int(np.argmax(np.linalg.norm(parent_delta, axis=1)))],
+            )
+
+        attempts = 0
+        while len(candidates) < 6 and attempts < 100:
+            _append_unique_unit_vector(candidates, _random_unit_vector(self.rng))
+            attempts += 1
+
+        return candidates[:6]
+
+    def _estimate_cut_balance(
+        self,
+        centers_a1,
+        centers_a2,
+        weights,
+        cut_point_cart,
+        cut_normal_cart,
+    ):
+        distances_a1 = np.dot(centers_a1 - cut_point_cart, cut_normal_cart)
+        distances_a2 = np.dot(centers_a2 - cut_point_cart, cut_normal_cart)
+
+        count1 = int(np.sum(weights[distances_a1 > 0.0]))
+        count2 = int(np.sum(weights[distances_a2 < 0.0]))
+        nmin = 1 if self.minfrac is None else max(1, int(np.ceil(self.minfrac * self.n_top)))
+        target = 0.5 * self.n_top
+        deficit = max(0, nmin - count1) + max(0, nmin - count2)
+        return (
+            abs(count1 - target)
+            + abs(count2 - target)
+            + 10.0 * deficit
+        )
+
+    def _candidate_cut_configurations(self, a1, a2, cell):
+        if self.number_of_variable_cell_vectors != 0:
+            cosp1 = np.average(a1.get_scaled_positions(), axis=0)
+            cosp2 = np.average(a2.get_scaled_positions(), axis=0)
+            cut_p = np.zeros((1, 3))
+            for i in range(3):
+                if i < self.number_of_variable_cell_vectors:
+                    cut_p[0, i] = self.rng.random()
+                else:
+                    cut_p[0, i] = 0.5 * (cosp1[i] + cosp2[i])
+            cut_n = self.rng.choice(self.number_of_variable_cell_vectors)
+            return [(0.0, cut_p, cut_n)]
+
+        centers_a1, weights = self._group_centers_and_weights(a1)
+        centers_a2, _ = self._group_centers_and_weights(a2)
+        base_cut_point = 0.5 * (
+            np.mean(a1.get_positions(), axis=0) + np.mean(a2.get_positions(), axis=0)
+        )
+        cell_array = np.asarray(cell)
+        cut_candidates = []
+
+        for cut_normal_cart in self._candidate_cut_normals(a1, a2):
+            projections = np.concatenate(
+                [
+                    np.dot(centers_a1 - base_cut_point, cut_normal_cart),
+                    np.dot(centers_a2 - base_cut_point, cut_normal_cart),
+                ]
+            )
+            shifts = [0.0]
+            if len(projections) > 0:
+                for quantile in (0.35, 0.5, 0.65):
+                    shifts.append(float(np.quantile(projections, quantile)))
+
+            cut_normal = np.linalg.solve(cell_array.T, cut_normal_cart)
+            for shift in shifts:
+                cut_point_cart = base_cut_point + shift * cut_normal_cart
+                cut_point = np.linalg.solve(cell_array.T, cut_point_cart)[np.newaxis, :]
+                score = self._estimate_cut_balance(
+                    centers_a1,
+                    centers_a2,
+                    weights,
+                    cut_point_cart,
+                    cut_normal_cart,
+                )
+                cut_candidates.append((score, cut_point, cut_normal))
+
+        cut_candidates.sort(key=lambda item: item[0])
+        return cut_candidates[:12]
 
     def update_scaling_volume(self, population, w_adapt=0.5, n_adapt=0):
         """Updates the scaling volume that is used in the pairing
@@ -232,14 +371,14 @@ class CutAndSplicePairing(OffspringCreator):
             err = "Unit cells are supposed to be identical in direction %d"
             assert np.allclose(cell1[i], cell2[i]), (err % i, cell1, cell2)
 
-        invalid = True
         counter = 0
         maxcount = 1000
         a1_copy = a1.copy()
         a2_copy = a2.copy()
+        self.last_attempt_count = 0
 
         # Run until a valid pairing is made or maxcount pairings are tested.
-        while invalid and counter < maxcount:
+        while counter < maxcount:
             counter += 1
 
             newcell = self.generate_unit_cell(cell1, cell2)
@@ -250,15 +389,9 @@ class CutAndSplicePairing(OffspringCreator):
                 # better to abort now.
                 break
 
-            # Choose direction of cutting plane normal
-            if self.number_of_variable_cell_vectors == 0:
-                # Will be generated entirely at random
-                theta = np.pi * self.rng.random()
-                phi = 2. * np.pi * self.rng.random()
-                cut_n = np.array([np.cos(phi) * np.sin(theta),
-                                  np.sin(phi) * np.sin(theta), np.cos(theta)])
-            else:
-                # Pick one of the 'variable' cell vectors
+            cut_n = None
+            if self.number_of_variable_cell_vectors != 0:
+                # Pick one of the 'variable' cell vectors.
                 cut_n = self.rng.choice(self.number_of_variable_cell_vectors)
 
             # Randomly translate parent structures
@@ -285,38 +418,32 @@ class CutAndSplicePairing(OffspringCreator):
                     if len(self.slab) == 0:
                         a_copy.center()
 
-            # Generate the cutting point in scaled coordinates
-            cosp1 = np.average(a1_copy.get_scaled_positions(), axis=0)
-            cosp2 = np.average(a2_copy.get_scaled_positions(), axis=0)
-            cut_p = np.zeros((1, 3))
-            for i in range(3):
-                if i < self.number_of_variable_cell_vectors:
-                    cut_p[0, i] = self.rng.random()
-                else:
-                    cut_p[0, i] = 0.5 * (cosp1[i] + cosp2[i])
-
-            # Perform the pairing:
-            child = self._get_pairing(a1_copy, a2_copy, cut_p, cut_n, newcell)
-            if child is None:
-                continue
-
-            # Verify whether the atoms are too close or not:
-            if atoms_too_close(child, self.blmin, use_tags=self.use_tags):
-                continue
-
-            if (
-                self.test_dist_to_slab
-                and len(self.slab) > 0
-                and atoms_too_close_two_sets(self.slab, child, self.blmin)
+            for _score, cut_p, cut_normal in self._candidate_cut_configurations(
+                a1_copy,
+                a2_copy,
+                newcell,
             ):
-                continue
+                self.last_attempt_count += 1
 
-            # Passed all the tests
-            child = self.slab + child
-            child.set_cell(newcell, scale_atoms=False)
-            if len(self.slab) == 0:
-                child.center()
-            return child
+                child = self._get_pairing(a1_copy, a2_copy, cut_p, cut_normal, newcell)
+                if child is None:
+                    continue
+
+                if atoms_too_close(child, self.blmin, use_tags=self.use_tags):
+                    continue
+
+                if (
+                    self.test_dist_to_slab
+                    and len(self.slab) > 0
+                    and atoms_too_close_two_sets(self.slab, child, self.blmin)
+                ):
+                    continue
+
+                child = self.slab + child
+                child.set_cell(newcell, scale_atoms=False)
+                if len(self.slab) == 0:
+                    child.center()
+                return child
 
         return None
 
@@ -345,6 +472,7 @@ class CutAndSplicePairing(OffspringCreator):
         if self.number_of_variable_cell_vectors == 0:
             assert np.allclose(cell1, cell2), "Parent cells are not the same"
             newcell = np.copy(cell1)
+            self.last_cell_attempt_count = 1
         else:
             count = 0
             while count < maxcount:
@@ -366,6 +494,7 @@ class CutAndSplicePairing(OffspringCreator):
             else:
                 # Did not find acceptable cell
                 newcell = None
+            self.last_cell_attempt_count = count if newcell is None else count + 1
 
         return newcell
 
@@ -492,6 +621,47 @@ class CutAndSplicePairing(OffspringCreator):
         if len(self.slab) == 0:
             child.center()
         return child
+
+
+class DualCutAndSplicePairing:
+    """Wrapper that probabilistically delegates to one of two pairing operators.
+
+    With probability ``exploratory_probability`` the exploratory (more
+    asymmetric) cut-and-splice variant is used; otherwise the primary one.
+
+    Parameters
+    ----------
+    primary : CutAndSplicePairing
+        The default pairing operator.
+    exploratory : CutAndSplicePairing
+        A more exploratory variant (e.g. lower ``minfrac``).
+    exploratory_probability : float
+        Probability of choosing *exploratory* per call.
+    rng : numpy.random.Generator or None
+        Random number generator for the selection coin flip.
+    """
+
+    def __init__(
+        self,
+        primary: CutAndSplicePairing,
+        exploratory: CutAndSplicePairing,
+        exploratory_probability: float = 0.2,
+        *,
+        rng=None,
+    ):
+        self.primary = primary
+        self.exploratory = exploratory
+        self.exploratory_probability = exploratory_probability
+        self.rng = _ensure_rng(rng)
+
+    def get_new_individual(self, parents):
+        if self.rng.random() < self.exploratory_probability:
+            return self.exploratory.get_new_individual(parents)
+        return self.primary.get_new_individual(parents)
+
+    def update_scaling_volume(self, population, **kwargs):
+        self.primary.update_scaling_volume(population, **kwargs)
+        self.exploratory.update_scaling_volume(population, **kwargs)
 
 
 # fmt: on

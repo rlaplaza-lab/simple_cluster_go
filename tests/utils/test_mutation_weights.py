@@ -17,9 +17,12 @@ def test_calculate_composition_weights_pure():
 
     assert use_permutation is False
     assert "rattle" in weights
+    assert "overlap_relief" in weights
     assert "flattening" in weights
     assert "rotational" in weights
     assert "anisotropic_rattle" in weights
+    assert "breathing" in weights
+    assert "in_plane_slide" in weights
     assert "permutation" not in weights
     assert abs(sum(weights.values()) - 1.0) < 1e-6
 
@@ -31,6 +34,8 @@ def test_calculate_composition_weights_mixed():
 
     assert use_permutation is True
     assert "permutation" in weights
+    assert "shell_swap" in weights
+    assert "overlap_relief" in weights
     assert "anisotropic_rattle" in weights
     assert weights["permutation"] > weights["rattle"]  # Should favor permutation
     assert abs(sum(weights.values()) - 1.0) < 1e-6
