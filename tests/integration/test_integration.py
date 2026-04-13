@@ -24,7 +24,6 @@ from scgo.run_minima import (
 )
 
 
-
 @pytest.mark.slow
 @pytest.mark.integration
 @pytest.mark.parametrize(
@@ -81,6 +80,7 @@ def test_full_optimizer_workflow(tmp_path, rng, optimizer, opt_kwargs):
     assert os.path.exists(output_dir)
 
     from scgo.utils.run_tracking import get_run_directories
+
     run_dirs = get_run_directories(output_dir)
     assert len(run_dirs) > 0
     run_dir = run_dirs[0]
@@ -96,21 +96,25 @@ def test_full_optimizer_workflow(tmp_path, rng, optimizer, opt_kwargs):
     assert os.path.exists(trial1_db)
 
     # Verify database integrity
-    import sqlite3
     for db_path in [trial1_db]:
         with sqlite3.connect(db_path) as conn:
             cursor = conn.cursor()
             cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
             tables = [row[0] for row in cursor.fetchall()]
             assert "systems" in tables
-            cols = [r[1] for r in cursor.execute("PRAGMA table_info(systems)").fetchall()]
-            
+            cols = [
+                r[1] for r in cursor.execute("PRAGMA table_info(systems)").fetchall()
+            ]
+
             # Check for run_id persistence
-            cursor.execute(f"SELECT {'metadata, ' if 'metadata' in cols else ''}key_value_pairs FROM systems LIMIT 5")
+            cursor.execute(
+                f"SELECT {'metadata, ' if 'metadata' in cols else ''}key_value_pairs FROM systems LIMIT 5"
+            )
             rows = cursor.fetchall()
             found_runid = False
             for row in rows:
                 import json
+
                 meta = json.loads(row[0]) if len(row) > 1 and row[0] else {}
                 kv = json.loads(row[-1]) if row[-1] else {}
                 if meta.get("run_id") or kv.get("run_id"):
@@ -132,6 +136,7 @@ def test_full_optimizer_workflow(tmp_path, rng, optimizer, opt_kwargs):
             assert len(atoms_from_file) == 3
             assert "provenance" in atoms_from_file.info
             assert "trial" in atoms_from_file.info["provenance"]
+
 
 def test_multi_trial_campaign(tmp_path, rng):
     """Test multi-trial campaign with unique minima filtering."""

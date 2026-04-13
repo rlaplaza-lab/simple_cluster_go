@@ -6,14 +6,14 @@ A compact toolkit for global optimization of small atomic clusters using ASE. SC
 
 ## Install (minimal)
 
-SCGO has a **small core** (`ase`, `numpy`, …) and two **mutually exclusive** optional MLIP stacks:
+SCGO has a small core dependency set plus two mutually exclusive MLIP extras:
 
-- **`[mace]`** — MACE + TorchSim + `nvalchemi-toolkit-ops` (GPU batched relaxation and NEB).
-- **`[uma]`** — `fairchem-core` (UMA checkpoints via `FAIRChemCalculator`).
+- `[mace]` for MACE + TorchSim + `nvalchemi-toolkit-ops`
+- `[uma]` for `fairchem-core` UMA checkpoints
 
-Do **not** install `[mace]` and `[uma]` in the same environment; dependency pins conflict. If you need both for experiments, use two separate virtualenvs or conda envs.
+Install only one of `[mace]` or `[uma]` per environment.
 
-Conda (recommended; default env uses the MACE stack):
+Conda (recommended):
 
 ```bash
 git clone https://github.com/rlaplaza-lab/simple_cluster_go.git
@@ -22,9 +22,9 @@ conda env create -f environment.yml
 conda activate scgo
 ```
 
-`environment.yml` installs the package editable with **`[mace,dev]`** (MACE stack plus `pytest`, `ruff`, `pre-commit`, etc.). For UMA-only work: `pip install -e ".[uma,dev]"` in a fresh env. For core only: `pip install -e .`.
+`environment.yml` installs the package editable with **`[mace,dev]`** (MACE/TorchSim + test/lint tooling). For a runtime-only editable install, use `pip install -e .` instead.
 
-The MACE conda env uses `torch-sim-atomistic[mace]` with `nvalchemi-toolkit-ops` for TorchSim neighbor lists. Do not install `vesin` or `vesin-torch`—they conflict with the TorchSim stack we use.
+The conda env uses `torch-sim-atomistic[mace]` with `nvalchemi-toolkit-ops` for TorchSim neighbor lists. Do not install `vesin` or `vesin-torch`—they conflict with the TorchSim stack we use.
 
 Note: SCGO requires SQLite with the JSON1 extension (for `json_extract` and related functions). If you installed using conda, ensure `sqlite` from `conda-forge` is available in your environment (e.g., `conda install -c conda-forge sqlite`). If you use pip-only installs, consider installing `pysqlite3-binary` (e.g., `pip install pysqlite3-binary`) so that the Python `sqlite3` module exposes JSON1. This repository's CI enforces JSON1 availability.
 
@@ -38,9 +38,9 @@ cd simple_cluster_go
 pip install -e ".[mace]"   # or: pip install -e ".[uma]"
 ```
 
-For the MACE stack, ensure `nvalchemi-toolkit-ops` is available; uninstall `vesin` and `vesin-torch` if you see TorchSim-related errors.
+For pip installs, the same TorchSim stack applies: ensure `nvalchemi-toolkit-ops` is available; uninstall `vesin` and `vesin-torch` if you see TorchSim-related errors.
 
-For development with tests and linting:
+For development with tests and linting (after a **runtime-only** `pip install -e .`):
 
 ```bash
 pip install -e ".[mace,dev]"   # or UMA: pip install -e ".[uma,dev]"
@@ -101,7 +101,7 @@ Notes:
 
 **Per-pair entries** in `ts_search_summary_*.json` (and overlapping fields in `neb_*_metadata.json`) typically include: `pair_id`, `status` (`success` / `failed`), `neb_converged`, `n_images`, `spring_constant`, `reactant_energy`, `product_energy`, `ts_energy`, `barrier_height`, `error`, and on success `ts_image_index`. When traceability is available, `minima_indices` and **`minima_provenance`** appear: each endpoint lists `run_id`, `trial`, `source_db`, `source_db_relpath`, `systems_row_id`, `confid`, `gaid`, `unique_id`, `final_id`, `energy` (see `scgo/ts_search/transition_state_io.py`).
 
-**`neb_{pair_id}_metadata.json`** merges the provenance header with pair fields above plus, when present: `final_fmax`, `steps_taken`, `force_calls`, `retry_history`, and NEB-parameter echoes (`use_torchsim`, `neb_backend`, `interpolation_method`, `climb`, `align_endpoints`, `perturb_sigma`, `neb_interpolation_mic`, `fmax`, `neb_steps`, etc.).
+**`neb_{pair_id}_metadata.json`** merges the provenance header with pair fields above plus, when present: `final_fmax`, `steps_taken`, `force_calls`, and NEB-parameter echoes (`use_torchsim`, `neb_backend`, `interpolation_method`, `climb`, `align_endpoints`, `perturb_sigma`, `neb_interpolation_mic`, `fmax`, `neb_steps`, etc.).
 
 ---
 
@@ -276,7 +276,7 @@ ts_results = run_transition_state_search(
 - `base_dir`: Directory containing `run_*/` folders with previous optimization results (default: `{formula}_searches`). TS artifacts are written to `base_dir/ts_results_{formula}/`.
 - `max_pairs`: Maximum number of structure pairs to evaluate
 - `energy_gap_threshold`: Only pair structures with energy gap below threshold (eV)
-- `neb_n_images`: Number of NEB images (API default 3; ``get_ts_search_params()`` uses 5 for gas and surface presets)
+- `neb_n_images`: Number of NEB images (default: 3)
 - `neb_spring_constant`: Spring constant for NEB band (default: 0.1)
 - `neb_perturb_sigma`: Interior-image perturbation (Å) applied after interpolation (default: 0.0)
 - `neb_fmax`: Force convergence criterion (default: 0.05 eV/Å)
@@ -293,7 +293,7 @@ ts_results = run_transition_state_search(
 - `"transition_state"`: TS `Atoms` on success (not serialized in summary JSON)
 - `"reactant_structure"`, `"product_structure"`: endpoint `Atoms` when kept on the result
 - `"minima_indices"`, `"minima_provenance"`: traceability back to GO databases when attached
-- `"ts_image_index"`, `"final_fmax"`, `"steps_taken"`, `"force_calls"`, `"retry_history"`: NEB diagnostics when present
+- `"ts_image_index"`, `"final_fmax"`, `"steps_taken"`, `"force_calls"`: NEB diagnostics when present
 - `"use_torchsim"`, `"neb_backend"`, interpolation/climb/MIC flags: echo NEB configuration
 - If `validate_ts_by_frequency=True`: `"ts_vib_validated"`, `"ts_vib_frequencies"`, and related vibrational fields
 

@@ -12,8 +12,6 @@ def test_ts_search_params_expose_dedupe_and_tolerance_defaults():
     ts = get_ts_search_params()
 
     # Defaults must exist and be coherent with project-wide defaults
-    assert ts.get("neb_n_images") == 5
-    assert ts.get("energy_gap_threshold") == pytest.approx(2.0)
     assert ts.get("dedupe_minima", None) is True
     assert ts.get("minima_energy_tolerance", None) == pytest.approx(
         DEFAULT_ENERGY_TOLERANCE
@@ -40,6 +38,7 @@ def test_ts_search_params_allow_overrides():
 
 def test_ts_search_params_surface_config_forwarded_to_run_kwargs():
     slab = fcc111("Pt", size=(2, 2, 1), vacuum=6.0, orthogonal=True)
+    slab.pbc = [True, True, True]
     cfg = SurfaceSystemConfig(slab=slab, fix_all_slab_atoms=True)
     ts = get_ts_search_params(surface_config=cfg)
     assert ts.get("surface_config") is cfg

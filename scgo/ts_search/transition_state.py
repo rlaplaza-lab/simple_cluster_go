@@ -4,11 +4,10 @@ from __future__ import annotations
 
 import contextlib
 import json
-import logging
 import os
 import sys
 from copy import deepcopy
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 from ase import Atoms
@@ -442,12 +441,8 @@ def find_transition_state(
         logger.info(f"Finding transition state for pair {pair_id}")
         if reactant_energy is not None:
             logger.info(f"  Reactant energy: {reactant_energy:.6f} eV")
-        else:
-            logger.info("  Reactant energy: (not present, will use relaxer)")
         if product_energy is not None:
             logger.info(f"  Product energy: {product_energy:.6f} eV")
-        else:
-            logger.info("  Product energy: (not present, will use relaxer)")
 
     result = {
         "status": "failed",
@@ -470,9 +465,6 @@ def find_transition_state(
         "perturb_sigma": float(perturb_sigma),
         "neb_interpolation_mic": bool(neb_interpolation_mic),
         "neb_tangent_method": neb_tangent_method,
-        "retry_attempted": False,
-        "retry_success": False,
-        "retry_history": [],
         "fmax": float(fmax),
         "neb_steps": int(neb_steps)
         if isinstance(neb_steps, (int, np.integer))
@@ -657,8 +649,8 @@ def find_transition_state(
         if ts_energy is None:
             raise RuntimeError(f"No TS energy found after NEB for pair {pair_id}")
 
-        reactant_energy_result: float = float(cast(float, result["reactant_energy"]))
-        product_energy_result: float = float(cast(float, result["product_energy"]))
+        reactant_energy_result = float(result["reactant_energy"])
+        product_energy_result = float(result["product_energy"])
         min_endpoint_energy = min(reactant_energy_result, product_energy_result)
 
         barrier_height = ts_energy - min_endpoint_energy
@@ -684,10 +676,8 @@ def find_transition_state(
                     pair_id,
                     max_energy_idx,
                 )
-
-            else:
-                result["status"] = "failed"
-
+        else:
+            result["status"] = "success" if result["neb_converged"] else "failed"
             result["barrier_height"] = float(barrier_height)
             result["barrier_forward"] = float(ts_energy - reactant_energy_result)
             result["barrier_reverse"] = float(ts_energy - product_energy_result)
@@ -812,8 +802,6 @@ def _neb_provenance_extra(result: dict[str, Any]) -> dict[str, Any]:
         "interpolation_method",
         "fmax",
         "neb_steps",
-        "retry_attempted",
-        "retry_success",
         "minima_indices",
         "minima_provenance",
     ):
@@ -847,8 +835,7 @@ def save_neb_result(
         _detach_calc(result["transition_state"])
         ts_path = os.path.join(output_dir, f"ts_{pair_id}.xyz")
         write(ts_path, result["transition_state"])
-        if logger.isEnabledFor(logging.INFO):
-            logger.info(f"Saved TS structure to {ts_path}")
+        logger.info(f"Saved TS structure to {ts_path}")
 
     for label, key in (
         ("reactant", "reactant_structure"),
@@ -860,8 +847,7 @@ def save_neb_result(
             _detach_calc(ep)
             ep_path = os.path.join(output_dir, f"{label}_{pair_id}.xyz")
             write(ep_path, ep)
-            if logger.isEnabledFor(logging.INFO):
-                logger.info(f"Saved {label} endpoint structure to {ep_path}")
+            logger.info(f"Saved {label} endpoint structure to {ep_path}")
 
     metadata = ts_output_provenance(extra=_neb_provenance_extra(result))
     metadata.update(
@@ -885,12 +871,8 @@ def save_neb_result(
     if result["status"] == "success":
         metadata["ts_image_index"] = result.get("ts_image_index")
 
-    if result.get("retry_history"):
-        metadata["retry_history"] = result["retry_history"]
-
     metadata_path = os.path.join(output_dir, f"neb_{pair_id}_metadata.json")
     with open(metadata_path, "w") as f:
         json.dump(metadata, f, indent=2)
 
-    if logger.isEnabledFor(logging.INFO):
-        logger.info(f"Saved NEB metadata to {metadata_path}")
+    logger.info(f"Saved NEB metadata to {metadata_path}")

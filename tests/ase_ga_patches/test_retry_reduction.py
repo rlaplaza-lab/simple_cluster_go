@@ -12,10 +12,12 @@ These tests check:
 """
 
 import numpy as np
-import pytest
 from ase import Atoms
-from ase_ga.utilities import closest_distances_generator, get_all_atom_types
-from ase_ga.utilities import atoms_too_close
+from ase_ga.utilities import (
+    atoms_too_close,
+    closest_distances_generator,
+    get_all_atom_types,
+)
 
 from scgo.algorithms.ga_common import create_mutation_operators
 from scgo.ase_ga_patches.cutandsplicepairing import CutAndSplicePairing
@@ -49,8 +51,11 @@ class TestRattleGuaranteedSelection:
         atoms = pt4_tetrahedron.copy()
         blmin = _blmin(atoms)
         mut = RattleMutation(
-            blmin, len(atoms), rattle_strength=0.3,
-            rattle_prop=0.01, rng=np.random.default_rng(7),
+            blmin,
+            len(atoms),
+            rattle_strength=0.3,
+            rattle_prop=0.01,
+            rng=np.random.default_rng(7),
         )
         result = mut.mutate(atoms)
         assert result is not None
@@ -64,8 +69,11 @@ class TestRattleGuaranteedSelection:
         successes = 0
         for seed in range(20):
             mut = RattleMutation(
-                blmin, len(atoms), rattle_strength=0.3,
-                rattle_prop=0.0, rng=np.random.default_rng(seed),
+                blmin,
+                len(atoms),
+                rattle_strength=0.3,
+                rattle_prop=0.0,
+                rng=np.random.default_rng(seed),
             )
             result = mut.mutate(atoms)
             if result is not None:
@@ -78,13 +86,15 @@ class TestRattleGuaranteedSelection:
 # 2. AnisotropicRattleMutation always moves at least one atom
 # ---------------------------------------------------------------------------
 class TestAnisotropicRattleGuaranteedSelection:
-
     def test_low_rattle_prop_still_succeeds(self, pt4_tetrahedron):
         atoms = pt4_tetrahedron.copy()
         blmin = {(78, 78): 0.1}
         mut = AnisotropicRattleMutation(
-            blmin, len(atoms), in_plane_strength=0.3,
-            normal_strength=0.05, rattle_prop=0.01,
+            blmin,
+            len(atoms),
+            in_plane_strength=0.3,
+            normal_strength=0.05,
+            rattle_prop=0.01,
             test_dist_to_slab=False,
             rng=np.random.default_rng(12),
         )
@@ -96,7 +106,6 @@ class TestAnisotropicRattleGuaranteedSelection:
 # 3. RotationalMutation angle is in [min_angle, pi]
 # ---------------------------------------------------------------------------
 class TestRotationalMutationAngleRange:
-
     def test_angle_within_correct_range(self, pt4_tetrahedron):
         """Monkey-patch rng.random to record the raw draw and verify
         the angle formula produces values in [min_angle, pi]."""
@@ -117,8 +126,12 @@ class TestRotationalMutationAngleRange:
         atoms.center(vacuum=10.0)
         blmin = {(78, 78): 0.1}
         mut = RotationalMutation(
-            blmin, n_top=4, fraction=1.0, min_angle=np.pi / 2,
-            test_dist_to_slab=False, rng=np.random.default_rng(42),
+            blmin,
+            n_top=4,
+            fraction=1.0,
+            min_angle=np.pi / 2,
+            test_dist_to_slab=False,
+            rng=np.random.default_rng(42),
         )
         result = mut.mutate(atoms)
         assert result is not None
@@ -128,7 +141,6 @@ class TestRotationalMutationAngleRange:
 # 4. Diatomic rotation axis is rejection-free
 # ---------------------------------------------------------------------------
 class TestDiatomicAxisRejectionFree:
-
     def test_axis_perpendicular_to_bond(self):
         """The cross-product method should always produce an axis
         with angle in (0, pi/2] relative to the bond direction."""
@@ -150,13 +162,13 @@ class TestDiatomicAxisRejectionFree:
 # 5. PermutationMutation uses bounded pair selection
 # ---------------------------------------------------------------------------
 class TestPermutationBoundedPairSelection:
-
     def test_bimetallic_permutation_succeeds(self, au2pt2_atoms):
         """Permutation on bimetallic cluster should succeed without
         spinning in an unbounded inner loop."""
         atoms = au2pt2_atoms.copy()
         mut = PermutationMutation(
-            len(atoms), probability=1.0,
+            len(atoms),
+            probability=1.0,
             rng=np.random.default_rng(5),
         )
         result = mut.mutate(atoms)
@@ -171,13 +183,18 @@ class TestPermutationBoundedPairSelection:
         atoms = Atoms(
             "Pt5Au",
             positions=[
-                [0, 0, 0], [2.5, 0, 0], [0, 2.5, 0],
-                [2.5, 2.5, 0], [1.25, 1.25, 2.5], [3.75, 1.25, 2.5],
+                [0, 0, 0],
+                [2.5, 0, 0],
+                [0, 2.5, 0],
+                [2.5, 2.5, 0],
+                [1.25, 1.25, 2.5],
+                [3.75, 1.25, 2.5],
             ],
         )
         atoms.center(vacuum=10.0)
         mut = PermutationMutation(
-            len(atoms), probability=1.0,
+            len(atoms),
+            probability=1.0,
             rng=np.random.default_rng(8),
         )
         result = mut.mutate(atoms)
@@ -188,7 +205,6 @@ class TestPermutationBoundedPairSelection:
 # 6. OverlapReliefMutation repairs clashes in one bounded call
 # ---------------------------------------------------------------------------
 class TestOverlapReliefBoundedRepair:
-
     def test_dense_cluster_is_repaired_without_outer_retry(self):
         atoms = Atoms(
             "Pt4",
@@ -219,7 +235,6 @@ class TestOverlapReliefBoundedRepair:
 # 7. Active factory mirror uses reflected mode to avoid long rejection runs
 # ---------------------------------------------------------------------------
 class TestMirrorFactoryUsesReflectedMode:
-
     def test_factory_configures_reflected_mirror(self, au2pt2_atoms):
         atoms = au2pt2_atoms.copy()
         blmin = _blmin(atoms)
@@ -238,12 +253,13 @@ class TestMirrorFactoryUsesReflectedMode:
 # 8. FlatteningMutation vectorised projection matches scalar version
 # ---------------------------------------------------------------------------
 class TestFlatteningVectorised:
-
     def test_flattening_produces_valid_output(self, pt4_tetrahedron):
         atoms = pt4_tetrahedron.copy()
         blmin = _blmin(atoms)
         mut = FlatteningMutation(
-            blmin, len(atoms), thickness_factor=1.0,
+            blmin,
+            len(atoms),
+            thickness_factor=1.0,
             rng=np.random.default_rng(1),
         )
         result = mut.mutate(atoms)
@@ -259,9 +275,9 @@ class TestFlatteningVectorised:
 
         theta = np.arccos(1.0 - 2.0 * rng.random())
         phi = rng.random() * 2 * np.pi
-        n = np.array([np.sin(theta) * np.cos(phi),
-                      np.sin(theta) * np.sin(phi),
-                      np.cos(theta)])
+        n = np.array(
+            [np.sin(theta) * np.cos(phi), np.sin(theta) * np.sin(phi), np.cos(theta)]
+        )
 
         thickness = 0.5
         perts = rng.uniform(-thickness / 2, thickness / 2, size=len(pos))
@@ -286,7 +302,6 @@ class TestFlatteningVectorised:
 # 9. BreathingMutation uses bounded feasible scales
 # ---------------------------------------------------------------------------
 class TestBreathingBoundedCandidates:
-
     def test_breathing_uses_feasible_scale_set(self, pt3_atoms):
         atoms = pt3_atoms.copy()
         blmin = _blmin(atoms)
@@ -309,7 +324,6 @@ class TestBreathingBoundedCandidates:
 # 10. InPlaneSlideMutation uses bounded geometry-guided shifts
 # ---------------------------------------------------------------------------
 class TestInPlaneSlideBoundedCandidates:
-
     def test_in_plane_slide_uses_ranked_shift_set(self):
         from ase.build import fcc111
 
@@ -350,15 +364,24 @@ class TestInPlaneSlideBoundedCandidates:
 # 11. CutAndSplicePairing uses a bounded ranked cut set
 # ---------------------------------------------------------------------------
 class TestCutAndSpliceRankedCandidates:
-
     def test_cut_and_splice_uses_bounded_ranked_candidates(self, au2pt2_atoms):
         atoms1 = au2pt2_atoms.copy()
         atoms2 = au2pt2_atoms.copy()
         atoms1.positions += np.array(
-            [[0.08, 0.00, 0.00], [0.00, 0.08, 0.00], [0.00, 0.00, 0.08], [0.06, 0.04, 0.00]]
+            [
+                [0.08, 0.00, 0.00],
+                [0.00, 0.08, 0.00],
+                [0.00, 0.00, 0.08],
+                [0.06, 0.04, 0.00],
+            ]
         )
         atoms2.positions += np.array(
-            [[0.00, 0.08, 0.00], [0.00, 0.00, 0.08], [0.08, 0.00, 0.00], [0.00, 0.04, 0.06]]
+            [
+                [0.00, 0.08, 0.00],
+                [0.00, 0.00, 0.08],
+                [0.08, 0.00, 0.00],
+                [0.00, 0.04, 0.06],
+            ]
         )
 
         pairing = CutAndSplicePairing(
@@ -378,7 +401,6 @@ class TestCutAndSpliceRankedCandidates:
 # 12. Uniform sphere sampling (statistical check)
 # ---------------------------------------------------------------------------
 class TestUniformSphereSampling:
-
     def test_arccos_formula_is_uniform(self):
         """theta = arccos(1 - 2u) should produce uniform cos(theta)."""
         rng = np.random.default_rng(0)
@@ -407,7 +429,6 @@ class TestUniformSphereSampling:
 # 13. Population roulette-wheel loops are capped
 # ---------------------------------------------------------------------------
 class TestPopulationSelectionCapped:
-
     def test_get_one_candidate_always_terminates(self, pt3_atoms, rng, tmp_path):
         """get_one_candidate should return a result (not hang) even
         with skewed fitness values, thanks to the iteration cap."""

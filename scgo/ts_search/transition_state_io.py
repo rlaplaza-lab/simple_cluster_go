@@ -258,6 +258,7 @@ def select_structure_pairs(
     energy_gap_threshold: float | None = None,
     similarity_tolerance: float = DEFAULT_COMPARATOR_TOL,
     similarity_pair_cor_max: float = 0.1,
+    pair_priority_mode: str = "physics",
     surface_aware: bool = False,
 ) -> list[tuple[int, int]]:
     """Select pairs of minima for TS calculations.
@@ -278,12 +279,19 @@ def select_structure_pairs(
             to pair. Default `DEFAULT_COMPARATOR_TOL` (tighter than GA duplicate detection).
         similarity_pair_cor_max: Maximum single distance difference tolerance.
             Default 0.1 Å (tighter than GA to ensure truly distinct structures).
+        pair_priority_mode: Pair ranking strategy when capping pair count.
+            "physics" ranks by the score below; "legacy" keeps discovery order.
         surface_aware: Use slightly looser scoring scales (slab / periodic systems).
 
     Returns:
         List of (index1, index2) tuples where index1 < index2, indicating which minima to pair.
     """
     logger = get_logger(__name__)
+
+    if pair_priority_mode not in {"physics", "legacy"}:
+        raise ValueError(
+            f"pair_priority_mode must be 'physics' or 'legacy', got {pair_priority_mode!r}"
+        )
 
     if len(minima) < 2:
         logger.info(f"Only {len(minima)} minima, need at least 2 to pair")
@@ -366,8 +374,10 @@ def select_structure_pairs(
     if not scored_pairs:
         return []
 
-    # Deterministic ordering: higher score first, then stable index tie-break.
-    scored_pairs.sort(key=lambda item: (-item[0], item[1], item[2]))
+    if pair_priority_mode == "physics":
+        # Deterministic ordering: higher score first, then stable index tie-break.
+        scored_pairs.sort(key=lambda item: (-item[0], item[1], item[2]))
+    # For "legacy", preserve the original nested-loop discovery order.
     ranked_pairs = [(i, j) for _score, i, j in scored_pairs]
     if max_pairs is None:
         return ranked_pairs
@@ -470,34 +480,30 @@ def save_transition_state_results(
     return summary_path
 
 
-def _unique_ts_representatives_for_clustering(
-    energy_atoms_list: list[tuple[float, Atoms]],
+def _cluster_ts_candidates_globally(
+    candidates: list[tuple[float, Atoms, str, tuple[int, int], dict[str, Any]]],
     energy_tolerance: float,
     similarity_tolerance: float,
     similarity_pair_cor_max: float,
-) -> list[tuple[float, Atoms]]:
-    """Pick non-redundant TS representatives without ASE GA comparators.
-
-    ``filter_unique_minima`` uses ``ase_ga`` comparators that call
-    ``Atoms.get_potential_energy()``; TS ``Atoms`` here have no calculator after
-    NEB. We instead deduplicate using stored energies plus
-    ``calculate_structure_similarity`` (same geometry notion as elsewhere in
-    this module).
-    """
-    if not energy_atoms_list:
+) -> list[list[tuple[float, Atoms, str, tuple[int, int], dict[str, Any]]]]:
+    """Cluster TS candidates by energy + geometry in one deterministic pass."""
+    if not candidates:
         return []
 
-    sorted_pairs = sorted(energy_atoms_list, key=lambda x: x[0])
-    unique_reps: list[tuple[float, Atoms]] = []
+    sorted_candidates = sorted(candidates, key=lambda c: c[0])
+    clusters: list[list[tuple[float, Atoms, str, tuple[int, int], dict[str, Any]]]] = []
+    representatives: list[tuple[float, Atoms]] = []
 
-    for energy, atoms in sorted_pairs:
-        is_duplicate = False
-        for u_e, u_a in unique_reps:
-            if abs(energy - u_e) > energy_tolerance:
+    for cand in sorted_candidates:
+        energy, atoms, *_ = cand
+        matched_idx: int | None = None
+
+        for idx, (rep_energy, rep_atoms) in enumerate(representatives):
+            if abs(float(energy) - float(rep_energy)) > energy_tolerance:
                 continue
             try:
-                _c, _m, are_similar = calculate_structure_similarity(
-                    u_a,
+                _cum, _maxd, are_similar = calculate_structure_similarity(
+                    rep_atoms,
                     atoms,
                     tolerance=similarity_tolerance,
                     pair_cor_max=similarity_pair_cor_max,
@@ -505,65 +511,14 @@ def _unique_ts_representatives_for_clustering(
             except (ValueError, TypeError, RuntimeError):
                 are_similar = False
             if are_similar:
-                is_duplicate = True
+                matched_idx = idx
                 break
-        if not is_duplicate:
-            unique_reps.append((energy, atoms))
 
-    return unique_reps
-
-
-def _cluster_ts_candidates_globally(
-    candidates: list[tuple[float, Atoms, str, tuple[int, int], dict[str, Any]]],
-    energy_tolerance: float,
-    similarity_tolerance: float,
-    similarity_pair_cor_max: float,
-) -> list[list[tuple[float, Atoms, str, tuple[int, int], dict[str, Any]]]]:
-    """Cluster TS candidates by geometry across all minima pairs.
-
-    Builds representative structures via energy + geometry only (no calculator),
-    then assigns each candidate to the first representative for which
-    ``calculate_structure_similarity`` passes (same logic as per-pair dedup).
-    Candidates matching no representative form singleton clusters.
-    """
-    if not candidates:
-        return []
-
-    energy_atoms_list = [(en, at) for en, at, *_ in candidates]
-    unique_reps = _unique_ts_representatives_for_clustering(
-        energy_atoms_list,
-        energy_tolerance,
-        similarity_tolerance,
-        similarity_pair_cor_max,
-    )
-
-    assigned = [False] * len(candidates)
-    clusters: list[list[tuple[float, Atoms, str, tuple[int, int], dict[str, Any]]]] = []
-
-    for _rep_energy, rep_atoms in unique_reps:
-        cluster: list[tuple[float, Atoms, str, tuple[int, int], dict[str, Any]]] = []
-        for idx, cand in enumerate(candidates):
-            if assigned[idx]:
-                continue
-            energy, a, _pair_id, _mins_idx, _result = cand
-            try:
-                _cum, _maxd, are_similar = calculate_structure_similarity(
-                    rep_atoms,
-                    a,
-                    tolerance=similarity_tolerance,
-                    pair_cor_max=similarity_pair_cor_max,
-                )
-            except (ValueError, TypeError):
-                are_similar = False
-            if are_similar:
-                cluster.append(cand)
-                assigned[idx] = True
-        if cluster:
-            clusters.append(cluster)
-
-    for idx, cand in enumerate(candidates):
-        if not assigned[idx]:
+        if matched_idx is None:
             clusters.append([cand])
+            representatives.append((float(energy), atoms))
+        else:
+            clusters[matched_idx].append(cand)
 
     return clusters
 

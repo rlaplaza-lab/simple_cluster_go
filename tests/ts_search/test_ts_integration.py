@@ -225,7 +225,6 @@ def test_run_transition_state_search_with_climb(mock_database_dir):
     # run produced diagnostics rather than silently failing.
     assert any(
         r.get("neb_converged")
-        or r.get("retry_success")
         or (r.get("final_fmax") is not None and r.get("final_fmax") < 0.3)
         for r in results
     ), "Expected at least one converged/diagnosed NEB run when climb=True"

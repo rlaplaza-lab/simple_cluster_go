@@ -97,9 +97,7 @@ def _assert_accepted_geometry(
     assert np.allclose(atoms.get_cell(), parent.get_cell())
     assert np.all(atoms.get_pbc() == parent.get_pbc())
     if n_slab == 0:
-        assert not atoms_too_close(
-            atoms, blmin, use_tags=adsorbate_use_tags
-        )
+        assert not atoms_too_close(atoms, blmin, use_tags=adsorbate_use_tags)
     else:
         slab_part = atoms[:n_slab]
         ads = atoms[n_slab:]
@@ -433,7 +431,7 @@ def test_crossover_gas_pt55_random_spherical_then_rattle_mutate() -> None:
     p1 = _prepare_ga_parent(p1_raw, confid=1)
     p2 = _prepare_ga_parent(p2_raw, confid=2)
     rng_pert = np.random.default_rng(5)
-    for p, subseed in ((p1, 1), (p2, 2)):
+    for p, _subseed in ((p1, 1), (p2, 2)):
         for _trial in range(30):
             delta = rng_pert.normal(0, 0.06, size=p.positions.shape)
             trial_pos = p.positions + delta
@@ -443,10 +441,14 @@ def test_crossover_gas_pt55_random_spherical_then_rattle_mutate() -> None:
                 p.positions[:] = trial_pos
                 break
         else:
-            pytest.fail(f"could not apply small diversity perturbation (confid={p.info['confid']})")
+            pytest.fail(
+                f"could not apply small diversity perturbation (confid={p.info['confid']})"
+            )
 
     child = _crossover_child(p1, p2, 55, blmin, 0, None, p1.copy())
-    assert child is not None, f"crossover failed after {MAX_CROSSOVER_ATTEMPTS} attempts"
+    assert child is not None, (
+        f"crossover failed after {MAX_CROSSOVER_ATTEMPTS} attempts"
+    )
 
     mut_ok = False
     for attempt in range(MAX_MUTATION_ATTEMPTS):
@@ -466,9 +468,7 @@ def test_crossover_gas_pt55_random_spherical_then_rattle_mutate() -> None:
         mutated = rattle.mutate(child)
         if mutated is None:
             continue
-        _assert_accepted_geometry(
-            mutated, 0, blmin, p1, adsorbate_use_tags=False
-        )
+        _assert_accepted_geometry(mutated, 0, blmin, p1, adsorbate_use_tags=False)
         mut_ok = True
         break
     assert mut_ok, "rattle.mutate after crossover did not yield accepted geometry"
@@ -484,7 +484,9 @@ def test_crossover_surface_pt20_then_rattle_mutate() -> None:
     p2 = _prepare_ga_parent(raw_p2, confid=2)
 
     child = _crossover_child(p1, p2, len(composition), blmin, n_slab, slab, tmpl)
-    assert child is not None, f"surface crossover failed after {MAX_CROSSOVER_ATTEMPTS} attempts"
+    assert child is not None, (
+        f"surface crossover failed after {MAX_CROSSOVER_ATTEMPTS} attempts"
+    )
 
     mut_ok = False
     for attempt in range(MAX_MUTATION_ATTEMPTS):
@@ -504,12 +506,12 @@ def test_crossover_surface_pt20_then_rattle_mutate() -> None:
         mutated = rattle.mutate(child)
         if mutated is None:
             continue
-        _assert_accepted_geometry(
-            mutated, n_slab, blmin, p1, adsorbate_use_tags=False
-        )
+        _assert_accepted_geometry(mutated, n_slab, blmin, p1, adsorbate_use_tags=False)
         mut_ok = True
         break
-    assert mut_ok, "rattle.mutate after surface crossover did not yield accepted geometry"
+    assert mut_ok, (
+        "rattle.mutate after surface crossover did not yield accepted geometry"
+    )
 
 
 @pytest.mark.slow
@@ -544,4 +546,6 @@ def test_crossover_gas_pt55_dual_pairing_accepts_offspring() -> None:
         p1.copy(),
         exploratory_crossover_probability=0.25,
     )
-    assert child is not None, f"dual crossover failed after {MAX_CROSSOVER_ATTEMPTS} attempts"
+    assert child is not None, (
+        f"dual crossover failed after {MAX_CROSSOVER_ATTEMPTS} attempts"
+    )

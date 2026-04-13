@@ -341,17 +341,16 @@ def test_find_ts_with_climb(cu3_triangle, cu3_linear, temp_output_dir):
     assert result["neb_converged"] is True
 
 
-def test_find_transition_state_auto_retry_recovers_cu3(
+def test_find_transition_state_endpoint_failure_cu3(
     cu3_triangle, cu3_linear, temp_output_dir
 ):
-    """If the initial NEB reports an endpoint TS, the staged-retry should recover an interior saddle for Cu3."""
-    # Use conservative initial settings that commonly lead to endpoint outcomes
+    """NEB with conservative settings may report an endpoint TS; verify graceful failure."""
     result = find_transition_state(
         cu3_triangle,
         cu3_linear,
         calculator=EMT(),
         output_dir=temp_output_dir,
-        pair_id="cu3_retry",
+        pair_id="cu3_endpoint",
         n_images=3,
         spring_constant=0.1,
         fmax=0.05,
@@ -360,17 +359,13 @@ def test_find_transition_state_auto_retry_recovers_cu3(
         rng=np.random.default_rng(0),
     )
 
-    # Expect the single conservative retry to have been attempted and to succeed
-    assert result.get("retry_attempted") is True
-    assert result.get("retry_success") is True
-    assert result["status"] == "success"
-    assert result["neb_converged"] is True
-    assert result.get("ts_image_index") not in (0, result.get("n_images") + 1)
-    # Original attempt + single retry
-    assert (
-        isinstance(result.get("retry_history"), list)
-        and len(result.get("retry_history")) == 2
-    )
+    # Result should be either success (interior TS) or failed (endpoint TS)
+    assert result["status"] in ("success", "failed")
+    if result["status"] == "success":
+        assert result["neb_converged"] is True
+        assert result.get("ts_image_index") not in (0, result.get("n_images") + 1)
+    else:
+        assert result.get("error") is not None
 
 
 def test_find_ts_linear_interpolation(h2_reactant, h2_product, temp_output_dir):
@@ -661,6 +656,39 @@ def test_select_structure_pairs_physics_ranking_when_capped(monkeypatch):
     assert ranked == [(1, 2), (0, 2)]
 
 
+def test_select_structure_pairs_legacy_order_when_capped(monkeypatch):
+    """Legacy mode should preserve discovery order for capped pair lists."""
+    atoms0 = Atoms("H2", positions=[[0.0, 0, 0], [1.0, 0, 0]])
+    atoms1 = Atoms("H2", positions=[[1.0, 0, 0], [1.5, 0, 0]])
+    atoms2 = Atoms("H2", positions=[[2.0, 0, 0], [2.5, 0, 0]])
+    minima = [(-1.0, atoms0), (-0.95, atoms1), (-0.55, atoms2)]
+
+    def _fake_similarity(
+        a_i: Atoms,
+        a_j: Atoms,
+        tolerance: float = 0.1,
+        pair_cor_max: float = 0.1,
+    ) -> tuple[float, float, bool]:
+        _ = (a_i, a_j, tolerance, pair_cor_max)
+        return (0.2, 0.1, False)
+
+    monkeypatch.setattr(
+        "scgo.ts_search.transition_state_io.calculate_structure_similarity",
+        _fake_similarity,
+    )
+
+    ranked = select_structure_pairs(minima, max_pairs=2, pair_priority_mode="legacy")
+    assert ranked == [(0, 1), (0, 2)]
+
+
+def test_select_structure_pairs_invalid_priority_mode_raises():
+    atoms = Atoms("H2", positions=[[0, 0, 0], [1, 0, 0]])
+    minima = [(-1.0, atoms), (-0.9, atoms.copy())]
+
+    with pytest.raises(ValueError, match="pair_priority_mode"):
+        select_structure_pairs(minima, pair_priority_mode="invalid")
+
+
 def test_find_ts_emt_basic(cu3_triangle, cu3_linear, temp_output_dir):
     """Test TS finding with EMT calculator on CPU.
 
@@ -682,11 +710,7 @@ def test_find_ts_emt_basic(cu3_triangle, cu3_linear, temp_output_dir):
 
     # Verify EMT path was used (not TorchSim)
     assert result["use_torchsim"] is False
-    # n_images may be 3 (original) or 5 (if the retry mechanism was triggered)
-    if result.get("retry_attempted") and result.get("retry_success"):
-        assert result["n_images"] >= 3
-    else:
-        assert result["n_images"] == 3
+    assert result["n_images"] == 3
     # Either converged or failed gracefully with error
     assert result["status"] in ["success", "failed"]
     # If successful, check key outputs
@@ -730,10 +754,7 @@ def test_find_ts_mace_cpu(cu3_triangle, cu3_linear, temp_output_dir):
 
     # Verify MACE CPU path was used
     assert result["use_torchsim"] is False
-    if result.get("retry_attempted") and result.get("retry_success"):
-        assert result["n_images"] >= 3
-    else:
-        assert result["n_images"] == 3
+    assert result["n_images"] == 3
     assert result["status"] in ["success", "failed"]
     if result["status"] == "success":
         assert "transition_state" in result

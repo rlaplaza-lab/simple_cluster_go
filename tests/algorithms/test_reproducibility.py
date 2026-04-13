@@ -30,38 +30,39 @@ from tests.test_utils import (
 )
 
 
-import pytest
-
-@pytest.mark.parametrize("algorithm,seed,kwargs", [
-    (
-        bh_go,
-        123,
-        {
-            "optimizer": LBFGS,
-            "temperature": 0.01,
-            "fmax": 0.2,
-            "niter": 3,
-            "niter_local_relaxation": 8,
-            "dr": 0.2,
-            "move_fraction": 0.5,
-        }
-    ),
-    (
-        ga_go,
-        456,
-        {
-            "population_size": 4,
-            "niter": 2,
-            "niter_local_relaxation": 10,
-            "optimizer": LBFGS,
-            "fmax": 0.2,
-            "vacuum": 5.0,
-            "energy_tolerance": 0.1,
-            "n_jobs_population_init": -2,  # Parallel for tests
-            "mutation_probability": 0.2,
-        }
-    )
-])
+@pytest.mark.parametrize(
+    "algorithm,seed,kwargs",
+    [
+        (
+            bh_go,
+            123,
+            {
+                "optimizer": LBFGS,
+                "temperature": 0.01,
+                "fmax": 0.2,
+                "niter": 3,
+                "niter_local_relaxation": 8,
+                "dr": 0.2,
+                "move_fraction": 0.5,
+            },
+        ),
+        (
+            ga_go,
+            456,
+            {
+                "population_size": 4,
+                "niter": 2,
+                "niter_local_relaxation": 10,
+                "optimizer": LBFGS,
+                "fmax": 0.2,
+                "vacuum": 5.0,
+                "energy_tolerance": 0.1,
+                "n_jobs_population_init": -2,  # Parallel for tests
+                "mutation_probability": 0.2,
+            },
+        ),
+    ],
+)
 def test_algorithm_reproducibility(tmp_path, algorithm, seed, kwargs):
     comp = ["Pt", "Pt", "Pt"]
 

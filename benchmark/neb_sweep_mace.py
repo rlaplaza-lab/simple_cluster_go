@@ -126,6 +126,7 @@ def load_bundle_from_searches(
     similarity_tolerance: float,
     similarity_pair_cor_max: float,
     surface_aware: bool,
+    pair_priority_mode: str,
     minima_energy_tolerance: float,
     neb_steps_override: int | None,
     neb_steps_scale: float,
@@ -150,6 +151,7 @@ def load_bundle_from_searches(
         energy_gap_threshold=energy_gap_threshold,
         similarity_tolerance=similarity_tolerance,
         similarity_pair_cor_max=similarity_pair_cor_max,
+        pair_priority_mode=pair_priority_mode,
         surface_aware=surface_aware,
     )
     if not pairs_all:
@@ -180,6 +182,7 @@ def load_bundle_from_searches(
             "sample_paths_requested": sample_paths,
             "max_pairs_requested": max_pairs,
             "energy_gap_threshold_ev": energy_gap_threshold,
+            "pair_priority_mode": pair_priority_mode,
             "surface_aware": surface_aware,
             "neb_steps_base": neb_steps,
         },
@@ -320,6 +323,7 @@ def row_for_result(
         "reactant_energy_ev": e_i,
         "product_energy_ev": e_j,
         "energy_gap_ev": float(abs(e_j - e_i)),
+        "pair_priority_mode": bundle.meta["pair_priority_mode"],
         "pair_similarity_cum_diff": float(pair_similarity_cum_diff),
         "pair_similarity_max_diff": float(pair_similarity_max_diff),
         "n_minima_loaded": int(bundle.meta["n_minima_loaded"]),
@@ -438,6 +442,9 @@ def main() -> None:
     parser.add_argument("--sample-paths", type=int, default=5)
     parser.add_argument("--energy-gap-threshold", type=float, default=1.0)
     parser.add_argument(
+        "--pair-priority-mode", choices=("legacy", "physics"), default="physics"
+    )
+    parser.add_argument(
         "--similarity-tolerance", type=float, default=DEFAULT_COMPARATOR_TOL
     )
     parser.add_argument("--similarity-pair-cor-max", type=float, default=0.1)
@@ -529,6 +536,7 @@ def main() -> None:
             similarity_tolerance=args.similarity_tolerance,
             similarity_pair_cor_max=args.similarity_pair_cor_max,
             surface_aware=False,
+            pair_priority_mode=args.pair_priority_mode,
             minima_energy_tolerance=DEFAULT_ENERGY_TOLERANCE,
             neb_steps_override=gas_neb_override,
             neb_steps_scale=1.0,
@@ -544,6 +552,7 @@ def main() -> None:
             similarity_tolerance=args.similarity_tolerance,
             similarity_pair_cor_max=args.similarity_pair_cor_max,
             surface_aware=True,
+            pair_priority_mode=args.pair_priority_mode,
             minima_energy_tolerance=DEFAULT_ENERGY_TOLERANCE,
             neb_steps_override=sup_neb_override,
             neb_steps_scale=sup_scale,

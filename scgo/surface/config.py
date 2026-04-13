@@ -107,7 +107,9 @@ class SurfaceSystemConfig:
         if not all(self.slab.pbc):
             import warnings
 
-            warnings.warn("Extending slab periodicity to 3D for VASP compatibility.", stacklevel=2)
+            warnings.warn(
+                "Extending slab periodicity to 3D for VASP compatibility.", stacklevel=2
+            )
             self.slab.pbc = [True, True, True]
 
         vacuum_length = self.slab.cell.lengths()[self.surface_normal_axis]
@@ -116,7 +118,8 @@ class SurfaceSystemConfig:
 
             warnings.warn(
                 f"Slab vacuum size ({vacuum_length:.2f} \u00c5) on axis {self.surface_normal_axis} "
-                "might be too small to prevent periodic interaction.", stacklevel=2
+                "might be too small to prevent periodic interaction.",
+                stacklevel=2,
             )
 
         if (

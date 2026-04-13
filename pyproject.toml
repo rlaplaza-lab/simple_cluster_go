@@ -41,14 +41,14 @@ Issues = "https://github.com/rlaplaza-lab/simple_cluster_go/issues"
 [project.optional-dependencies]
 # Install exactly one of [mace] or [uma] for MLIPs; they use incompatible dependency stacks.
 mace = [
-    "e3nn>=0.4.4",  # Pinned for current mace-torch model-loading behavior.
+    "e3nn>=0.4.4,<0.5",  # Keep 0.4.x for current mace-torch model-loading behavior.
     "mace-torch>=0.3.15",
     "nvalchemi-toolkit-ops>=0.3.0",
-    "torch>=2.0.0",
+    "torch>=2.10.0",
     "torch-sim-atomistic[mace]>=0.5.2",
 ]
 uma = [
-    "fairchem-core>=2.11.0",
+    "fairchem-core>=2.19.0",
 ]
 test = [
     "pytest>=7.0.0",

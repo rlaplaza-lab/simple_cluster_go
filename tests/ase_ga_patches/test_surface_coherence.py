@@ -21,15 +21,14 @@ from scgo.ase_ga_patches.standardmutations import (
     FlatteningMutation,
     InPlaneSlideMutation,
     MirrorMutation,
-    PermutationMutation,
     RattleMutation,
     RotationalMutation,
 )
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_surface_system(n_adsorbate=3, seed=0):
     """Create a small slab + adsorbate system for testing.
@@ -100,8 +99,12 @@ class TestSlabPositionsPreserved:
     def test_rattle_preserves_slab(self, surface_system, seed):
         combined, slab, n_slab, n_top, blmin = surface_system
         mut = RattleMutation(
-            blmin, n_top, rattle_strength=0.8, rattle_prop=0.6,
-            test_dist_to_slab=True, rng=np.random.default_rng(seed),
+            blmin,
+            n_top,
+            rattle_strength=0.8,
+            rattle_prop=0.6,
+            test_dist_to_slab=True,
+            rng=np.random.default_rng(seed),
         )
         result = mut.mutate(combined)
         if result is not None:
@@ -112,7 +115,9 @@ class TestSlabPositionsPreserved:
     def test_anisotropic_preserves_slab(self, surface_system, seed):
         combined, slab, n_slab, n_top, blmin = surface_system
         mut = AnisotropicRattleMutation(
-            blmin, n_top, test_dist_to_slab=True,
+            blmin,
+            n_top,
+            test_dist_to_slab=True,
             rng=np.random.default_rng(seed),
         )
         result = mut.mutate(combined)
@@ -124,7 +129,9 @@ class TestSlabPositionsPreserved:
     def test_mirror_preserves_slab(self, surface_system, seed):
         combined, slab, n_slab, n_top, blmin = surface_system
         mut = MirrorMutation(
-            blmin, n_top, rng=np.random.default_rng(seed),
+            blmin,
+            n_top,
+            rng=np.random.default_rng(seed),
         )
         result = mut.mutate(combined)
         if result is not None:
@@ -145,8 +152,12 @@ class TestSlabPositionsPreserved:
         tags2 = [0] * n_slab2 + [1, 1, 2, 2]
         combined2.set_tags(tags2)
         mut = RotationalMutation(
-            blmin2, n_top2, fraction=1.0, min_angle=0.5,
-            test_dist_to_slab=True, rng=np.random.default_rng(seed),
+            blmin2,
+            n_top2,
+            fraction=1.0,
+            min_angle=0.5,
+            test_dist_to_slab=True,
+            rng=np.random.default_rng(seed),
         )
         result = mut.mutate(combined2)
         if result is not None:
@@ -157,8 +168,11 @@ class TestSlabPositionsPreserved:
     def test_flattening_preserves_slab(self, surface_system, seed):
         combined, slab, n_slab, n_top, blmin = surface_system
         mut = FlatteningMutation(
-            blmin, n_top, thickness_factor=1.0,
-            test_dist_to_slab=True, rng=np.random.default_rng(seed),
+            blmin,
+            n_top,
+            thickness_factor=1.0,
+            test_dist_to_slab=True,
+            rng=np.random.default_rng(seed),
         )
         result = mut.mutate(combined)
         assert result is not None
@@ -170,8 +184,12 @@ class TestSlabPositionsPreserved:
     def test_breathing_preserves_slab(self, surface_system, seed):
         combined, slab, n_slab, n_top, blmin = surface_system
         mut = BreathingMutation(
-            blmin, n_top, scale_min=0.85, scale_max=1.15,
-            test_dist_to_slab=True, rng=np.random.default_rng(seed),
+            blmin,
+            n_top,
+            scale_min=0.85,
+            scale_max=1.15,
+            test_dist_to_slab=True,
+            rng=np.random.default_rng(seed),
         )
         result = mut.mutate(combined)
         assert result is not None
@@ -183,7 +201,10 @@ class TestSlabPositionsPreserved:
     def test_in_plane_slide_preserves_slab(self, surface_system, seed):
         combined, slab, n_slab, n_top, blmin = surface_system
         mut = InPlaneSlideMutation(
-            blmin, n_top, surface_normal_axis=2, max_displacement=1.0,
+            blmin,
+            n_top,
+            surface_normal_axis=2,
+            max_displacement=1.0,
             rng=np.random.default_rng(seed),
         )
         result = mut.mutate(combined)
@@ -207,7 +228,6 @@ class TestNoCenteringOnSurfaceSystems:
         )
         tags = [0] * n_slab + [1, 1, 2, 2]
         combined.set_tags(tags)
-        original_top_cm = np.mean(combined.positions[n_slab:], axis=0)
 
         # Run many mutations and verify none center the adsorbate in the cell
         cell_center = np.diag(combined.cell) / 2.0
@@ -215,8 +235,12 @@ class TestNoCenteringOnSurfaceSystems:
         trials = 0
         for seed in range(30):
             mut = RotationalMutation(
-                blmin, n_top, fraction=1.0, min_angle=0.5,
-                test_dist_to_slab=True, rng=np.random.default_rng(seed),
+                blmin,
+                n_top,
+                fraction=1.0,
+                min_angle=0.5,
+                test_dist_to_slab=True,
+                rng=np.random.default_rng(seed),
             )
             result = mut.mutate(combined)
             if result is not None:
@@ -243,8 +267,11 @@ class TestNoCenteringOnSurfaceSystems:
         cell_center = np.diag(combined.cell) / 2.0
         for seed in range(5):
             mut = FlatteningMutation(
-                blmin, n_top, thickness_factor=1.0,
-                test_dist_to_slab=True, rng=np.random.default_rng(seed),
+                blmin,
+                n_top,
+                thickness_factor=1.0,
+                test_dist_to_slab=True,
+                rng=np.random.default_rng(seed),
             )
             result = mut.mutate(combined)
             assert result is not None
@@ -270,8 +297,12 @@ class TestGasPhaseCenteringPreserved:
         atoms.set_pbc(False)
         blmin = {(78, 78): 0.1}
         mut = RotationalMutation(
-            blmin, n_top=4, fraction=1.0, min_angle=0.5,
-            test_dist_to_slab=False, rng=np.random.default_rng(42),
+            blmin,
+            n_top=4,
+            fraction=1.0,
+            min_angle=0.5,
+            test_dist_to_slab=False,
+            rng=np.random.default_rng(42),
         )
         result = mut.mutate(atoms)
         assert result is not None
@@ -283,8 +314,11 @@ class TestGasPhaseCenteringPreserved:
     def test_flattening_centers_gas_phase(self):
         atoms, blmin = _make_gas_phase_cluster()
         mut = FlatteningMutation(
-            blmin, n_top=4, thickness_factor=1.0,
-            test_dist_to_slab=False, rng=np.random.default_rng(42),
+            blmin,
+            n_top=4,
+            thickness_factor=1.0,
+            test_dist_to_slab=False,
+            rng=np.random.default_rng(42),
         )
         result = mut.mutate(atoms)
         assert result is not None
@@ -297,17 +331,16 @@ class TestGasPhaseCenteringPreserved:
 # 4. CutAndSplicePairing preserves slab for surface systems
 # ---------------------------------------------------------------------------
 class TestCutAndSpliceSurfaceCoherence:
-
     def test_pairing_preserves_slab_positions(self):
         combined, slab, n_slab, n_top, blmin = _make_surface_system(
             n_adsorbate=3, seed=0
         )
-        combined2, _, _, _, _ = _make_surface_system(
-            n_adsorbate=3, seed=1
-        )
+        combined2, _, _, _, _ = _make_surface_system(n_adsorbate=3, seed=1)
 
         pairing = CutAndSplicePairing(
-            slab, n_top, blmin,
+            slab,
+            n_top,
+            blmin,
             test_dist_to_slab=True,
             rng=np.random.default_rng(42),
         )
@@ -326,7 +359,9 @@ class TestCutAndSpliceSurfaceCoherence:
         # Gas-phase: empty slab
         empty_slab = Atoms(cell=atoms1.cell, pbc=atoms1.pbc)
         pairing = CutAndSplicePairing(
-            empty_slab, len(atoms1), blmin,
+            empty_slab,
+            len(atoms1),
+            blmin,
             test_dist_to_slab=False,
             rng=np.random.default_rng(42),
         )
@@ -355,7 +390,10 @@ class TestInPlaneSlideAxes:
         original_z = combined.positions[n_slab:, 2].copy()
 
         mut = InPlaneSlideMutation(
-            blmin, n_top, surface_normal_axis=2, max_displacement=1.0,
+            blmin,
+            n_top,
+            surface_normal_axis=2,
+            max_displacement=1.0,
             rng=np.random.default_rng(42),
         )
         result = mut.mutate(combined)

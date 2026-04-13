@@ -150,9 +150,6 @@ def _build_failed_ts_result(
         "perturb_sigma": neb_perturb_sigma,
         "neb_interpolation_mic": neb_interpolation_mic,
         "neb_tangent_method": neb_tangent_method,
-        "retry_attempted": False,
-        "retry_success": False,
-        "retry_history": [],
         "final_fmax": None,
         "steps_taken": None,
     }
@@ -168,6 +165,7 @@ def run_transition_state_search(
     energy_gap_threshold: float | None = 1.0,
     similarity_tolerance: float = DEFAULT_COMPARATOR_TOL,
     similarity_pair_cor_max: float = 0.1,
+    pair_priority_mode: str = "physics",
     neb_n_images: int = 3,
     neb_spring_constant: float = 0.1,
     neb_fmax: float = 0.05,
@@ -217,6 +215,9 @@ def run_transition_state_search(
             Default `DEFAULT_COMPARATOR_TOL`.
         similarity_pair_cor_max: Maximum single distance difference tolerance for similarity.
             Default 0.1 Å.
+        pair_priority_mode: Pair ranking strategy when limiting evaluated pairs.
+            ``"physics"`` ranks by energy-gap/geometry heuristics; ``"legacy"``
+            preserves discovery order.
         neb_n_images: Number of intermediate NEB images. Default 3 (recommended).
         neb_spring_constant: Spring constant for NEB band (eV/Ų). Default 0.1 (MACE gas sweep).
         neb_fmax: Maximum force convergence for NEB (eV/Å). Default 0.05.
@@ -331,6 +332,7 @@ def run_transition_state_search(
         "neb_perturb_sigma": neb_perturb_sigma,
         "neb_interpolation_mic": neb_interpolation_mic,
         "neb_tangent_method": neb_tangent_method,
+        "pair_priority_mode": pair_priority_mode,
     }
     if surface_config is not None:
         run_context["surface_slab_constraints"] = surface_slab_constraint_summary(
@@ -370,6 +372,7 @@ def run_transition_state_search(
         energy_gap_threshold=energy_gap_threshold,
         similarity_tolerance=similarity_tolerance,
         similarity_pair_cor_max=similarity_pair_cor_max,
+        pair_priority_mode=pair_priority_mode,
         surface_aware=bool(neb_interpolation_mic),
     )
 
@@ -677,7 +680,6 @@ def run_transition_state_search(
                         neb_tangent_method=neb_tangent_method,
                     )
                     break
-            assert result is not None
 
             if result.get("transition_state") is not None:
                 _detach_calc(result["transition_state"])
