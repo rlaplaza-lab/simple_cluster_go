@@ -5,7 +5,9 @@ The slab is built inline (graphene 3x3 shown here); replace with any ASE
 ``Atoms`` slab to run on a different surface.
 """
 
+import os
 from pathlib import Path
+from time import perf_counter
 
 from ase.build import graphene
 
@@ -27,9 +29,18 @@ ELEMENT = "Cu"
 MIN_ATOMS = 4
 MAX_ATOMS = 4
 RANDOM_SEED = 42
-OUTPUT_ROOT = Path("ts_search_graphene_with_oh_results").resolve()
 
 logger = get_logger(__name__)
+
+
+def _resolve_output_root(default_dir_name: str) -> Path:
+    configured_root = os.environ.get("SCGO_OUTPUT_ROOT")
+    if configured_root:
+        return Path(configured_root).expanduser().resolve()
+    return Path(default_dir_name).resolve()
+
+
+OUTPUT_ROOT = _resolve_output_root("ts_search_graphene_with_oh_results")
 
 
 def _make_slab():
@@ -40,6 +51,7 @@ def _make_slab():
 
 
 def main() -> None:
+    run_started = perf_counter()
     slab = _make_slab()
     surface_config = make_surface_config(slab)
 
@@ -50,6 +62,9 @@ def main() -> None:
     ga_params["optimizer_params"]["ga"]["n_jobs_population_init"] = 1
     ga_params["optimizer_params"]["ga"]["surface_config"] = surface_config
     ga_params["optimizer_params"]["ga"]["batch_size"] = 4
+    ga_params["optimizer_params"]["ga"]["previous_search_glob"] = (
+        "__no_seed_dbs__/**/*.db"
+    )
 
     OUTPUT_ROOT.mkdir(parents=True, exist_ok=True)
 
@@ -58,6 +73,7 @@ def main() -> None:
     final_minima_dir = formula_search_dir / "final_unique_minima"
     minima_exist = final_minima_dir.exists() and any(final_minima_dir.glob("*.xyz"))
 
+    minima_started = perf_counter()
     if not minima_exist:
         run_scgo_campaign_arbitrary_compositions(
             [cluster_with_oh],
@@ -68,12 +84,17 @@ def main() -> None:
         )
     else:
         logger.info("Reusing existing minima under %s", final_minima_dir)
+    logger.info(
+        "Minima search stage completed in %.2f s",
+        perf_counter() - minima_started,
+    )
     full_composition = read_full_composition_from_first_xyz(final_minima_dir)
     logger.info("Full system composition for TS search: %s", full_composition)
 
     ts_params = get_ts_search_params(regime="surface", surface_config=surface_config)
     ts_kwargs = get_ts_run_kwargs(ts_params)
     ts_kwargs["max_pairs"] = 15
+    ts_started = perf_counter()
     ts_results = run_transition_state_search(
         full_composition,
         base_dir=formula_search_dir,
@@ -88,6 +109,8 @@ def main() -> None:
         n_success,
         len(ts_results),
     )
+    logger.info("TS search stage completed in %.2f s", perf_counter() - ts_started)
+    logger.info("Total runner wall time: %.2f s", perf_counter() - run_started)
 
 
 if __name__ == "__main__":

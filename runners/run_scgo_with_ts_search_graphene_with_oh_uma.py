@@ -1,20 +1,18 @@
 #!/usr/bin/env python3
-"""Run SCGO on a surface slab then perform TS search on full slab+cluster structures.
+"""Run SCGO with UMA on a surface slab for Cu4OH and perform TS search."""
 
-The slab is built inline (graphene 3x3 shown here); replace with any ASE
-``Atoms`` slab to run on a different surface.
-"""
-
+import os
 from pathlib import Path
+from time import perf_counter
 
 from ase.build import graphene
 
 from scgo.param_presets import (
-    get_minimal_ga_params,
+    get_default_uma_params,
     get_ts_run_kwargs,
-    get_ts_search_params,
+    get_ts_search_params_uma,
 )
-from scgo.run_minima import run_scgo_campaign_one_element
+from scgo.run_minima import run_scgo_campaign_arbitrary_compositions
 from scgo.runner_surface import (
     make_surface_config,
     read_full_composition_from_first_xyz,
@@ -27,9 +25,18 @@ ELEMENT = "Cu"
 MIN_ATOMS = 4
 MAX_ATOMS = 4
 RANDOM_SEED = 42
-OUTPUT_ROOT = Path("ts_search_graphene_results").resolve()
 
 logger = get_logger(__name__)
+
+
+def _resolve_output_root(default_dir_name: str) -> Path:
+    configured_root = os.environ.get("SCGO_OUTPUT_ROOT")
+    if configured_root:
+        return Path(configured_root).expanduser().resolve()
+    return Path(default_dir_name).resolve()
+
+
+OUTPUT_ROOT = _resolve_output_root("ts_search_graphene_with_oh_results_uma")
 
 
 def _make_slab():
@@ -40,41 +47,55 @@ def _make_slab():
 
 
 def main() -> None:
+    run_started = perf_counter()
     slab = _make_slab()
     surface_config = make_surface_config(slab)
 
-    ga_params = get_minimal_ga_params(seed=RANDOM_SEED)
+    base_cluster = [ELEMENT] * MIN_ATOMS
+    cluster_with_oh = base_cluster + ["O", "H"]
+
+    ga_params = get_default_uma_params()
+    ga_params["seed"] = RANDOM_SEED
     ga_params["optimizer_params"]["ga"]["n_jobs_population_init"] = 1
     ga_params["optimizer_params"]["ga"]["surface_config"] = surface_config
     ga_params["optimizer_params"]["ga"]["batch_size"] = 4
+    ga_params["optimizer_params"]["ga"]["previous_search_glob"] = (
+        "__no_seed_dbs__/**/*.db"
+    )
 
     OUTPUT_ROOT.mkdir(parents=True, exist_ok=True)
 
-    go_formula = get_cluster_formula([ELEMENT] * MIN_ATOMS)
-    formula_search_dir = OUTPUT_ROOT / f"{go_formula}_searches"
+    formula = get_cluster_formula(cluster_with_oh)
+    formula_search_dir = OUTPUT_ROOT / f"{formula}_searches"
     final_minima_dir = formula_search_dir / "final_unique_minima"
     minima_exist = final_minima_dir.exists() and any(final_minima_dir.glob("*.xyz"))
 
+    minima_started = perf_counter()
     if not minima_exist:
-        run_scgo_campaign_one_element(
-            ELEMENT,
-            MIN_ATOMS,
-            MAX_ATOMS,
+        run_scgo_campaign_arbitrary_compositions(
+            [cluster_with_oh],
             params=ga_params,
             seed=RANDOM_SEED,
             output_dir=OUTPUT_ROOT,
+            verbosity=1,
         )
     else:
         logger.info("Reusing existing minima under %s", final_minima_dir)
+    logger.info(
+        "Minima search stage completed in %.2f s",
+        perf_counter() - minima_started,
+    )
 
     full_composition = read_full_composition_from_first_xyz(final_minima_dir)
-    logger.info("Detected full surface composition for TS search: %s", full_composition)
+    logger.info("Full system composition for TS search: %s", full_composition)
 
-    # Use full surface NEB preset (MIC, linear, n_images=5, fmax=0.1, …) — do not
-    # shrink the band; thin bands on supported clusters tend to miss interior TSs.
-    ts_params = get_ts_search_params(regime="surface", surface_config=surface_config)
+    ts_params = get_ts_search_params_uma(
+        regime="surface",
+        surface_config=surface_config,
+    )
     ts_kwargs = get_ts_run_kwargs(ts_params)
     ts_kwargs["max_pairs"] = 15
+    ts_started = perf_counter()
     ts_results = run_transition_state_search(
         full_composition,
         base_dir=formula_search_dir,
@@ -83,12 +104,14 @@ def main() -> None:
         **ts_kwargs,
     )
 
-    n_success = sum(1 for r in ts_results if r.get("status") == "success")
+    n_success = sum(1 for result in ts_results if result.get("status") == "success")
     logger.info(
-        "Finished TS search for surface/cluster. Successful NEBs: %d/%d",
+        "Finished TS search for surface + OH cluster. Successful NEBs: %d/%d",
         n_success,
         len(ts_results),
     )
+    logger.info("TS search stage completed in %.2f s", perf_counter() - ts_started)
+    logger.info("Total runner wall time: %.2f s", perf_counter() - run_started)
 
 
 if __name__ == "__main__":

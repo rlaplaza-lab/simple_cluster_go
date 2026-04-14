@@ -66,6 +66,7 @@ def ga_go(
     offspring_fraction: float = 0.5,
     n_jobs_population_init: int = -2,
     vacuum: float = 10.0,
+    previous_search_glob: str = "**/*.db",
     use_adaptive_mutations: bool = True,
     stagnation_trigger: int = 4,
     stagnation_full_trigger: int = 8,
@@ -105,6 +106,8 @@ def ga_go(
         n_jobs_population_init: Parallel workers for initial population generation.
             -1 = all CPUs, -2 = all except one. Default -2.
         vacuum: Vacuum to add around cluster to define simulation cell size.
+        previous_search_glob: Glob pattern used to discover previous database
+            files for seed-based initialization.
         use_adaptive_mutations: If True (default), use adaptive mutation operators
             that adjust based on composition, size, and generation.
         early_stopping_niter: Generations without improvement before stopping early.
@@ -259,6 +262,7 @@ def ga_go(
             rng=rng,
             calculator=None,
             population_size=population_size,
+            previous_search_glob=previous_search_glob,
             n_jobs=n_jobs_population_init,
         )
     else:
@@ -269,6 +273,7 @@ def ga_go(
             calculator=None,  # Do not attach calculator to initial population to avoid pickling issues
             population_size=population_size,
             mode="smart",
+            previous_search_glob=previous_search_glob,
             n_jobs=n_jobs_population_init,
         )
     starting_population = [

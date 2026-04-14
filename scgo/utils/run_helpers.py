@@ -167,6 +167,7 @@ def validate_algorithm_params(
             "mutation_probability",
             "max_mutation_probability",
             "vacuum",
+            "previous_search_glob",
             "energy_tolerance",
             "use_torchsim",
             "use_adaptive_mutations",

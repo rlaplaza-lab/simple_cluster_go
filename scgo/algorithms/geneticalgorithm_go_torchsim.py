@@ -192,6 +192,7 @@ def ga_go_torchsim(
     offspring_fraction: float = 0.5,
     n_jobs_population_init: int = -2,
     vacuum: float = 10.0,
+    previous_search_glob: str = "**/*.db",
     use_adaptive_mutations: bool = True,
     stagnation_trigger: int = 4,
     stagnation_full_trigger: int = 8,
@@ -221,6 +222,8 @@ def ga_go_torchsim(
     Args:
         composition: List of element symbols defining the cluster composition.
         calculator: ASE calculator for energy/force evaluations.
+        previous_search_glob: Glob pattern used to discover previous database
+            files for seed-based initialization.
         early_stopping_niter: Number of consecutive generations with no improvement
                               before stopping early. Uses fitness for non-low_energy
                               strategies, energy for low_energy. If 0, no early stopping
@@ -374,6 +377,7 @@ def ga_go_torchsim(
             rng=rng,
             calculator=None,
             population_size=population_size,
+            previous_search_glob=previous_search_glob,
             n_jobs=n_jobs_population_init,
         )
     else:
@@ -384,6 +388,7 @@ def ga_go_torchsim(
             calculator=None,  # Do not attach calculator to initial population to avoid pickling issues
             population_size=population_size,
             mode="smart",
+            previous_search_glob=previous_search_glob,
             n_jobs=n_jobs_population_init,
         )
     initial_population = [

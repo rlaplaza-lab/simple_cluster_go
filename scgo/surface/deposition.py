@@ -59,6 +59,7 @@ def create_deposited_cluster(
     blmin: dict,
     rng: Generator,
     config: SurfaceSystemConfig,
+    previous_search_glob: str = "**/*.db",
 ) -> Atoms | None:
     """One adsorbate+slab structure, or None if placement fails.
 
@@ -76,6 +77,7 @@ def create_deposited_cluster(
             list(composition),
             vacuum=config.cluster_init_vacuum,
             rng=rng,
+            previous_search_glob=previous_search_glob,
             mode=config.init_mode,
         )
         nums = cluster.get_atomic_numbers()
@@ -125,6 +127,7 @@ def create_deposited_cluster_batch(
     rng: Generator,
     config: SurfaceSystemConfig,
     *,
+    previous_search_glob: str = "**/*.db",
     n_jobs: int = 1,
 ) -> list[Atoms]:
     """Generate multiple deposited structures (sequential or threaded)."""
@@ -142,7 +145,12 @@ def create_deposited_cluster_batch(
                 rng.integers(0, 2**63 - 1, dtype=np.int64)
             )
             struct = create_deposited_cluster(
-                composition, slab, blmin, child_rng, config
+                composition,
+                slab,
+                blmin,
+                child_rng,
+                config,
+                previous_search_glob=previous_search_glob,
             )
             if struct is not None:
                 out.append(struct)
@@ -161,7 +169,14 @@ def create_deposited_cluster_batch(
             child_rng = np.random.default_rng(
                 rng.integers(0, 2**63 - 1, dtype=np.int64)
             )
-            s = create_deposited_cluster(composition, slab, blmin, child_rng, config)
+            s = create_deposited_cluster(
+                composition,
+                slab,
+                blmin,
+                child_rng,
+                config,
+                previous_search_glob=previous_search_glob,
+            )
             if s is not None:
                 return s
         raise RuntimeError("Parallel deposition failed for one structure")

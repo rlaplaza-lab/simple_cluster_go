@@ -119,6 +119,7 @@ class ClusterStartGenerator(StartGenerator):
         calculator: Calculator | None = None,
         population_size: int | None = None,
         mode: str = "smart",
+        previous_search_glob: str = "**/*.db",
         n_jobs: int = 1,
     ) -> None:
         """Initialize ClusterStartGenerator.
@@ -131,6 +132,8 @@ class ClusterStartGenerator(StartGenerator):
             population_size: Optional total population size. If provided, pre-generates
                 entire population in one batch call. If None, generates on demand.
             mode: Initialization mode. Default "smart".
+            previous_search_glob: Glob pattern used to find prior databases for
+                seed-based initialization. Defaults to ``"**/*.db"``.
             n_jobs: Number of parallel workers for batch initialization.
                 Default 1 (sequential). Special values: -1 (all CPUs), -2 (all except one).
                 Only used when population_size is provided.
@@ -144,6 +147,7 @@ class ClusterStartGenerator(StartGenerator):
         self.calculator: Calculator | None = calculator
         self.population_size: int | None = population_size
         self.mode: str = mode
+        self.previous_search_glob: str = previous_search_glob
         self.n_jobs: int = n_jobs
         self._candidate_count = 0
         self._candidate_batch: list[Atoms] | None = None
@@ -156,6 +160,7 @@ class ClusterStartGenerator(StartGenerator):
                 n_structures=population_size,
                 rng=self.rng,
                 vacuum=vacuum,
+                previous_search_glob=previous_search_glob,
                 mode=mode,
                 n_jobs=n_jobs,
             )
@@ -180,6 +185,7 @@ class ClusterStartGenerator(StartGenerator):
                 self.composition,
                 vacuum=self.vacuum,
                 rng=self.rng or np.random.default_rng(),
+                previous_search_glob=self.previous_search_glob,
                 mode=self.mode,
             )
 
@@ -201,6 +207,7 @@ class SurfaceClusterStartGenerator(StartGenerator):
         rng: np.random.Generator | None = None,
         calculator: Calculator | None = None,
         population_size: int | None = None,
+        previous_search_glob: str = "**/*.db",
         n_jobs: int = 1,
     ) -> None:
         self.rng: Generator | None = (
@@ -212,6 +219,7 @@ class SurfaceClusterStartGenerator(StartGenerator):
         self.blmin = blmin
         self.calculator = calculator
         self.population_size = population_size
+        self.previous_search_glob = previous_search_glob
         self.n_jobs = n_jobs
         self._candidate_count = 0
         self._candidate_batch: list[Atoms] | None = None
@@ -224,6 +232,7 @@ class SurfaceClusterStartGenerator(StartGenerator):
                 n_structures=population_size,
                 rng=self.rng,
                 config=surface_config,
+                previous_search_glob=previous_search_glob,
                 n_jobs=n_jobs,
             )
 
@@ -242,6 +251,7 @@ class SurfaceClusterStartGenerator(StartGenerator):
                 self.blmin,
                 self.rng or np.random.default_rng(),
                 self.surface_config,
+                previous_search_glob=self.previous_search_glob,
             )
             if atoms is None:
                 raise RuntimeError(
