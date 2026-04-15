@@ -50,6 +50,28 @@ def _detach_calc(atoms: Atoms | None) -> None:
         atoms.calc = None
 
 
+def attach_singlepoint_from_relax_output(
+    atoms: Atoms,
+    energy: float,
+    relaxed_atoms: Atoms,
+    *,
+    require_forces: bool = True,
+) -> None:
+    """Attach ``SinglePointCalculator`` to ``atoms`` from one ``relax_batch`` result."""
+    forces = relaxed_atoms.arrays.get("forces")
+    if forces is None and relaxed_atoms.calc is not None:
+        with contextlib.suppress(AttributeError, NotImplementedError):
+            forces = relaxed_atoms.get_forces()
+    if forces is not None and getattr(forces, "size", 0) > 0:
+        atoms.calc = SinglePointCalculator(atoms, energy=energy, forces=forces)
+        return
+    if require_forces:
+        raise RuntimeError(
+            "TorchSim did not return forces. Ensure the model is loaded with compute_forces=True."
+        )
+    atoms.calc = SinglePointCalculator(atoms, energy=energy)
+
+
 def _make_torchsim_relaxer(**kwargs: Any) -> Any:
     """Build a TorchSim relaxer; resolve the class via module attribute for monkeypatching."""
     from scgo.calculators import torchsim_helpers as _tsh
@@ -168,17 +190,9 @@ class TorchSimNEB(NEB):
         results = self.relaxer.relax_batch(self.images, steps=0)
 
         for atoms, (energy, relaxed_atoms) in zip(self.images, results, strict=True):
-            forces = relaxed_atoms.arrays.get("forces")
-            if forces is None and relaxed_atoms.calc is not None:
-                with contextlib.suppress(AttributeError, NotImplementedError):
-                    forces = relaxed_atoms.get_forces()
-
-            if forces is None:
-                raise RuntimeError(
-                    "TorchSim did not return forces. Ensure the model is loaded with compute_forces=True."
-                )
-
-            atoms.calc = SinglePointCalculator(atoms, energy=energy, forces=forces)
+            attach_singlepoint_from_relax_output(
+                atoms, energy, relaxed_atoms, require_forces=True
+            )
 
         # Compute NEB forces (includes spring/tangent contributions)
         return super().get_forces()

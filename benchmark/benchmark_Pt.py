@@ -5,10 +5,15 @@ the recovered minima primarily through geometric agreement and, secondarily,
 relative energetic ordering. The script doubles as a pytest entry point and a
 standalone CLI for rapid regression checks while tweaking optimization knobs.
 
-Campaign outputs are written under ``benchmark/results/pt_cluster/`` (per-formula
-subdirectories named ``<Formula>_searches``), alongside the other Pt benchmarks;
-see ``benchmark.benchmark_common`` for path constants.
+Campaign outputs are written under ``benchmark/results/pt_cluster/`` (MACE) or
+``benchmark/results/pt_cluster_uma/`` (UMA); see ``benchmark.benchmark_common``.
 """
+
+from __future__ import annotations
+
+import argparse
+import os
+import time
 
 import pytest
 
@@ -23,6 +28,7 @@ from benchmark.benchmark_common import (
 
 BENCHMARK_SEEDS = [42, 43, 44, 45]
 MODEL_NAME: str | None = None
+BENCHMARK_BACKEND = os.environ.get("SCGO_BENCHMARK_BACKEND", "mace")
 
 
 @pytest.mark.parametrize(
@@ -31,7 +37,9 @@ MODEL_NAME: str | None = None
 )
 def test_benchmark_minima_recovery(cluster_formula: str, seed: int):
     """Pytest entry point for validating a single cluster benchmark run."""
-    params = get_benchmark_params(seed, model_name=MODEL_NAME)
+    params = get_benchmark_params(
+        seed, model_name=MODEL_NAME, backend=BENCHMARK_BACKEND
+    )
     result = evaluate_cluster(
         cluster_formula,
         params=params,
@@ -55,9 +63,47 @@ def test_benchmark_minima_recovery(cluster_formula: str, seed: int):
         )
 
 
-def main():
+def main() -> None:
     """CLI entry point for running the Pt benchmark suite."""
-    run_benchmark_suite(seed=42, model_name=MODEL_NAME, verbose=True)
+    parser = argparse.ArgumentParser(
+        description="Pt cluster geometric recovery benchmark (MACE/TorchSim or UMA/ASE GA).",
+    )
+    parser.add_argument(
+        "--backend",
+        choices=("mace", "uma"),
+        default=os.environ.get("SCGO_BENCHMARK_BACKEND", "mace"),
+        help="mace: TorchSim GA + MACE; uma: ASE GA + UMA (install scgo[uma] in a separate env).",
+    )
+    parser.add_argument(
+        "--model-name",
+        default=None,
+        help="Override calculator model_name (default UMA: uma-s-1p1; MACE: preset default).",
+    )
+    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument(
+        "--uma-task",
+        default="omat",
+        help="UMA task_name (only used when --backend uma).",
+    )
+    parser.add_argument(
+        "--clusters",
+        nargs="*",
+        default=None,
+        metavar="FORMULA",
+        help="Optional subset (e.g. Pt4 Pt5). Default: full DEFAULT_CLUSTERS list.",
+    )
+    args = parser.parse_args()
+    t0 = time.perf_counter()
+    run_benchmark_suite(
+        clusters=args.clusters,
+        seed=args.seed,
+        model_name=args.model_name,
+        verbose=True,
+        backend=args.backend,
+        uma_task_name=args.uma_task,
+    )
+    elapsed = time.perf_counter() - t0
+    print(f"\nBenchmark wall time: {elapsed:.1f} s ({args.backend})")
 
 
 if __name__ == "__main__":

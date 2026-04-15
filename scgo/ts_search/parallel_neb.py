@@ -5,24 +5,18 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
-from ase.calculators.singlepoint import SinglePointCalculator
 from ase.optimize import FIRE
 
-from scgo.ts_search.transition_state import TorchSimNEB
+from scgo.ts_search.transition_state import (
+    TorchSimNEB,
+    attach_singlepoint_from_relax_output,
+)
 from scgo.utils.logging import get_logger
 
 if TYPE_CHECKING:
     from scgo.calculators.torchsim_helpers import TorchSimBatchRelaxer
 
 logger = get_logger(__name__)
-
-
-def _pes_forces_from_relaxed(relaxed_atoms: Any) -> np.ndarray | None:
-    """Return PES forces from TorchSim-relaxed atoms, or None if unavailable."""
-    forces = relaxed_atoms.arrays.get("forces")
-    if forces is not None and getattr(forces, "size", 0) > 0:
-        return np.asarray(forces)
-    return None
 
 
 class ParallelNEBBatch:
@@ -136,13 +130,9 @@ class ParallelNEBBatch:
                         batch_results[start_idx:end_idx],
                         strict=True,
                     ):
-                        forces = _pes_forces_from_relaxed(relaxed_atoms)
-                        if forces is not None:
-                            atoms.calc = SinglePointCalculator(
-                                atoms, energy=energy, forces=forces
-                            )
-                        else:
-                            atoms.calc = SinglePointCalculator(atoms, energy=energy)
+                        attach_singlepoint_from_relax_output(
+                            atoms, energy, relaxed_atoms, require_forces=False
+                        )
 
                 # Now let each NEB compute its forces and step
                 still_active = []

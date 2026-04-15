@@ -10,6 +10,7 @@ from pathlib import Path
 from time import perf_counter
 
 from ase.build import graphene
+from torch.profiler import ProfilerActivity, profile
 
 from scgo.param_presets import (
     get_minimal_ga_params,
@@ -70,48 +71,60 @@ def main() -> None:
     final_minima_dir = formula_search_dir / "final_unique_minima"
     minima_exist = final_minima_dir.exists() and any(final_minima_dir.glob("*.xyz"))
 
-    minima_started = perf_counter()
-    if not minima_exist:
-        run_scgo_campaign_one_element(
-            ELEMENT,
-            MIN_ATOMS,
-            MAX_ATOMS,
-            params=ga_params,
-            seed=RANDOM_SEED,
-            output_dir=OUTPUT_ROOT,
+    with profile(
+        activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], record_shapes=False
+    ) as prof:
+        minima_started = perf_counter()
+        if not minima_exist:
+            run_scgo_campaign_one_element(
+                ELEMENT,
+                MIN_ATOMS,
+                MAX_ATOMS,
+                params=ga_params,
+                seed=RANDOM_SEED,
+                output_dir=OUTPUT_ROOT,
+            )
+        else:
+            logger.info("Reusing existing minima under %s", final_minima_dir)
+        logger.info(
+            "Minima search stage completed in %.2f s",
+            perf_counter() - minima_started,
         )
-    else:
-        logger.info("Reusing existing minima under %s", final_minima_dir)
-    logger.info(
-        "Minima search stage completed in %.2f s",
-        perf_counter() - minima_started,
-    )
 
-    full_composition = read_full_composition_from_first_xyz(final_minima_dir)
-    logger.info("Detected full surface composition for TS search: %s", full_composition)
+        full_composition = read_full_composition_from_first_xyz(final_minima_dir)
+        logger.info(
+            "Detected full surface composition for TS search: %s", full_composition
+        )
 
-    # Use full surface NEB preset (MIC, linear, n_images=5, fmax=0.1, …) — do not
-    # shrink the band; thin bands on supported clusters tend to miss interior TSs.
-    ts_params = get_ts_search_params(regime="surface", surface_config=surface_config)
-    ts_kwargs = get_ts_run_kwargs(ts_params)
-    ts_kwargs["max_pairs"] = 15
-    ts_started = perf_counter()
-    ts_results = run_transition_state_search(
-        full_composition,
-        base_dir=formula_search_dir,
-        seed=RANDOM_SEED,
-        verbosity=1,
-        **ts_kwargs,
-    )
+        # Use full surface NEB preset (MIC, linear, n_images=5, fmax=0.1, …) — do not
+        # shrink the band; thin bands on supported clusters tend to miss interior TSs.
+        ts_params = get_ts_search_params(
+            regime="surface", surface_config=surface_config
+        )
+        ts_kwargs = get_ts_run_kwargs(ts_params)
+        ts_kwargs["max_pairs"] = 15
+        ts_started = perf_counter()
+        ts_results = run_transition_state_search(
+            full_composition,
+            base_dir=formula_search_dir,
+            seed=RANDOM_SEED,
+            verbosity=1,
+            **ts_kwargs,
+        )
 
-    n_success = sum(1 for r in ts_results if r.get("status") == "success")
-    logger.info(
-        "Finished TS search for surface/cluster. Successful NEBs: %d/%d",
-        n_success,
-        len(ts_results),
-    )
-    logger.info("TS search stage completed in %.2f s", perf_counter() - ts_started)
-    logger.info("Total runner wall time: %.2f s", perf_counter() - run_started)
+        n_success = sum(1 for r in ts_results if r.get("status") == "success")
+        logger.info(
+            "Finished TS search for surface/cluster. Successful NEBs: %d/%d",
+            n_success,
+            len(ts_results),
+        )
+        logger.info("TS search stage completed in %.2f s", perf_counter() - ts_started)
+        logger.info("Total runner wall time: %.2f s", perf_counter() - run_started)
+
+    print("\n--- Profiler CPU Output ---")
+    print(prof.key_averages().table(sort_by="cpu_time_total", row_limit=20))
+    print("\n--- Profiler CUDA Output ---")
+    print(prof.key_averages().table(sort_by="cuda_time_total", row_limit=20))
 
 
 if __name__ == "__main__":

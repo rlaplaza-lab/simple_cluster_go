@@ -65,6 +65,9 @@ check_benchmark/
 investigate_*.py
 test_*.py  # Root-level test scripts (e.g., test_facet_scaling.py)
 
+# Profiler dumps (local dev)
+profiler_results/
+
 # Analysis and debugging artifacts
 *_analysis*.txt
 *_analysis*.log

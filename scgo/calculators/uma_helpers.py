@@ -27,7 +27,7 @@ class UMA(Calculator):
 
     def __init__(
         self,
-        model_name: str = "uma-s-1",
+        model_name: str = "uma-s-1p1",
         task_name: str | None = "omat",
         device: str | None = None,
         **kwargs: Any,

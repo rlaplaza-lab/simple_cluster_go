@@ -16,7 +16,7 @@ from ase import Atoms
 from ase.io import read
 from ase.units import Hartree
 
-from scgo.param_presets import get_torchsim_ga_params
+from scgo.param_presets import get_torchsim_ga_params, get_uma_ga_benchmark_params
 from scgo.run_minima import run_scgo_campaign_one_element
 from scgo.utils.atoms_helpers import parse_energy_from_xyz_comment
 from scgo.utils.comparators import (
@@ -42,11 +42,18 @@ BENCHMARK_DIR = PROJECT_ROOT / "benchmark" / "benchmark_files_Pt"
 BENCHMARK_RESULTS_ROOT = PROJECT_ROOT / "benchmark" / "results"
 PT_CLUSTER_RESULTS_DIR = BENCHMARK_RESULTS_ROOT / "pt_cluster"
 PT_CLUSTER_PBE_RESULTS_DIR = BENCHMARK_RESULTS_ROOT / "pt_cluster_pbe"
+PT_CLUSTER_UMA_RESULTS_DIR = BENCHMARK_RESULTS_ROOT / "pt_cluster_uma"
 PT_SURFACE_NIO_RESULTS_DIR = BENCHMARK_RESULTS_ROOT / "pt_surface_nio"
 
 
-def default_pt_cluster_benchmark_output_dir(model_name: str | None) -> Path:
-    """Destination for gas-phase Pt benchmark campaigns (split by MACE variant)."""
+def default_pt_cluster_benchmark_output_dir(
+    model_name: str | None,
+    *,
+    calculator: str = "MACE",
+) -> Path:
+    """Destination for gas-phase Pt benchmark campaigns (split by backend / MACE variant)."""
+    if calculator == "UMA":
+        return PT_CLUSTER_UMA_RESULTS_DIR.resolve()
     if model_name == "large":
         return PT_CLUSTER_PBE_RESULTS_DIR.resolve()
     return PT_CLUSTER_RESULTS_DIR.resolve()
@@ -61,7 +68,10 @@ def resolve_pt_cluster_benchmark_output_dir(
         path = Path(output_dir).resolve()
     else:
         model_name = params.get("calculator_kwargs", {}).get("model_name")
-        path = default_pt_cluster_benchmark_output_dir(model_name)
+        calculator = str(params.get("calculator", "MACE"))
+        path = default_pt_cluster_benchmark_output_dir(
+            model_name, calculator=calculator
+        )
     path.mkdir(parents=True, exist_ok=True)
     return path
 
@@ -140,8 +150,17 @@ def _get_campaign_results(
     return results
 
 
-def get_benchmark_params(seed: int, model_name: str | None = None) -> dict:
-    """Build benchmark params using the TorchSim GA preset (required for benchmarks)."""
+def get_benchmark_params(
+    seed: int,
+    model_name: str | None = None,
+    *,
+    backend: str = "mace",
+    uma_task_name: str = "omat",
+) -> dict:
+    """Build benchmark params: TorchSim GA + MACE (``backend=mace``) or ASE GA + UMA."""
+    if backend == "uma":
+        mn = model_name or "uma-s-1p1"
+        return get_uma_ga_benchmark_params(seed, model_name=mn, task_name=uma_task_name)
     params = get_torchsim_ga_params(seed=seed)
     if model_name is not None:
         params["calculator_kwargs"]["model_name"] = model_name
@@ -337,11 +356,19 @@ def run_benchmark_suite(
     model_name: str | None = None,
     verbose: bool = True,
     output_dir: str | Path | None = None,
+    *,
+    backend: str = "mace",
+    uma_task_name: str = "omat",
 ) -> list[BenchmarkResult]:
     """Execute the Pt benchmark suite for a set of cluster formulas."""
     clusters = clusters or DEFAULT_CLUSTERS
     if params is None:
-        params = get_benchmark_params(seed, model_name=model_name)
+        params = get_benchmark_params(
+            seed,
+            model_name=model_name,
+            backend=backend,
+            uma_task_name=uma_task_name,
+        )
 
     if not clusters:
         return []

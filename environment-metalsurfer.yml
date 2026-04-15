@@ -1,0 +1,12 @@
+# UMA / fairchem stack only — do not mix with MACE+TorchSim in the same env.
+# Install: conda env create -f environment-metalsurfer.yml
+# Update:  conda env update -f environment-metalsurfer.yml --prune
+name: metalsurfer
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.12
+  - pip
+  - pip:
+    - -e ".[uma,dev]"

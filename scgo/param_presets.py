@@ -24,7 +24,7 @@ AVAILABLE_MACE_MODELS = [
 
 # Common fairchem pretrained names (see fairchem.core.calculate.pretrained_mlip)
 AVAILABLE_UMA_MODELS = [
-    "uma-s-1",
+    "uma-s-1p2",
     "uma-s-1p1",
     "uma-m-1p1",
 ]
@@ -45,6 +45,7 @@ __all__ = [
     "get_ts_run_kwargs",
     "get_default_uma_params",
     "get_ts_search_params_uma",
+    "get_uma_ga_benchmark_params",
 ]
 
 
@@ -200,12 +201,25 @@ def _get_base_ga_benchmark_params(seed: int) -> dict[str, Any]:
     return params
 
 
+def get_uma_ga_benchmark_params(
+    seed: int,
+    *,
+    model_name: str = "uma-s-1p1",
+    task_name: str = "omat",
+) -> dict[str, Any]:
+    """GA benchmark parameters matching :func:`_get_base_ga_benchmark_params` but with UMA (ASE GA)."""
+    params = _get_base_ga_benchmark_params(seed)
+    params["calculator"] = "UMA"
+    params["calculator_kwargs"] = {"model_name": model_name, "task_name": task_name}
+    return params
+
+
 def get_default_uma_params() -> dict[str, Any]:
     """Default SCGO parameters using the UMA calculator (fairchem-core)."""
     params = get_default_params()
     params["calculator"] = "UMA"
     params["calculator_kwargs"] = {
-        "model_name": "uma-s-1",
+        "model_name": "uma-s-1p1",
         "task_name": "omat",
     }
     return params
@@ -215,7 +229,7 @@ def get_ts_search_params_uma(
     *,
     regime: TsSearchRegime = "gas",
     surface_config: SurfaceSystemConfig | None = None,
-    model_name: str = "uma-s-1",
+    model_name: str = "uma-s-1p1",
     task_name: str | None = "omat",
 ) -> dict[str, Any]:
     """TS preset for UMA: ASE NEB (no TorchSim); use with ``scgo[uma]`` only."""

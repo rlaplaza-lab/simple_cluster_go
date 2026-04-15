@@ -28,7 +28,7 @@ def test_get_default_uma_params():
 
     p = get_default_uma_params()
     assert p["calculator"] == "UMA"
-    assert p["calculator_kwargs"]["model_name"] == "uma-s-1"
+    assert p["calculator_kwargs"]["model_name"] == "uma-s-1p1"
 
 
 def test_get_ts_search_params_uma_disables_torchsim():

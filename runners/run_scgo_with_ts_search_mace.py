@@ -4,6 +4,8 @@ import os
 from pathlib import Path
 from time import perf_counter
 
+from torch.profiler import ProfilerActivity, profile
+
 from scgo.param_presets import (
     get_minimal_ga_params,
     get_ts_run_kwargs,
@@ -43,45 +45,53 @@ def main() -> None:
 
     OUTPUT_ROOT.mkdir(parents=True, exist_ok=True)
 
-    minima_started = perf_counter()
-    run_scgo_campaign_one_element(
-        ELEMENT,
-        MIN_ATOMS,
-        MAX_ATOMS,
-        params=ga_params,
-        seed=RANDOM_SEED,
-        output_dir=OUTPUT_ROOT,
-    )
-    logger.info(
-        "Minima search stage completed in %.2f s",
-        perf_counter() - minima_started,
-    )
-
-    ts_params = get_ts_search_params()
-    total_found = 0
-    ts_started = perf_counter()
-
-    for n_atoms in range(MIN_ATOMS, MAX_ATOMS + 1):
-        composition = [ELEMENT] * n_atoms
-        # TS search expects the formula-specific "*_searches" directory as base
-        formula_search_dir = (
-            OUTPUT_ROOT / f"{get_cluster_formula(composition)}_searches"
-        )
-        ts_results = run_transition_state_search(
-            composition,
-            base_dir=formula_search_dir,
+    with profile(
+        activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], record_shapes=False
+    ) as prof:
+        minima_started = perf_counter()
+        run_scgo_campaign_one_element(
+            ELEMENT,
+            MIN_ATOMS,
+            MAX_ATOMS,
+            params=ga_params,
             seed=RANDOM_SEED,
-            **get_ts_run_kwargs(ts_params),
+            output_dir=OUTPUT_ROOT,
         )
-        total_found += sum(1 for r in ts_results if r["status"] == "success")
+        logger.info(
+            "Minima search stage completed in %.2f s",
+            perf_counter() - minima_started,
+        )
 
-    logger.info(
-        "Finished TS search: %d successful NEB runs under %s",
-        total_found,
-        OUTPUT_ROOT,
-    )
-    logger.info("TS search stage completed in %.2f s", perf_counter() - ts_started)
-    logger.info("Total runner wall time: %.2f s", perf_counter() - run_started)
+        ts_params = get_ts_search_params()
+        total_found = 0
+        ts_started = perf_counter()
+
+        for n_atoms in range(MIN_ATOMS, MAX_ATOMS + 1):
+            composition = [ELEMENT] * n_atoms
+            # TS search expects the formula-specific "*_searches" directory as base
+            formula_search_dir = (
+                OUTPUT_ROOT / f"{get_cluster_formula(composition)}_searches"
+            )
+            ts_results = run_transition_state_search(
+                composition,
+                base_dir=formula_search_dir,
+                seed=RANDOM_SEED,
+                **get_ts_run_kwargs(ts_params),
+            )
+            total_found += sum(1 for r in ts_results if r["status"] == "success")
+
+        logger.info(
+            "Finished TS search: %d successful NEB runs under %s",
+            total_found,
+            OUTPUT_ROOT,
+        )
+        logger.info("TS search stage completed in %.2f s", perf_counter() - ts_started)
+        logger.info("Total runner wall time: %.2f s", perf_counter() - run_started)
+
+    print("\n--- Profiler CPU Output ---")
+    print(prof.key_averages().table(sort_by="cpu_time_total", row_limit=20))
+    print("\n--- Profiler CUDA Output ---")
+    print(prof.key_averages().table(sort_by="cuda_time_total", row_limit=20))
 
 
 if __name__ == "__main__":

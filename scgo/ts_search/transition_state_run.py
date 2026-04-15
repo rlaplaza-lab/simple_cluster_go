@@ -71,11 +71,6 @@ from .ts_network import (
 )
 
 
-def _try_cleanup_cuda(logger: Any) -> None:
-    """Release CUDA caches between pairs; ``cleanup_torch_cuda`` does not raise."""
-    cleanup_torch_cuda(logger=logger)
-
-
 def _neb_endpoint_copies(
     atoms_i: Atoms,
     atoms_j: Atoms,
@@ -259,7 +254,7 @@ def run_transition_state_search(
     configure_logging(verbosity)
     logger = get_logger(__name__)
 
-    _try_cleanup_cuda(logger)
+    cleanup_torch_cuda(logger=logger)
 
     validate_composition(composition, allow_empty=False)
     rng = ensure_rng(seed)
@@ -341,7 +336,7 @@ def run_transition_state_search(
 
     if not minima_by_formula:
         logger.error(f"No minima found in {ts_output_dir}")
-        _try_cleanup_cuda(logger)
+        cleanup_torch_cuda(logger=logger)
         return []
 
     minima = minima_by_formula.get(formula, [])
@@ -359,7 +354,7 @@ def run_transition_state_search(
 
     if len(minima) < 2:
         logger.error(f"Only {len(minima)} minima found, need at least 2 to find TS")
-        _try_cleanup_cuda(logger)
+        cleanup_torch_cuda(logger=logger)
         return []
 
     if verbosity >= 1:
@@ -378,7 +373,7 @@ def run_transition_state_search(
 
     if not pairs:
         logger.error("No suitable pairs found for TS search")
-        _try_cleanup_cuda(logger)
+        cleanup_torch_cuda(logger=logger)
         return []
 
     if verbosity >= 1:
@@ -391,9 +386,6 @@ def run_transition_state_search(
 
     # If requested, run multiple TorchSim NEBs together using ParallelNEBBatch.
     if use_parallel_neb:
-        if not use_torchsim:
-            raise ValueError("use_parallel_neb requires use_torchsim=True")
-
         ts_params = torchsim_params or {}
         relaxer = _make_torchsim_relaxer(**ts_params)
 
@@ -573,11 +565,11 @@ def run_transition_state_search(
             # Save result (same behavior as non-parallel path)
             save_neb_result(result, str(result_dir), result["pair_id"])
 
-            _try_cleanup_cuda(logger)
+            cleanup_torch_cuda(logger=logger)
 
     else:
         for idx, (i, j) in enumerate(pairs, 1):
-            _try_cleanup_cuda(logger)
+            cleanup_torch_cuda(logger=logger)
 
             energy_i, atoms_i = minima[i]
             energy_j, atoms_j = minima[j]
@@ -649,14 +641,14 @@ def run_transition_state_search(
                             attempt + 1,
                             e,
                         )
-                        _try_cleanup_cuda(logger)
+                        cleanup_torch_cuda(logger=logger)
                         continue
 
                     logger.exception(
                         "Unexpected error while finding TS for pair %s: %s", pair_id, e
                     )
                     if oom:
-                        _try_cleanup_cuda(logger)
+                        cleanup_torch_cuda(logger=logger)
                         logger.warning(
                             "Detected CUDA OOM for pair %s; freed cached GPU memory",
                             pair_id,
@@ -694,7 +686,7 @@ def run_transition_state_search(
             if not use_torchsim and calculator is not None:
                 del calculator
 
-            _try_cleanup_cuda(logger)
+            cleanup_torch_cuda(logger=logger)
     # Save summary
     save_transition_state_results(
         ts_results,
@@ -876,7 +868,7 @@ def run_transition_state_search(
         )
         logger.info(f"Results written to: {result_dir}")
 
-    _try_cleanup_cuda(logger)
+    cleanup_torch_cuda(logger=logger)
 
     return ts_results
 

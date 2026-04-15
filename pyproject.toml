@@ -43,8 +43,9 @@ Issues = "https://github.com/rlaplaza-lab/simple_cluster_go/issues"
 mace = [
     "e3nn>=0.4.4,<0.5",  # Keep 0.4.x for current mace-torch model-loading behavior.
     "mace-torch>=0.3.15",
-    "nvalchemi-toolkit-ops>=0.3.0",
-    "torch>=2.10.0",
+    "nvalchemi-toolkit-ops>=0.3.1",
+    # Torch 2.11+ wheels target CUDA 13; keep <2.11 for typical CUDA 12 / nvrtc layouts.
+    "torch>=2.10.0,<2.11",
     "torch-sim-atomistic[mace]>=0.5.2",
 ]
 uma = [
