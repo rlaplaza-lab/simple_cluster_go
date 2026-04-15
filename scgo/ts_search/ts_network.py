@@ -240,8 +240,16 @@ def save_ts_network_metadata(
             "product_energy": float(product_energy),
             "ts_energy": float(ts_energy),
             "barrier_height": float(barrier_height),
-            "barrier_forward": float(result.get("barrier_forward") or 0.0),
-            "barrier_reverse": float(result.get("barrier_reverse") or 0.0),
+            "barrier_forward": (
+                float(result["barrier_forward"])
+                if result.get("barrier_forward") is not None
+                else None
+            ),
+            "barrier_reverse": (
+                float(result["barrier_reverse"])
+                if result.get("barrier_reverse") is not None
+                else None
+            ),
             "neb_converged": bool(result.get("neb_converged")),
             "n_images": int(result.get("n_images", 0)),
         }

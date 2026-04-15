@@ -186,15 +186,7 @@ def load_transition_states_by_composition(
     composition: list[str] | None = None,
     require_final_unique_ts: bool = True,
 ) -> dict[str, list[tuple[float, Atoms]]]:
-    """Load transition states from discovered databases under ``base_dir``.
-
-    By default only rows tagged ``final_unique_ts`` are returned (canonical
-    deduplicated, converged NEB output from the TS pipeline). Set
-    ``require_final_unique_ts=False`` to include any relaxed row marked as a
-    transition state (e.g. integrator-only writes).
-
-    Results are grouped by chemical formula, sorted by energy (lowest first).
-    """
+    """Load transition-state rows grouped by formula from discovered databases."""
     logger = get_logger(__name__)
 
     if not os.path.exists(base_dir):
@@ -203,7 +195,6 @@ def load_transition_states_by_composition(
 
     ts_by_formula: dict[str, list[tuple[float, Atoms]]] = {}
     target_formula = get_cluster_formula(composition) if composition else None
-
     db_files_with_run_trial = list_discovered_db_paths_with_run_trial(
         base_dir, composition=composition, use_cache=True
     )
@@ -219,14 +210,11 @@ def load_transition_states_by_composition(
             if not ts_list:
                 continue
 
-            first_atoms = ts_list[0][1]
-            formula = get_cluster_formula(first_atoms.get_chemical_symbols())
+            formula = get_cluster_formula(ts_list[0][1].get_chemical_symbols())
             if target_formula and formula != target_formula:
                 continue
 
-            if formula not in ts_by_formula:
-                ts_by_formula[formula] = []
-
+            ts_by_formula.setdefault(formula, [])
             for energy, atoms in ts_list:
                 atoms_copy = atoms.copy()
                 add_metadata(

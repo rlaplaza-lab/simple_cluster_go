@@ -416,6 +416,31 @@ class TestLogConfiguration:
         log_output = caplog.text
         assert "5" in log_output or "Trials" in log_output
 
+    def test_log_configuration_redacts_relaxer_model_dump(self, caplog):
+        """Test log_configuration keeps relaxer logging compact."""
+        caplog.set_level(logging.INFO)
+        params = {"calculator": "EMT"}
+
+        class _VerboseRelaxer:
+            def __repr__(self):
+                return "VerboseRelaxer(model=VERY_LONG_MODEL_DUMP)"
+
+        optimizer_kwargs = {"relaxer": _VerboseRelaxer()}
+
+        log_configuration(
+            params=params,
+            chosen_go="ga",
+            n_trials=1,
+            cluster_formula="Pt3",
+            n_atoms=3,
+            global_optimizer_kwargs=optimizer_kwargs,
+            verbosity=1,
+        )
+
+        log_output = caplog.text
+        assert "SCGO optimizer: relaxer=<_VerboseRelaxer>" in log_output
+        assert "VERY_LONG_MODEL_DUMP" not in log_output
+
 
 def test_cleanup_torch_cuda_runs_safely():
     """cleanup_torch_cuda should be callable and not raise if torch absent."""

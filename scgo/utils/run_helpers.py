@@ -423,12 +423,20 @@ def log_configuration(
         params.get("imag_freq_threshold", 50.0),
     )
 
+    def _format_optimizer_log_value(key: str, value: Any) -> Any:
+        """Format optimizer values to avoid overly verbose object dumps."""
+        if key == "relaxer" and value is not None:
+            return f"<{value.__class__.__name__}>"
+        return value
+
     for key, value in sorted(global_optimizer_kwargs.items()):
         # Convert numpy types to native Python types for cleaner output
         if isinstance(value, np.integer):
             value = int(value)
         elif isinstance(value, np.floating):
             value = float(value)
+
+        value = _format_optimizer_log_value(key, value)
 
         if key == "temperature" and isinstance(value, float):
             temp_k = value / BOLTZMANN_K_EV_PER_K

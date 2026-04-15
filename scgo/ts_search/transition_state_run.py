@@ -757,6 +757,14 @@ def run_transition_state_search(
                     barrier = edge.get("barrier_height")
                     neb_conv = edge.get("neb_converged")
                     endpoint_prov = edge.get("minima_provenance")
+                    if ts_energy is None or barrier is None:
+                        logger.warning(
+                            "Skipping TS %s for DB tag due to missing energies: ts=%s barrier=%s",
+                            pair_id,
+                            ts_energy,
+                            barrier,
+                        )
+                        continue
 
                     db_candidate = None
                     src_db_i = None
@@ -834,9 +842,7 @@ def run_transition_state_search(
                             minima_idx_2=int(j),
                             db_file=db_candidate,
                             pair_id=str(pair_id),
-                            barrier_height=float(barrier)
-                            if barrier is not None
-                            else 0.0,
+                            barrier_height=float(barrier),
                             endpoint_provenance=endpoint_prov,
                             canonical_ts=True,
                             neb_converged=bool(neb_conv),
@@ -903,6 +909,15 @@ def integrate_ts_to_database(
             ts_structure = result.get("transition_state")
             ts_energy = result.get("ts_energy")
             barrier = result.get("barrier_height")
+            if ts_structure is None or ts_energy is None or barrier is None:
+                logger.warning(
+                    "Skipping TS %s DB integration due to missing fields: structure=%s ts_energy=%s barrier=%s",
+                    pair_id,
+                    ts_structure is not None,
+                    ts_energy,
+                    barrier,
+                )
+                continue
 
             minima_idx_1, minima_idx_2 = -1, -1
             mid = result.get("minima_indices")
@@ -916,12 +931,12 @@ def integrate_ts_to_database(
 
             success = add_ts_to_database(
                 ts_structure=ts_structure,
-                ts_energy=float(ts_energy) if ts_energy is not None else 0.0,
+                ts_energy=float(ts_energy),
                 minima_idx_1=int(minima_idx_1),
                 minima_idx_2=int(minima_idx_2),
                 db_file=minima_database_file,
                 pair_id=pair_id,
-                barrier_height=float(barrier) if barrier is not None else 0.0,
+                barrier_height=float(barrier),
                 endpoint_provenance=endpoint_provenance,
                 canonical_ts=False,
                 neb_converged=bool(result.get("neb_converged", False)),
