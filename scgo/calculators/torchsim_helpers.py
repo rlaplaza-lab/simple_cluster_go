@@ -1,10 +1,13 @@
 """Utilities for integrating TorchSim batched relaxations with SCGO.
 
-Requires the ``scgo[mace]`` extra. UMA (fairchem) workflows use ASE relaxation
-and ASE NEB instead; see :mod:`scgo.utils.torchsim_policy`.
+This module wraps the TorchSim high-level optimization API so SCGO can relax
+multiple candidate structures in a single batched call.
 
-This module wraps the TorchSim high-level optimization API so that SCGO can
-relax multiple candidate structures in a single batched call.
+Important:
+- Imports for optional stacks (TorchSim, MACE, FairChem) are **lazy** so SCGO can
+  be imported in minimal environments without pulling MLIP dependencies.
+- TorchSim can run with multiple model families. SCGO supports MACE and
+  FairChem/UMA via TorchSim model wrappers.
 """
 
 from __future__ import annotations
@@ -19,15 +22,10 @@ from pathlib import Path
 
 import numpy as np
 import torch
-import torch_sim as ts
 from ase import Atoms
 from ase.build import bulk
 from ase.constraints import FixAtoms as ASEFixAtoms
-from mace.calculators.foundations_models import mace_mp  # type: ignore
-from torch_sim.constraints import FixAtoms as TSFixAtoms
-from torch_sim.models.mace import MaceModel  # type: ignore
 
-from scgo.calculators.mace_helpers import MaceUrls
 from scgo.database.metadata import update_metadata
 from scgo.utils.helpers import ensure_float64_forces
 from scgo.utils.logging import get_logger
@@ -146,6 +144,12 @@ def _patch_torchsim_fixatoms_subconstraint_device() -> None:
     ``FixAtoms.select_sub_constraint`` while batched constraints live on CUDA,
     which makes ``torch.isin`` fail. This is applied once per process.
     """
+    # Lazy import: only patch when TorchSim is actually available/used.
+    try:
+        from torch_sim.constraints import FixAtoms as TSFixAtoms  # type: ignore
+    except Exception:
+        return
+
     if getattr(TSFixAtoms.select_sub_constraint, "_scgo_patched", False):
         return
 
@@ -177,6 +181,9 @@ def build_torchsim_fixatoms_from_ase_batch(
     Returns:
         A ``torch_sim.constraints.FixAtoms`` instance, or ``None`` if nothing to fix.
     """
+    # Lazy import: do not require TorchSim until needed.
+    from torch_sim.constraints import FixAtoms as TSFixAtoms  # type: ignore
+
     merged: list[int] = []
     offset = 0
     for atoms in atoms_list:
@@ -200,8 +207,13 @@ def _load_default_mace_model(
     compute_stress: bool = False,
 ):
     """Create a TorchSim MACE model given a canonical model identifier."""
-    model_selector = getattr(MaceUrls, mace_model_name, mace_model_name)
+    # Lazy imports: only required for the MACE TorchSim path.
+    from mace.calculators.foundations_models import mace_mp  # type: ignore
+    from torch_sim.models.mace import MaceModel  # type: ignore
 
+    from scgo.calculators.mace_helpers import MaceUrls
+
+    model_selector = getattr(MaceUrls, mace_model_name, mace_model_name)
     raw_model = mace_mp(
         model=model_selector,
         return_raw_model=True,
@@ -213,6 +225,26 @@ def _load_default_mace_model(
         device=device,
         dtype=dtype,
         compute_forces=compute_forces,
+        compute_stress=compute_stress,
+    )
+
+
+def _load_default_fairchem_model(
+    *,
+    device,
+    dtype,
+    fairchem_model_name: str,
+    fairchem_task_name: str | None,
+    compute_stress: bool = False,
+):
+    """Create a TorchSim FairChem model for UMA checkpoints."""
+    from torch_sim.models.fairchem import FairChemModel  # type: ignore
+
+    return FairChemModel(
+        model=fairchem_model_name,
+        task_name=fairchem_task_name,
+        device=device,
+        dtype=dtype,
         compute_stress=compute_stress,
     )
 
@@ -254,7 +286,10 @@ class TorchSimBatchRelaxer:
     device: object | None = None
     dtype: object | None = None
     model: object | None = None
+    model_kind: str = "mace"  # "mace" or "fairchem"
     mace_model_name: str = "mace_matpes_0"
+    fairchem_model_name: str | None = None
+    fairchem_task_name: str | None = None
     optimizer_name: str = "fire"
     force_tol: float | None = 0.05
     max_steps: int | None = 100
@@ -273,6 +308,9 @@ class TorchSimBatchRelaxer:
 
     def __post_init__(self) -> None:
         self._torch = torch
+        # Lazy import: only require TorchSim when actually instantiating the relaxer.
+        import torch_sim as ts  # type: ignore
+
         self._ts = ts
         if self.device is None:
             self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -297,11 +335,28 @@ class TorchSimBatchRelaxer:
             self.optimizer = self.optimizer_name
 
         if self.model is None:
-            self.model = _load_default_mace_model(
-                device=self.device,
-                dtype=self.dtype,
-                mace_model_name=self.mace_model_name,
-            )
+            mk = str(self.model_kind or "mace").strip().lower()
+            if mk == "mace":
+                self.model = _load_default_mace_model(
+                    device=self.device,
+                    dtype=self.dtype,
+                    mace_model_name=self.mace_model_name,
+                )
+            elif mk in ("fairchem", "uma"):
+                if not self.fairchem_model_name:
+                    raise ValueError(
+                        "TorchSimBatchRelaxer(model_kind='fairchem') requires fairchem_model_name"
+                    )
+                self.model = _load_default_fairchem_model(
+                    device=self.device,
+                    dtype=self.dtype,
+                    fairchem_model_name=str(self.fairchem_model_name),
+                    fairchem_task_name=self.fairchem_task_name,
+                )
+            else:
+                raise ValueError(
+                    f"Unknown model_kind {self.model_kind!r}; expected 'mace' or 'fairchem'"
+                )
         self._patch_model_for_cuda()
 
         if self.compile_model:
@@ -361,7 +416,7 @@ class TorchSimBatchRelaxer:
             # Check if already cached from previous runs
             cached_scaler = _GLOBAL_MEMORY_SCALER_CACHE.get(
                 n_atoms=n_atoms,
-                model_name=self.mace_model_name,
+                model_name=self._cache_model_name(),
                 memory_scales_with=self.memory_scales_with,
                 device=self._device_str,
             )
@@ -402,7 +457,7 @@ class TorchSimBatchRelaxer:
             ):
                 _GLOBAL_MEMORY_SCALER_CACHE.set(
                     n_atoms=n_atoms,
-                    model_name=self.mace_model_name,
+                    model_name=self._cache_model_name(),
                     memory_scales_with=self.memory_scales_with,
                     device=self._device_str,
                     value=float(autobatcher.max_memory_scaler),
@@ -439,7 +494,7 @@ class TorchSimBatchRelaxer:
         if self.max_memory_scaler is None and "autobatcher" in self._runner_kwargs:
             cached_scaler = _GLOBAL_MEMORY_SCALER_CACHE.get(
                 n_atoms=max_atoms_in_batch,
-                model_name=self.mace_model_name,
+                model_name=self._cache_model_name(),
                 memory_scales_with=self.memory_scales_with,
                 device=self._device_str,
             )
@@ -499,7 +554,7 @@ class TorchSimBatchRelaxer:
             ):
                 _GLOBAL_MEMORY_SCALER_CACHE.set(
                     n_atoms=max_atoms_in_batch,
-                    model_name=self.mace_model_name,
+                    model_name=self._cache_model_name(),
                     memory_scales_with=self.memory_scales_with,
                     device=self._device_str,
                     value=float(autobatcher.max_memory_scaler),
@@ -564,6 +619,14 @@ class TorchSimBatchRelaxer:
     def __deepcopy__(self, memo):  # pragma: no cover - deepcopy helper
         memo[id(self)] = self
         return self
+
+    def _cache_model_name(self) -> str:
+        mk = str(self.model_kind or "mace").strip().lower()
+        if mk == "mace":
+            return str(self.mace_model_name)
+        if mk in ("fairchem", "uma"):
+            return str(self.fairchem_model_name or "fairchem")
+        return str(mk)
 
     def _patch_model_for_cuda(self) -> None:
         """Ensure TorchSim models handle CUDA atomic numbers safely."""

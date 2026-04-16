@@ -7,9 +7,11 @@ adapted for atomic clusters.
 
 from __future__ import annotations
 
+import json
 import math
 import os
 from contextlib import suppress
+from time import perf_counter
 from typing import Any
 
 import numpy as np
@@ -137,6 +139,10 @@ def ga_go(
         ValueError: If calculator is not attached or parameters are invalid.
     """
     logger = get_logger(__name__)
+    profile_t0 = perf_counter()
+    profile_timings: dict[str, float] = {}
+    profile_counters: dict[str, int] = {"offspring_created": 0}
+    per_generation: list[dict[str, Any]] = []
 
     validate_composition(composition, allow_empty=False, allow_tuple=False)
     validate_ga_common_params(
@@ -276,9 +282,11 @@ def ga_go(
             previous_search_glob=previous_search_glob,
             n_jobs=n_jobs_population_init,
         )
+    t0 = perf_counter()
     starting_population = [
         start_generator.get_new_candidate() for _ in range(population_size)
     ]
+    profile_timings["initial_population_generation_s"] = perf_counter() - t0
 
     if verbosity >= 1:
         n_workers = (
@@ -327,6 +335,7 @@ def ga_go(
             da.c.update(gaid, gaid=gaid)
             cand.info["confid"] = gaid
 
+        t0 = perf_counter()
         for cand in starting_population:
             retry_with_backoff(
                 lambda _cand=cand: _insert_unrelaxed(_cand),
@@ -335,8 +344,11 @@ def ga_go(
                 backoff_factor=2.0,
                 exception_types=_HPC_RETRY_EXCEPTIONS,
             )
+        profile_timings["initial_unrelaxed_insert_s"] = perf_counter() - t0
 
         initial_pop_count = 0
+        t_relax = 0.0
+        t_write = 0.0
         for cand in starting_population:
             if surface_config is not None:
                 attach_slab_constraints(
@@ -347,6 +359,7 @@ def ga_go(
                     n_relax_top_slab_layers=surface_config.n_relax_top_slab_layers,
                     surface_normal_axis=surface_config.surface_normal_axis,
                 )
+            t_start = perf_counter()
             perform_local_relaxation(
                 cand,
                 calculator,
@@ -355,6 +368,7 @@ def ga_go(
                 niter_local_relaxation,
                 center_after_relax=center_after_relax,
             )
+            t_relax += perf_counter() - t_start
             add_metadata(
                 cand,
                 generation=0,
@@ -362,6 +376,7 @@ def ga_go(
                 **slab_ga_metadata_extras(surface_config, n_slab),
             )
 
+            t_start = perf_counter()
             retry_with_backoff(
                 lambda _a=cand: da.add_relaxed_step(_a),
                 max_retries=5,
@@ -369,7 +384,10 @@ def ga_go(
                 backoff_factor=2.0,
                 exception_types=_HPC_RETRY_EXCEPTIONS,
             )
+            t_write += perf_counter() - t_start
             initial_pop_count += 1
+        profile_timings["initial_local_relaxation_s"] = t_relax
+        profile_timings["initial_relaxed_write_s"] = t_write
 
         if initial_pop_count > 0:
             logger.debug(
@@ -445,21 +463,35 @@ def ga_go(
             attempts = 0
             max_attempts = max(10, n_offspring * 10)
 
+            t_loop = perf_counter()
+            t_relax_gen = 0.0
+            t_db_unrelaxed_gen = 0.0
+            t_db_relaxed_gen = 0.0
+            t_parent_select_gen = 0.0
+            t_crossover_gen = 0.0
+            t_mutation_gen = 0.0
             while created < n_offspring and attempts < max_attempts:
                 attempts += 1
+                t0 = perf_counter()
                 candidates = population.get_two_candidates()
+                t_parent_select_gen += perf_counter() - t0
                 if candidates is None:
                     continue
                 a1, a2 = candidates
+                t0 = perf_counter()
                 a3, desc = pairing.get_new_individual([a1, a2])
+                t_crossover_gen += perf_counter() - t0
                 if a3 is None:
                     continue
 
                 if rng.random() < current_mutation_probability:
+                    t0 = perf_counter()
                     a3_mutated = mutations.get_operator().mutate(a3)
+                    t_mutation_gen += perf_counter() - t0
                     if a3_mutated is not None:
                         a3 = a3_mutated
 
+                t_start = perf_counter()
                 retry_with_backoff(
                     lambda _a3=a3, _desc=desc: da.add_unrelaxed_candidate(
                         _a3, description=_desc
@@ -469,6 +501,7 @@ def ga_go(
                     backoff_factor=2.0,
                     exception_types=_HPC_RETRY_EXCEPTIONS,
                 )
+                t_db_unrelaxed_gen += perf_counter() - t_start
 
                 if surface_config is not None:
                     attach_slab_constraints(
@@ -479,6 +512,7 @@ def ga_go(
                         n_relax_top_slab_layers=surface_config.n_relax_top_slab_layers,
                         surface_normal_axis=surface_config.surface_normal_axis,
                     )
+                t_start = perf_counter()
                 perform_local_relaxation(
                     a3,
                     calculator,
@@ -487,6 +521,7 @@ def ga_go(
                     niter_local_relaxation,
                     center_after_relax=center_after_relax,
                 )
+                t_relax_gen += perf_counter() - t_start
 
                 add_metadata(
                     a3,
@@ -494,6 +529,7 @@ def ga_go(
                     run_id=run_id,
                     **slab_ga_metadata_extras(surface_config, n_slab),
                 )
+                t_start = perf_counter()
                 retry_with_backoff(
                     lambda _a3=a3: da.add_relaxed_step(_a3),
                     max_retries=5,
@@ -501,15 +537,67 @@ def ga_go(
                     backoff_factor=2.0,
                     exception_types=_HPC_RETRY_EXCEPTIONS,
                 )
+                t_db_relaxed_gen += perf_counter() - t_start
 
                 created += 1
+            profile_counters["offspring_created"] += created
+            profile_timings["offspring_mutation_queue_s"] = profile_timings.get(
+                "offspring_mutation_queue_s", 0.0
+            ) + (perf_counter() - t_loop)
+            profile_timings["offspring_parent_select_s"] = (
+                profile_timings.get("offspring_parent_select_s", 0.0)
+                + t_parent_select_gen
+            )
+            profile_timings["offspring_crossover_s"] = (
+                profile_timings.get("offspring_crossover_s", 0.0) + t_crossover_gen
+            )
+            profile_timings["offspring_mutation_s"] = (
+                profile_timings.get("offspring_mutation_s", 0.0) + t_mutation_gen
+            )
+            profile_timings["offspring_local_relaxation_s"] = (
+                profile_timings.get("offspring_local_relaxation_s", 0.0) + t_relax_gen
+            )
+            profile_timings["offspring_unrelaxed_insert_s"] = (
+                profile_timings.get("offspring_unrelaxed_insert_s", 0.0)
+                + t_db_unrelaxed_gen
+            )
+            profile_timings["offspring_relaxed_write_s"] = (
+                profile_timings.get("offspring_relaxed_write_s", 0.0) + t_db_relaxed_gen
+            )
+            profile_timings["offspring_db_io_s"] = profile_timings.get(
+                "offspring_db_io_s", 0.0
+            ) + (t_db_unrelaxed_gen + t_db_relaxed_gen)
 
             logger.debug(
                 f"Generation {generation}: created and tagged {created} offspring"
             )
 
             # Update population once per generation (reflects all created offspring)
+            t_start = perf_counter()
             population.update()
+            pop_update_s = perf_counter() - t_start
+            profile_timings["population_update_s"] = (
+                profile_timings.get("population_update_s", 0.0) + pop_update_s
+            )
+
+            per_generation.append(
+                {
+                    "generation": int(generation),
+                    "n_offspring_target": int(n_offspring),
+                    "offspring_created": int(created),
+                    "attempts": int(attempts),
+                    "timings_s": {
+                        "parent_select_s": t_parent_select_gen,
+                        "crossover_s": t_crossover_gen,
+                        "mutation_s": t_mutation_gen,
+                        "db_unrelaxed_insert_s": t_db_unrelaxed_gen,
+                        "relax_s": t_relax_gen,
+                        "db_relaxed_write_s": t_db_relaxed_gen,
+                        "population_update_s": pop_update_s,
+                        "offspring_loop_wall_s": perf_counter() - t_loop,
+                    },
+                }
+            )
 
             if early_stopping_niter > 0:
                 best_value, generations_without_improvement, should_stop = (
@@ -557,6 +645,25 @@ def ga_go(
             fitness_strategy=fitness_strategy,
             logger=logger,
         )
+        profile_timings["total_wall_s"] = perf_counter() - profile_t0
+        profile_timings["cpu_non_relax_s"] = max(
+            0.0,
+            profile_timings["total_wall_s"]
+            - profile_timings.get("initial_local_relaxation_s", 0.0)
+            - profile_timings.get("offspring_local_relaxation_s", 0.0),
+        )
+        profile_path = os.path.join(output_dir, "ga_profile.json")
+        with open(profile_path, "w") as f:
+            json.dump(
+                {
+                    "backend": "ase_ga",
+                    "timings_s": profile_timings,
+                    "counters": profile_counters,
+                    "per_generation": per_generation,
+                },
+                f,
+                indent=2,
+            )
 
         return all_minima
 

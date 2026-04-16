@@ -204,8 +204,8 @@ def _get_base_ga_benchmark_params(seed: int) -> dict[str, Any]:
 def get_uma_ga_benchmark_params(
     seed: int,
     *,
-    model_name: str = "uma-s-1p1",
-    task_name: str = "omat",
+    model_name: str = "uma-s-1p2",
+    task_name: str = "oc25",
 ) -> dict[str, Any]:
     """GA benchmark parameters matching :func:`_get_base_ga_benchmark_params` but with UMA (ASE GA)."""
     params = _get_base_ga_benchmark_params(seed)
@@ -219,9 +219,26 @@ def get_default_uma_params() -> dict[str, Any]:
     params = get_default_params()
     params["calculator"] = "UMA"
     params["calculator_kwargs"] = {
-        "model_name": "uma-s-1p1",
-        "task_name": "omat",
+        "model_name": "uma-s-1p2",
+        "task_name": "oc25",
     }
+    # Default UMA GA to TorchSim-backed relaxations (requires TorchSim + FairChem support).
+    # Lazy import: do not require TorchSim unless this preset is used.
+    from scgo.calculators.torchsim_helpers import TorchSimBatchRelaxer
+
+    ga = params.get("optimizer_params", {}).get("ga", {})
+    fmax_val = float(ga.get("fmax", 0.05))
+    niter_local = ga.get("niter_local_relaxation", "auto")
+    max_steps = 250 if niter_local == "auto" else int(niter_local)
+    ga["relaxer"] = TorchSimBatchRelaxer(
+        model_kind="fairchem",
+        fairchem_model_name=params["calculator_kwargs"]["model_name"],
+        fairchem_task_name=params["calculator_kwargs"].get("task_name"),
+        force_tol=fmax_val,
+        optimizer_name="fire",
+        max_steps=max_steps,
+        dtype=None,  # TorchSim default per model; keep lazy/portable
+    )
     return params
 
 
@@ -229,8 +246,8 @@ def get_ts_search_params_uma(
     *,
     regime: TsSearchRegime = "gas",
     surface_config: SurfaceSystemConfig | None = None,
-    model_name: str = "uma-s-1p1",
-    task_name: str | None = "omat",
+    model_name: str = "uma-s-1p2",
+    task_name: str | None = "oc25",
 ) -> dict[str, Any]:
     """TS preset for UMA: ASE NEB (no TorchSim); use with ``scgo[uma]`` only."""
     return get_ts_search_params(
@@ -436,6 +453,16 @@ def get_ts_run_kwargs(ts_params: dict[str, Any] | None = None) -> dict[str, Any]
             "max_steps": ts_params.get("torchsim_max_steps"),
         },
     }
+    # TorchSim model selection: choose the correct model family lazily at runtime.
+    if str(ts_params.get("calculator", "")).strip().upper() == "UMA":
+        ck = ts_params.get("calculator_kwargs", {}) or {}
+        kwargs["torchsim_params"].update(
+            {
+                "model_kind": "fairchem",
+                "fairchem_model_name": ck.get("model_name", "uma-s-1p2"),
+                "fairchem_task_name": ck.get("task_name", "oc25"),
+            }
+        )
 
     direct_keys = [
         "max_pairs",

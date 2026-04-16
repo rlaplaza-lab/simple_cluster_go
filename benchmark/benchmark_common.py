@@ -1,7 +1,7 @@
 """Shared benchmark utilities for Pt cluster regression suites.
 
 Constants, helpers, evaluation logic, and parameter setup used by
-benchmark_Pt, benchmark_Pt_PBE, and seed-specific variants.
+benchmark_Pt and benchmark variants.
 """
 
 from __future__ import annotations
@@ -37,29 +37,39 @@ NUM_GROUND_TRUTH = 50
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 BENCHMARK_DIR = PROJECT_ROOT / "benchmark" / "benchmark_files_Pt"
 
-# Campaign outputs (used by benchmark_Pt, benchmark_Pt_PBE, benchmark_Pt_surface_nio).
+# Campaign outputs (used by benchmark_Pt and surface benchmark scripts).
 # Each suite writes under ``results/<suite>/``; per-formula runs use ``<Formula>_searches``.
 BENCHMARK_RESULTS_ROOT = PROJECT_ROOT / "benchmark" / "results"
 PT_CLUSTER_RESULTS_DIR = BENCHMARK_RESULTS_ROOT / "pt_cluster"
-PT_CLUSTER_PBE_RESULTS_DIR = BENCHMARK_RESULTS_ROOT / "pt_cluster_pbe"
-PT_CLUSTER_UMA_RESULTS_DIR = BENCHMARK_RESULTS_ROOT / "pt_cluster_uma"
-PT_SURFACE_NIO_RESULTS_DIR = BENCHMARK_RESULTS_ROOT / "pt_surface_nio"
+PT_SURFACE_GRAPHITE_RESULTS_DIR = BENCHMARK_RESULTS_ROOT / "pt_surface_graphite"
+# Backward-compatible alias for older script/import names.
+PT_SURFACE_NIO_RESULTS_DIR = PT_SURFACE_GRAPHITE_RESULTS_DIR
+
+
+def _slug(value: str) -> str:
+    """Normalize names used in benchmark output directory names."""
+    return value.strip().lower().replace("/", "-").replace(" ", "-").replace("__", "_")
 
 
 def default_pt_cluster_benchmark_output_dir(
-    model_name: str | None,
-    *,
-    calculator: str = "MACE",
+    cluster_formula: str,
+    params: dict,
 ) -> Path:
-    """Destination for gas-phase Pt benchmark campaigns (split by backend / MACE variant)."""
+    """Destination for gas-phase Pt benchmarks (per composition + backend/model)."""
+    calculator = str(params.get("calculator", "MACE")).upper()
+    calculator_kwargs = params.get("calculator_kwargs", {}) or {}
+    model_name = str(calculator_kwargs.get("model_name", "default"))
+    prefix = _slug(cluster_formula)
     if calculator == "UMA":
-        return PT_CLUSTER_UMA_RESULTS_DIR.resolve()
-    if model_name == "large":
-        return PT_CLUSTER_PBE_RESULTS_DIR.resolve()
-    return PT_CLUSTER_RESULTS_DIR.resolve()
+        task_name = str(calculator_kwargs.get("task_name", "default"))
+        dirname = f"{prefix}_uma_{_slug(model_name)}-{_slug(task_name)}"
+    else:
+        dirname = f"{prefix}_mace_{_slug(model_name)}"
+    return (BENCHMARK_RESULTS_ROOT / dirname).resolve()
 
 
 def resolve_pt_cluster_benchmark_output_dir(
+    cluster_formula: str,
     params: dict,
     output_dir: str | Path | None = None,
 ) -> Path:
@@ -67,11 +77,7 @@ def resolve_pt_cluster_benchmark_output_dir(
     if output_dir is not None:
         path = Path(output_dir).resolve()
     else:
-        model_name = params.get("calculator_kwargs", {}).get("model_name")
-        calculator = str(params.get("calculator", "MACE"))
-        path = default_pt_cluster_benchmark_output_dir(
-            model_name, calculator=calculator
-        )
+        path = default_pt_cluster_benchmark_output_dir(cluster_formula, params)
     path.mkdir(parents=True, exist_ok=True)
     return path
 
@@ -123,6 +129,170 @@ def _campaign_cache_key(
     return f"{element}|{min_atoms}|{max_atoms}|{seed}|{digest}|{out}"
 
 
+def _load_latest_ga_profile(
+    output_root: str | Path,
+    cluster_formula: str,
+) -> dict | None:
+    """Load latest GA profile JSON from benchmark run outputs."""
+    root = Path(output_root)
+    run_dirs = sorted(
+        (root / f"{cluster_formula}_searches").glob("run_*"),
+        key=lambda p: p.name,
+    )
+    if not run_dirs:
+        return None
+    latest = run_dirs[-1]
+    profile_path = latest / "trial_1" / "ga_profile.json"
+    if not profile_path.exists():
+        return None
+    try:
+        return json.loads(profile_path.read_text())
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
+def load_latest_ga_profile(
+    output_root: str | Path,
+    cluster_formula: str,
+) -> dict | None:
+    """Load latest GA profile JSON from benchmark run outputs."""
+    return _load_latest_ga_profile(output_root, cluster_formula)
+
+
+def format_ga_profile_lines(
+    profile: dict,
+    *,
+    detailed: bool = True,
+    max_entries: int = 8,
+) -> list[str]:
+    """Return human-readable profiling lines from a GA profile payload."""
+    timings = profile.get("timings_s", {})
+    backend = str(profile.get("backend", "ga"))
+    total = float(timings.get("total_wall_s", 0.0))
+    relax = float(
+        timings.get(
+            "relax_batch_s",
+            timings.get("initial_local_relaxation_s", 0.0)
+            + timings.get("offspring_local_relaxation_s", 0.0),
+        )
+    )
+    cpu = float(timings.get("cpu_non_relax_s", max(0.0, total - relax)))
+    db_io = float(
+        timings.get("db_read_s", 0.0)
+        + timings.get("db_write_s", 0.0)
+        + timings.get("offspring_db_io_s", 0.0)
+        + timings.get("initial_unrelaxed_insert_s", 0.0)
+        + timings.get("initial_relaxed_write_s", 0.0)
+    )
+    lines = [
+        (
+            f"Profiling ({backend}): total={total:.1f}s, relax={relax:.1f}s, "
+            f"cpu_non_relax={cpu:.1f}s, db_io={db_io:.1f}s"
+        )
+    ]
+    if not detailed:
+        return lines
+
+    timing_items: list[tuple[str, float]] = []
+    for key, value in timings.items():
+        if key == "total_wall_s":
+            continue
+        try:
+            duration = float(value)
+        except (TypeError, ValueError):
+            continue
+        if duration <= 0.0:
+            continue
+        timing_items.append((key, duration))
+
+    if not timing_items:
+        lines.append("Profiling details: no non-zero timing phases captured.")
+        return lines
+
+    timing_items.sort(key=lambda item: item[1], reverse=True)
+    total_for_pct = total if total > 0.0 else sum(v for _, v in timing_items)
+    lines.append(
+        f"Profiling details (top {min(max_entries, len(timing_items))} phases by wall time):"
+    )
+    for name, duration in timing_items[:max_entries]:
+        pct = (duration / total_for_pct * 100.0) if total_for_pct > 0.0 else 0.0
+        lines.append(f"  - {name}: {duration:.2f}s ({pct:.1f}%)")
+
+    counters = profile.get("counters")
+    if isinstance(counters, dict) and counters:
+        parts: list[str] = []
+        for key in sorted(counters):
+            value = counters[key]
+            parts.append(f"{key}={value}")
+        lines.append(f"Counters: {', '.join(parts)}")
+
+    per_gen = profile.get("per_generation")
+    if isinstance(per_gen, list) and per_gen:
+        timing_rows: list[dict[str, float]] = []
+        for row in per_gen:
+            if not isinstance(row, dict):
+                continue
+            t = row.get("timings_s")
+            if isinstance(t, dict):
+                parsed: dict[str, float] = {}
+                for k, v in t.items():
+                    try:
+                        parsed[str(k)] = float(v)
+                    except (TypeError, ValueError):
+                        continue
+                if parsed:
+                    timing_rows.append(parsed)
+
+        if timing_rows:
+            keys: set[str] = set()
+            for row in timing_rows:
+                keys.update(row.keys())
+
+            def _series(key: str) -> np.ndarray:
+                return np.asarray(
+                    [row.get(key, 0.0) for row in timing_rows], dtype=float
+                )
+
+            ordered_keys = [
+                "parent_select_s",
+                "crossover_s",
+                "mutation_s",
+                "db_unrelaxed_insert_s",
+                "relax_s",
+                "db_relaxed_write_s",
+                "torchsim_db_read_s",
+                "torchsim_relax_s",
+                "torchsim_db_write_s",
+                "population_update_s",
+            ]
+            remaining = sorted(k for k in keys if k not in ordered_keys)
+            ordered_all = [k for k in ordered_keys if k in keys] + remaining
+
+            # Rank phases by mean time per generation (descending), then show the most relevant ones.
+            ranked: list[tuple[str, float]] = []
+            for key in ordered_all:
+                s = _series(key)
+                mean = float(np.mean(s))
+                if mean <= 0.0:
+                    continue
+                ranked.append((key, mean))
+            ranked.sort(key=lambda kv: kv[1], reverse=True)
+
+            lines.append(
+                f"Per-generation timing summary (N={len(timing_rows)} generations):"
+            )
+            for key, _mean in ranked[:12]:
+                s = _series(key)
+                mean = float(np.mean(s))
+                median = float(np.median(s))
+                p90 = float(np.quantile(s, 0.9))
+                lines.append(
+                    f"  - {key}: mean={mean:.3f}s, median={median:.3f}s, p90={p90:.3f}s"
+                )
+
+    return lines
+
+
 def _get_campaign_results(
     element: str,
     min_atoms: int,
@@ -155,13 +325,14 @@ def get_benchmark_params(
     model_name: str | None = None,
     *,
     backend: str = "mace",
-    uma_task_name: str = "omat",
+    uma_task_name: str = "oc25",
 ) -> dict:
     """Build benchmark params: TorchSim GA + MACE (``backend=mace``) or ASE GA + UMA."""
     if backend == "uma":
-        mn = model_name or "uma-s-1p1"
+        mn = model_name or "uma-s-1p2"
         return get_uma_ga_benchmark_params(seed, model_name=mn, task_name=uma_task_name)
     params = get_torchsim_ga_params(seed=seed)
+    params["calculator"] = "MACE"
     if model_name is not None:
         params["calculator_kwargs"]["model_name"] = model_name
     return params
@@ -220,6 +391,8 @@ def evaluate_cluster(
     campaign_results: dict[str, list[tuple[float, Atoms]]] | None = None,
     verbose: bool = False,
     output_dir: str | Path | None = None,
+    profile_detail: bool = True,
+    profile_top_n: int = 8,
 ) -> BenchmarkResult:
     """Run SCGO for a single cluster and evaluate against the benchmark set."""
     lines: list[str] = []
@@ -251,8 +424,11 @@ def evaluate_cluster(
         f"--- Running SCGO for {cluster_formula} (seed={seed}) against {result.total_ground_truth} ground truth minima ---",
     )
 
+    resolved_out: Path | None = None
     if campaign_results is None:
-        resolved_out = resolve_pt_cluster_benchmark_output_dir(params, output_dir)
+        resolved_out = resolve_pt_cluster_benchmark_output_dir(
+            cluster_formula, params, output_dir
+        )
         campaign_results = _get_campaign_results(
             element=element,
             min_atoms=n_atoms,
@@ -340,6 +516,18 @@ def evaluate_cluster(
             f"Recovery rate {result.recovery_rate:.2f} is below threshold {MIN_RECOVERY_RATE:.2f}.",
         )
 
+    profile_root = output_dir or resolved_out
+    if profile_root is not None:
+        profile = _load_latest_ga_profile(profile_root, cluster_formula)
+        if profile:
+            lines.extend(
+                format_ga_profile_lines(
+                    profile,
+                    detailed=profile_detail,
+                    max_entries=profile_top_n,
+                )
+            )
+
     result.messages = lines
 
     if verbose:
@@ -358,7 +546,9 @@ def run_benchmark_suite(
     output_dir: str | Path | None = None,
     *,
     backend: str = "mace",
-    uma_task_name: str = "omat",
+    uma_task_name: str = "oc25",
+    profile_detail: bool = True,
+    profile_top_n: int = 8,
 ) -> list[BenchmarkResult]:
     """Execute the Pt benchmark suite for a set of cluster formulas."""
     clusters = clusters or DEFAULT_CLUSTERS
@@ -373,23 +563,22 @@ def run_benchmark_suite(
     if not clusters:
         return []
 
-    atom_counts = [_parse_atom_count(c) for c in clusters]
-    min_atoms = min(atom_counts)
-    max_atoms = max(atom_counts)
     element = "Pt"
-
-    resolved_out = resolve_pt_cluster_benchmark_output_dir(params, output_dir)
-    shared_campaign_results = _get_campaign_results(
-        element=element,
-        min_atoms=min_atoms,
-        max_atoms=max_atoms,
-        seed=seed,
-        params=params,
-        output_dir=resolved_out,
-    )
 
     results: list[BenchmarkResult] = []
     for cluster_formula in clusters:
+        n_atoms = _parse_atom_count(cluster_formula)
+        resolved_out = resolve_pt_cluster_benchmark_output_dir(
+            cluster_formula, params, output_dir
+        )
+        per_cluster_results = _get_campaign_results(
+            element=element,
+            min_atoms=n_atoms,
+            max_atoms=n_atoms,
+            seed=seed,
+            params=params,
+            output_dir=resolved_out,
+        )
         result = evaluate_cluster(
             cluster_formula,
             params=params,
@@ -397,8 +586,11 @@ def run_benchmark_suite(
             comparator_tolerance=0.05,
             num_ground_truth=NUM_GROUND_TRUTH,
             element=element,
-            campaign_results=shared_campaign_results,
+            campaign_results=per_cluster_results,
             verbose=verbose,
+            output_dir=resolved_out,
+            profile_detail=profile_detail,
+            profile_top_n=profile_top_n,
         )
         results.append(result)
 

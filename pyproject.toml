@@ -49,6 +49,7 @@ mace = [
 ]
 uma = [
     "fairchem-core>=2.19.0",
+    "torch-sim-atomistic[fairchem]>=0.5.2",
 ]
 test = [
     "pytest>=7.0.0",

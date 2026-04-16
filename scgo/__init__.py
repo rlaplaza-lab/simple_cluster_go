@@ -100,7 +100,8 @@ def __getattr__(name: str) -> Any:
             from scgo.algorithms.geneticalgorithm_go_torchsim import ga_go_torchsim
         except ImportError as e:
             raise ImportError(
-                "TorchSim GA requires the MACE stack. Install with: pip install 'scgo[mace]'"
+                "TorchSim GA requires TorchSim. Install with: pip install 'scgo[mace]' "
+                "(MACE) or 'scgo[uma]' (UMA) depending on the model family."
             ) from e
         return ga_go_torchsim
     msg = f"module {__name__!r} has no attribute {name!r}"

@@ -1,8 +1,14 @@
-"""When SCGO may use TorchSim batched NEB/GA paths (MACE stack only).
+"""When SCGO may use TorchSim batched NEB/GA paths.
 
-UMA (fairchem) and classical calculators must use ASE NEB with an attached
-calculator. ``TorchSimBatchRelaxer`` loads MACE inside TorchSim and cannot
-drive UMA checkpoints.
+TorchSim can drive multiple model families (e.g., MACE, FairChem/UMA) via model
+wrappers in ``torch_sim.models``. Policy helpers here validate whether TorchSim
+may be used for a given calculator name and whether the required stack is
+installed.
+
+Design note:
+- If a caller explicitly requests TorchSim (``use_torchsim=True``), we **fail
+  fast** when TorchSim (or the required model support) is missing; we do not
+  silently fall back to ASE.
 """
 
 from __future__ import annotations
@@ -19,8 +25,27 @@ def mace_torchsim_stack_available() -> bool:
 
 
 def calculator_name_supports_torchsim_batched_neb(calculator_name: str) -> bool:
-    """TorchSim NEB/parallel NEB only supports the MACE-backed relaxer today."""
-    return calculator_name.strip().upper() == "MACE"
+    """True if calculator family can run TorchSim NEB when its stack is installed."""
+    name = calculator_name.strip().upper()
+    return name in ("MACE", "UMA")
+
+
+def _require_torchsim() -> None:
+    if importlib.util.find_spec("torch_sim") is None:
+        raise ImportError(
+            "TorchSim was requested but torch_sim is not installed. "
+            "Install the appropriate extra (e.g., pip install 'scgo[uma]' or 'scgo[mace]')."
+        )
+
+
+def _require_torchsim_fairchem() -> None:
+    _require_torchsim()
+    # torch_sim.models.fairchem requires fairchem-core; validate importability.
+    if importlib.util.find_spec("fairchem") is None:
+        raise ImportError(
+            "TorchSim FairChem/UMA support was requested but fairchem-core is not installed. "
+            "Install with: pip install 'scgo[uma]'."
+        )
 
 
 def is_uma_like_calculator(calculator: Calculator | None) -> bool:
@@ -40,8 +65,10 @@ def resolve_ts_torchsim_flags(
 ) -> tuple[bool, bool]:
     """Return effective ``(use_torchsim, use_parallel_neb)`` for TS search.
 
-    Coerces incompatible combinations (UMA + TorchSim, missing stack, etc.)
-    to ASE NEB. Parallel NEB is disabled whenever TorchSim is disabled.
+    Validates requested TorchSim usage.
+
+    If TorchSim is **not** requested, returns ``(False, False)``.
+    If TorchSim is requested but unavailable/misconfigured, raises ImportError/ValueError.
     """
     us = bool(use_torchsim)
     up = bool(use_parallel_neb)
@@ -49,22 +76,15 @@ def resolve_ts_torchsim_flags(
     if not us:
         return False, False
 
-    reason: str | None = None
+    name = calculator_name.strip().upper()
     if not calculator_name_supports_torchsim_batched_neb(calculator_name):
-        reason = (
-            f"Calculator {calculator_name!r} does not use the TorchSim+MACE batched "
-            "NEB path; using ASE NEB with the selected calculator."
+        raise ValueError(
+            f"Calculator {calculator_name!r} does not support TorchSim NEB."
         )
-    elif not mace_torchsim_stack_available():
-        reason = (
-            "TorchSim batched NEB requested but the MACE stack is not installed "
-            "(pip install 'scgo[mace]'); using ASE NEB instead."
-        )
-
-    if reason is not None:
-        if logger is not None:
-            logger.warning(reason)
-        return False, False
+    if name == "UMA":
+        _require_torchsim_fairchem()
+    else:
+        _require_torchsim()
 
     return True, up
 
@@ -76,13 +96,13 @@ def coerce_find_transition_state_torchsim(
     pair_id: str,
     logger: Any,
 ) -> bool:
-    """If ``calculator`` is UMA-like, force ASE NEB even when ``use_torchsim`` was True."""
+    """Validate TorchSim request at per-pair TS search level (no silent fallback)."""
     if not use_torchsim:
         return False
-    if calculator is None or not is_uma_like_calculator(calculator):
-        return use_torchsim
-    logger.warning(
-        "Pair %s: UMA/FAIRChem calculator cannot use TorchSim NEB; switching to ASE NEB.",
-        pair_id,
-    )
-    return False
+    if calculator is None:
+        return True
+    if is_uma_like_calculator(calculator):
+        _require_torchsim_fairchem()
+        return True
+    _require_torchsim()
+    return True

@@ -7,9 +7,11 @@ interaction remains single-threaded to protect against SQLite locking issues.
 
 from __future__ import annotations
 
+import json
 import math
 import os
 from contextlib import suppress
+from time import perf_counter
 from typing import Any
 
 import numpy as np
@@ -87,6 +89,7 @@ def _relax_unrelaxed_candidates(
     run_id: str | None = None,
     surface_config: SurfaceSystemConfig | None = None,
     n_slab: int = 0,
+    profiling: dict[str, float] | None = None,
 ) -> int:
     """Relax unrelaxed candidates in batches and commit them to the database."""
     available = database_retry(
@@ -114,18 +117,26 @@ def _relax_unrelaxed_candidates(
                 batch.append(candidate)
         return batch
 
+    t0 = perf_counter()
     batch = database_retry(
         _read_batch_under_connection,
         max_retries=5,
         operation_name="read_candidate_batch",
     )
+    if profiling is not None:
+        profiling["db_read_s"] = profiling.get("db_read_s", 0.0) + (perf_counter() - t0)
 
     if not batch:
         return 0
 
+    t0 = perf_counter()
     relaxed_results = relaxer.relax_batch(
         [_torchsim_prepare_relaxed_copy(cand, surface_config, n_slab) for cand in batch]
     )
+    if profiling is not None:
+        profiling["relax_batch_s"] = profiling.get("relax_batch_s", 0.0) + (
+            perf_counter() - t0
+        )
     if len(relaxed_results) != len(batch):
         raise RuntimeError("TorchSim relaxer returned mismatched batch size")
 
@@ -164,14 +175,24 @@ def _relax_unrelaxed_candidates(
                 original.calc = SinglePointCalculator(original, energy=energy)
                 da.add_relaxed_step(original)
 
+    t0 = perf_counter()
     database_retry(
         _write_batch_under_connection,
         max_retries=5,
         operation_name="write_relaxed_batch",
     )
+    if profiling is not None:
+        profiling["db_write_s"] = profiling.get("db_write_s", 0.0) + (
+            perf_counter() - t0
+        )
 
     if population is not None:
+        t0 = perf_counter()
         population.update()
+        if profiling is not None:
+            profiling["population_update_s"] = profiling.get(
+                "population_update_s", 0.0
+            ) + (perf_counter() - t0)
 
     return len(batch)
 
@@ -242,6 +263,13 @@ def ga_go_torchsim(
         surface_config: Same as :func:`scgo.geneticalgorithm_go.ga_go` (adsorbate-on-slab GA).
     """
     logger = get_logger(__name__)
+    profile_t0 = perf_counter()
+    profile_timings: dict[str, float] = {}
+    profile_counters: dict[str, int] = {
+        "offspring_created": 0,
+        "offspring_relaxed": 0,
+    }
+    per_generation: list[dict[str, Any]] = []
 
     validate_composition(composition, allow_empty=False, allow_tuple=False)
     validate_ga_common_params(
@@ -391,9 +419,11 @@ def ga_go_torchsim(
             previous_search_glob=previous_search_glob,
             n_jobs=n_jobs_population_init,
         )
+    t0 = perf_counter()
     initial_population = [
         start_generator.get_new_candidate() for _ in range(population_size)
     ]
+    profile_timings["initial_population_generation_s"] = perf_counter() - t0
 
     if verbosity >= 1:
         n_workers = (
@@ -447,12 +477,14 @@ def ga_go_torchsim(
             da.c.update(gaid, gaid=gaid)
             cand.info["confid"] = gaid
 
+        t0 = perf_counter()
         for cand in initial_population:
             database_retry(
                 lambda _cand=cand: _insert_unrelaxed(_cand),
                 max_retries=5,
                 operation_name="insert_unrelaxed_candidate",
             )
+        profile_timings["initial_unrelaxed_insert_s"] = perf_counter() - t0
 
         # Helper to write a relaxed batch into the database under a single connection
         def _write_relaxed_batch(batch, relaxed_results):
@@ -487,17 +519,22 @@ def ga_go_torchsim(
 
         # Process starting population in batches
         batch_size_internal = batch_size or len(initial_population)
+        t0_relax = 0.0
+        t0_write = 0.0
         for i in range(0, len(initial_population), batch_size_internal):
             batch = initial_population[i : i + batch_size_internal]
+            t_start = perf_counter()
             relaxed_results = relaxer.relax_batch(
                 [
                     _torchsim_prepare_relaxed_copy(c, surface_config, n_slab)
                     for c in batch
                 ]
             )
+            t0_relax += perf_counter() - t_start
             if len(relaxed_results) != len(batch):
                 raise RuntimeError("TorchSim relaxer returned mismatched batch size")
 
+            t_start = perf_counter()
             database_retry(
                 lambda _batch=batch, _results=relaxed_results: _write_relaxed_batch(
                     _batch, _results
@@ -505,8 +542,11 @@ def ga_go_torchsim(
                 max_retries=5,
                 operation_name="write_initial_relaxed_batch",
             )
+            t0_write += perf_counter() - t_start
 
             initial_pop_count += len(batch)
+        profile_timings["initial_relax_batch_s"] = t0_relax
+        profile_timings["initial_relaxed_write_s"] = t0_write
 
         if initial_pop_count > 0:
             logger.debug(
@@ -588,21 +628,33 @@ def ga_go_torchsim(
             attempts = 0
             max_attempts = max(10, n_offspring * 10)
 
+            t_loop = perf_counter()
+            t_parent_select_gen = 0.0
+            t_crossover_gen = 0.0
+            t_mutation_gen = 0.0
+            t_db_unrelaxed_gen = 0.0
             while created < n_offspring and attempts < max_attempts:
                 attempts += 1
+                t0 = perf_counter()
                 candidates = population.get_two_candidates()
+                t_parent_select_gen += perf_counter() - t0
                 if candidates is None:
                     continue
                 a1, a2 = candidates
+                t0 = perf_counter()
                 a3, desc = pairing.get_new_individual([a1, a2])
+                t_crossover_gen += perf_counter() - t0
                 if a3 is None:
                     continue
 
                 if rng.random() < current_mutation_probability:
+                    t0 = perf_counter()
                     mutated = mutations.get_operator().mutate(a3)
+                    t_mutation_gen += perf_counter() - t0
                     if mutated is not None:
                         a3 = mutated
 
+                t0 = perf_counter()
                 database_retry(
                     lambda _a3=a3, _desc=desc: da.add_unrelaxed_candidate(
                         _a3, description=_desc
@@ -610,8 +662,27 @@ def ga_go_torchsim(
                     max_retries=5,
                     operation_name="add_unrelaxed_offspring",
                 )
+                t_db_unrelaxed_gen += perf_counter() - t0
 
                 created += 1
+            profile_timings["offspring_mutation_queue_s"] = profile_timings.get(
+                "offspring_mutation_queue_s", 0.0
+            ) + (perf_counter() - t_loop)
+            profile_timings["offspring_parent_select_s"] = (
+                profile_timings.get("offspring_parent_select_s", 0.0)
+                + t_parent_select_gen
+            )
+            profile_timings["offspring_crossover_s"] = (
+                profile_timings.get("offspring_crossover_s", 0.0) + t_crossover_gen
+            )
+            profile_timings["offspring_mutation_s"] = (
+                profile_timings.get("offspring_mutation_s", 0.0) + t_mutation_gen
+            )
+            profile_timings["offspring_unrelaxed_insert_s"] = (
+                profile_timings.get("offspring_unrelaxed_insert_s", 0.0)
+                + t_db_unrelaxed_gen
+            )
+            profile_counters["offspring_created"] += created
 
             # Emit a concise per-generation summary at DEBUG level (one line)
             logger.debug(
@@ -627,6 +698,11 @@ def ga_go_torchsim(
             # per-call limit as the GA `n_offspring` so a single relax call does not
             # drain an unrelated backlog and make logs look cumulative.
             per_gen_max = batch_size if batch_size is not None else n_offspring
+            pre_db_read = float(profile_timings.get("db_read_s", 0.0))
+            pre_relax = float(profile_timings.get("relax_batch_s", 0.0))
+            pre_db_write = float(profile_timings.get("db_write_s", 0.0))
+            pre_pop_update = float(profile_timings.get("population_update_s", 0.0))
+            t0_relax_call = perf_counter()
             offspring_count = _relax_unrelaxed_candidates(
                 da,
                 relaxer,
@@ -636,8 +712,19 @@ def ga_go_torchsim(
                 run_id=run_id,
                 surface_config=surface_config,
                 n_slab=n_slab,
+                profiling=profile_timings,
             )
+            relax_call_wall_s = perf_counter() - t0_relax_call
+            post_db_read = float(profile_timings.get("db_read_s", 0.0))
+            post_relax = float(profile_timings.get("relax_batch_s", 0.0))
+            post_db_write = float(profile_timings.get("db_write_s", 0.0))
+            post_pop_update = float(profile_timings.get("population_update_s", 0.0))
+            gen_db_read_s = max(0.0, post_db_read - pre_db_read)
+            gen_relax_s = max(0.0, post_relax - pre_relax)
+            gen_db_write_s = max(0.0, post_db_write - pre_db_write)
+            gen_pop_update_s_from_relax = max(0.0, post_pop_update - pre_pop_update)
             if offspring_count > 0:
+                profile_counters["offspring_relaxed"] += int(offspring_count)
                 # Attempt to report a concise triple: created_this_gen / relaxed_this_call / total_relaxed
                 try:
                     total_relaxed = database_retry(
@@ -665,7 +752,35 @@ def ga_go_torchsim(
                         offspring_count,
                     )
 
+            t_pop = perf_counter()
             population.update()
+            pop_update_s = perf_counter() - t_pop
+            profile_timings["population_update_s"] = (
+                profile_timings.get("population_update_s", 0.0) + pop_update_s
+            )
+
+            per_generation.append(
+                {
+                    "generation": int(generation),
+                    "n_offspring_target": int(n_offspring),
+                    "offspring_created": int(created),
+                    "attempts": int(attempts),
+                    "offspring_relaxed_this_call": int(offspring_count),
+                    "timings_s": {
+                        "parent_select_s": t_parent_select_gen,
+                        "crossover_s": t_crossover_gen,
+                        "mutation_s": t_mutation_gen,
+                        "db_unrelaxed_insert_s": t_db_unrelaxed_gen,
+                        "torchsim_db_read_s": gen_db_read_s,
+                        "torchsim_relax_s": gen_relax_s,
+                        "torchsim_db_write_s": gen_db_write_s,
+                        "torchsim_relax_call_wall_s": relax_call_wall_s,
+                        "population_update_s": pop_update_s,
+                        "population_update_s_from_relax": gen_pop_update_s_from_relax,
+                        "offspring_loop_wall_s": perf_counter() - t_loop,
+                    },
+                }
+            )
 
             if early_stopping_niter > 0:
                 best_value, generations_without_improvement, should_stop = (
@@ -700,7 +815,25 @@ def ga_go_torchsim(
             run_id=run_id,
             surface_config=surface_config,
             n_slab=n_slab,
+            profiling=profile_timings,
         )
+        profile_timings["total_wall_s"] = perf_counter() - profile_t0
+        profile_timings["cpu_non_relax_s"] = max(
+            0.0,
+            profile_timings["total_wall_s"] - profile_timings.get("relax_batch_s", 0.0),
+        )
+        profile_path = os.path.join(output_dir, "ga_profile.json")
+        with open(profile_path, "w") as f:
+            json.dump(
+                {
+                    "backend": "torchsim_ga",
+                    "timings_s": profile_timings,
+                    "counters": profile_counters,
+                    "per_generation": per_generation,
+                },
+                f,
+                indent=2,
+            )
 
         all_candidates = database_retry(
             da.get_all_relaxed_candidates,

@@ -146,12 +146,14 @@ def _validate_calculator_compatibility(
 def _is_ml_calculator_for_torchsim(calculator: Calculator) -> bool:
     """True if the calculator looks like an MLIP served by TorchSim+MACE."""
     calculator_class_name = calculator.__class__.__name__
-    if calculator_class_name in ("UMA", "FAIRChemCalculator"):
-        return False
+    # UMA/FAIRChem can be driven by TorchSim's FairChem model wrapper; do not
+    # exclude it from TorchSim GA selection.
     model = getattr(calculator, "model", None)
     return hasattr(model, "forward") or calculator_class_name in (
         "MACECalculator",
         "MACE",
+        "UMA",
+        "FAIRChemCalculator",
     )
 
 
@@ -160,7 +162,8 @@ def _get_ga_go_torchsim():
         from scgo.algorithms.geneticalgorithm_go_torchsim import ga_go_torchsim as _impl
     except ImportError as e:
         raise ImportError(
-            "TorchSim GA requires the MACE stack. Install with: pip install 'scgo[mace]'"
+            "TorchSim GA requires TorchSim. Install with: pip install 'scgo[mace]' "
+            "(MACE) or 'scgo[uma]' (UMA) depending on the model family."
         ) from e
     return _impl
 
@@ -207,9 +210,19 @@ def _resolve_ga_backend(
     logger: Any,
 ) -> tuple[bool, dict[str, Any], dict[str, Any]]:
     """TorchSim GA for MLIPs; ASE GA otherwise. Ignores any ``use_torchsim`` key (removed from public API)."""
+    requested_torchsim = optimizer_kwargs.get("relaxer") is not None or bool(
+        optimizer_kwargs.get("use_torchsim")
+    )
     ml = _is_ml_calculator_for_torchsim(calculator)
     torchsim_kwargs = _filter_ga_kwargs_for_torchsim(optimizer_kwargs)
     ase_ga_kwargs = _filter_ga_kwargs_for_ase(optimizer_kwargs)
+
+    if requested_torchsim:
+        # Fail fast if TorchSim was explicitly requested but isn't importable.
+        # This avoids silent backends switches that can hide misconfiguration.
+        _ = _get_ga_go_torchsim()
+        logger.debug("Using TorchSim GA (explicit request)")
+        return True, torchsim_kwargs, {}
 
     if ml:
         opt = optimizer_kwargs.get("optimizer")

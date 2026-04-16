@@ -125,7 +125,7 @@ class SCGODatabaseManager:
             logger.debug("Using cached previous results for %s", formula)
             return self._cache.get(self._cache_namespace, cache_key)
 
-        logger.info("Loading previous results for %s", formula)
+        logger.info("Attempting to load previous results for %s", formula)
 
         minima = load_previous_run_results(
             base_output_dir=str(self.base_dir),
