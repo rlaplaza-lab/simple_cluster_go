@@ -691,6 +691,12 @@ def test_run_transition_state_search_resolves_torchsim_maxsteps_auto(monkeypatch
         lambda *a, **k: None,
     )
 
+    # EMT does not support TorchSim NEB; keep the TorchSim code path for this check.
+    monkeypatch.setattr(
+        "scgo.ts_search.transition_state_run.resolve_ts_torchsim_flags",
+        lambda *_a, **_k: (True, False),
+    )
+
     # Pass explicit torchsim_params with 'max_steps' set to 'auto'
     run_transition_state_search(
         ["Pt", "Pt", "Pt", "Pt"],

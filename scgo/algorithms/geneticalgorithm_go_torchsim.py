@@ -363,7 +363,8 @@ def ga_go_torchsim(
         if surface_config is not None
         else range(n_to_optimize)
     )
-    all_atom_types = get_all_atom_types(atoms_template, idx_top)
+    top_z = list({int(atoms_template[i].number) for i in idx_top})
+    all_atom_types = get_all_atom_types(atoms_template, top_z)
     blmin = closest_distances_generator(all_atom_types, ratio_of_covalent_radii=0.7)
 
     operators_list, name_map = create_mutation_operators(

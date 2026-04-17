@@ -101,5 +101,3 @@ def test_initial_structure_safety(rng):
             f"This may cause energy to increase during relaxation.",
             stacklevel=2,
         )
-
-

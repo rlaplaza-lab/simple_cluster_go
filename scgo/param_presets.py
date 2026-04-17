@@ -352,7 +352,6 @@ def get_ts_search_params(
             "similarity_tolerance": DEFAULT_COMPARATOR_TOL,
             # Match ``run_transition_state_search`` default (0.1 Å), not DEFAULT_PAIR_COR_MAX.
             "similarity_pair_cor_max": 0.1,
-            "pair_priority_mode": "physics",
             # Pt5 gas sweep: `neb_climb=False` beat `neb_climb=True` on convergence.
             # Five images give a smoother initial path than three for 3D metal clusters
             # (fewer bands that collapse to an endpoint before retry).
@@ -469,7 +468,6 @@ def get_ts_run_kwargs(ts_params: dict[str, Any] | None = None) -> dict[str, Any]
         "energy_gap_threshold",
         "similarity_tolerance",
         "similarity_pair_cor_max",
-        "pair_priority_mode",
         "neb_n_images",
         "neb_spring_constant",
         "neb_fmax",

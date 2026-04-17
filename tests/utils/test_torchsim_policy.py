@@ -67,9 +67,12 @@ def test_resolve_ts_mace_depends_on_torch_sim_importability(
     monkeypatch.setattr(importlib.util, "find_spec", fake_spec)
     assert mace_torchsim_stack_available() is mace_available
 
-    us, up = resolve_ts_torchsim_flags("MACE", True, True, logger=None)
-    assert us is mace_available
-    assert up == (mace_available and True)
+    if mace_available:
+        us, up = resolve_ts_torchsim_flags("MACE", True, True, logger=None)
+        assert us is True and up is True
+    else:
+        with pytest.raises(ImportError, match="TorchSim was requested"):
+            resolve_ts_torchsim_flags("MACE", True, True, logger=None)
 
 
 def test_get_ts_search_params_uma_has_torchsim_when_available(monkeypatch):

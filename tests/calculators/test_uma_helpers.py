@@ -24,6 +24,7 @@ def test_get_calculator_class_uma():
 
 
 def test_get_default_uma_params():
+    pytest.importorskip("fairchem")
     from scgo.param_presets import get_default_uma_params
 
     p = get_default_uma_params()
@@ -33,6 +34,7 @@ def test_get_default_uma_params():
 
 
 def test_get_ts_search_params_uma_disables_torchsim():
+    pytest.importorskip("fairchem")
     from scgo.param_presets import get_ts_search_params_uma
 
     ts = get_ts_search_params_uma()

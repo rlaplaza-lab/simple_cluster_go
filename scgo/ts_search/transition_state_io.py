@@ -246,7 +246,6 @@ def select_structure_pairs(
     energy_gap_threshold: float | None = None,
     similarity_tolerance: float = DEFAULT_COMPARATOR_TOL,
     similarity_pair_cor_max: float = 0.1,
-    pair_priority_mode: str = "physics",
     surface_aware: bool = False,
 ) -> list[tuple[int, int]]:
     """Select pairs of minima for TS calculations.
@@ -267,19 +266,12 @@ def select_structure_pairs(
             to pair. Default `DEFAULT_COMPARATOR_TOL` (tighter than GA duplicate detection).
         similarity_pair_cor_max: Maximum single distance difference tolerance.
             Default 0.1 Å (tighter than GA to ensure truly distinct structures).
-        pair_priority_mode: Pair ranking strategy when capping pair count.
-            "physics" ranks by the score below; "legacy" keeps discovery order.
         surface_aware: Use slightly looser scoring scales (slab / periodic systems).
 
     Returns:
         List of (index1, index2) tuples where index1 < index2, indicating which minima to pair.
     """
     logger = get_logger(__name__)
-
-    if pair_priority_mode not in {"physics", "legacy"}:
-        raise ValueError(
-            f"pair_priority_mode must be 'physics' or 'legacy', got {pair_priority_mode!r}"
-        )
 
     if len(minima) < 2:
         logger.info(f"Only {len(minima)} minima, need at least 2 to pair")
@@ -362,10 +354,8 @@ def select_structure_pairs(
     if not scored_pairs:
         return []
 
-    if pair_priority_mode == "physics":
-        # Deterministic ordering: higher score first, then stable index tie-break.
-        scored_pairs.sort(key=lambda item: (-item[0], item[1], item[2]))
-    # For "legacy", preserve the original nested-loop discovery order.
+    # Deterministic ordering: higher score first, then stable index tie-break.
+    scored_pairs.sort(key=lambda item: (-item[0], item[1], item[2]))
     ranked_pairs = [(i, j) for _score, i, j in scored_pairs]
     if max_pairs is None:
         return ranked_pairs

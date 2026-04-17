@@ -42,8 +42,6 @@ BENCHMARK_DIR = PROJECT_ROOT / "benchmark" / "benchmark_files_Pt"
 BENCHMARK_RESULTS_ROOT = PROJECT_ROOT / "benchmark" / "results"
 PT_CLUSTER_RESULTS_DIR = BENCHMARK_RESULTS_ROOT / "pt_cluster"
 PT_SURFACE_GRAPHITE_RESULTS_DIR = BENCHMARK_RESULTS_ROOT / "pt_surface_graphite"
-# Backward-compatible alias for older script/import names.
-PT_SURFACE_NIO_RESULTS_DIR = PT_SURFACE_GRAPHITE_RESULTS_DIR
 
 
 def _slug(value: str) -> str:

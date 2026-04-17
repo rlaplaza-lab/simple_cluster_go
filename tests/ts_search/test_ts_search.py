@@ -656,39 +656,6 @@ def test_select_structure_pairs_physics_ranking_when_capped(monkeypatch):
     assert ranked == [(1, 2), (0, 2)]
 
 
-def test_select_structure_pairs_legacy_order_when_capped(monkeypatch):
-    """Legacy mode should preserve discovery order for capped pair lists."""
-    atoms0 = Atoms("H2", positions=[[0.0, 0, 0], [1.0, 0, 0]])
-    atoms1 = Atoms("H2", positions=[[1.0, 0, 0], [1.5, 0, 0]])
-    atoms2 = Atoms("H2", positions=[[2.0, 0, 0], [2.5, 0, 0]])
-    minima = [(-1.0, atoms0), (-0.95, atoms1), (-0.55, atoms2)]
-
-    def _fake_similarity(
-        a_i: Atoms,
-        a_j: Atoms,
-        tolerance: float = 0.1,
-        pair_cor_max: float = 0.1,
-    ) -> tuple[float, float, bool]:
-        _ = (a_i, a_j, tolerance, pair_cor_max)
-        return (0.2, 0.1, False)
-
-    monkeypatch.setattr(
-        "scgo.ts_search.transition_state_io.calculate_structure_similarity",
-        _fake_similarity,
-    )
-
-    ranked = select_structure_pairs(minima, max_pairs=2, pair_priority_mode="legacy")
-    assert ranked == [(0, 1), (0, 2)]
-
-
-def test_select_structure_pairs_invalid_priority_mode_raises():
-    atoms = Atoms("H2", positions=[[0, 0, 0], [1, 0, 0]])
-    minima = [(-1.0, atoms), (-0.9, atoms.copy())]
-
-    with pytest.raises(ValueError, match="pair_priority_mode"):
-        select_structure_pairs(minima, pair_priority_mode="invalid")
-
-
 def test_find_ts_emt_basic(cu3_triangle, cu3_linear, temp_output_dir):
     """Test TS finding with EMT calculator on CPU.
 

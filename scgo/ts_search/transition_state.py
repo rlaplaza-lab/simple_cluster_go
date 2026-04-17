@@ -764,7 +764,7 @@ def find_transition_state(
                     result["ts_vib_num_significant_imag"] = num_significant_imag
                     result["ts_vib_validated"] = False
                     if verbosity >= 1:
-                        logger.info(f"  ✗ TS rejected: {result['error']}")
+                        logger.info("TS rejected: %s", result["error"])
                 else:
                     result["ts_vib_frequencies"] = frequencies.tolist()
                     result["ts_vib_num_imag"] = num_all_imag
@@ -772,7 +772,7 @@ def find_transition_state(
                     result["ts_vib_validated"] = True
                     if verbosity >= 1:
                         logger.info(
-                            "  ✓ TS validated: exactly 1 significant imaginary frequency"
+                            "TS validated: exactly one significant imaginary frequency"
                         )
 
             except (OSError, RuntimeError, ValueError) as e:
@@ -821,10 +821,9 @@ def _neb_provenance_extra(result: dict[str, Any]) -> dict[str, Any]:
     ):
         if key in result:
             extra[key] = result[key]
-    if result.get("use_torchsim"):
-        extra["neb_backend"] = "torchsim"
-    elif "neb_backend" not in extra:
-        extra["neb_backend"] = "ase"
+    extra["neb_backend"] = (
+        "torchsim" if result.get("use_torchsim") else result.get("neb_backend", "ase")
+    )
     return extra
 
 
