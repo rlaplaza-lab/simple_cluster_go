@@ -80,14 +80,15 @@ def _make_ga_params(
 def _make_ts_kwargs(
     args: argparse.Namespace, surface_config: Any | None
 ) -> dict[str, Any]:
+    regime = "surface" if args.surface else "gas"
     if args.backend == "uma":
         ts_params = get_ts_search_params_uma(
-            regime="surface" if args.surface else "gas_phase",
+            regime=regime,
             surface_config=surface_config,
         )
     else:
         ts_params = get_ts_search_params(
-            regime="surface" if args.surface else "gas_phase",
+            regime=regime,
             surface_config=surface_config,
         )
     ts_kwargs = get_ts_run_kwargs(ts_params)

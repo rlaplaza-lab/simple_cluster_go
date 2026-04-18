@@ -220,6 +220,142 @@ def test_get_global_memory_scaler_cache():
     assert hasattr(cache, "clear")
 
 
+def test_torchsim_step_kwargs_removed():
+    """``step_kwargs`` has been removed from TorchSimBatchRelaxer (never forwarded by ts.optimize).
+
+    The field was replaced by ``optimizer_kwargs``; passing the old name should raise TypeError.
+    """
+    from scgo.calculators.torchsim_helpers import TorchSimBatchRelaxer
+
+    with pytest.raises(TypeError):
+        TorchSimBatchRelaxer(
+            device="cpu",
+            mace_model_name="mace_matpes_0",
+            step_kwargs={"dt_max": 0.1},  # type: ignore[call-arg]
+        )
+
+
+def test_torchsim_optimizer_kwargs_flatten_into_runner_kwargs():
+    """``optimizer_kwargs`` should be forwarded flat as **optimizer_kwargs to ts.optimize."""
+    from scgo.calculators.torchsim_helpers import TorchSimBatchRelaxer
+
+    relaxer = TorchSimBatchRelaxer(
+        device="cpu",
+        mace_model_name="mace_matpes_0",
+        optimizer_kwargs={"dt_max": 0.1},
+    )
+    # Flattened into the resolved runner kwargs rather than nested.
+    assert relaxer._runner_kwargs.get("dt_max") == pytest.approx(0.1)
+    assert "optimizer_kwargs" not in relaxer._runner_kwargs
+    assert "step_kwargs" not in relaxer._runner_kwargs
+
+
+def test_torchsim_autobatcher_default_off_on_cpu():
+    """On CPU the default ``autobatcher=None`` disables autobatching (docs recommendation)."""
+    from scgo.calculators.torchsim_helpers import TorchSimBatchRelaxer
+
+    relaxer = TorchSimBatchRelaxer(
+        device="cpu",
+        mace_model_name="mace_matpes_0",
+    )
+    assert "autobatcher" not in relaxer._runner_kwargs
+
+
+class _StubModel:
+    """Minimal stand-in for a torch-sim model; avoids MACE/UMA downloads in unit tests."""
+
+
+def test_torchsim_autobatcher_probe_capped_by_expected_max_atoms(monkeypatch):
+    """``expected_max_atoms`` should cap the autobatcher's GPU probe (``max_atoms_to_try``).
+
+    Without this cap the probe can geometrically climb to 500k atoms and OOM
+    small GPUs. We must never probe more atoms than the workload demands.
+    """
+    import torch_sim as ts
+
+    from scgo.calculators.torchsim_helpers import TorchSimBatchRelaxer
+
+    captured: dict = {}
+
+    class _FakeAutoBatcher:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+    monkeypatch.setattr(ts, "InFlightAutoBatcher", _FakeAutoBatcher)
+
+    TorchSimBatchRelaxer(
+        device="cuda",  # triggers the autobatcher construction path
+        model=_StubModel(),
+        expected_max_atoms=256,
+        autobatcher=True,
+    )
+    assert captured.get("max_atoms_to_try") == 256
+
+
+def test_torchsim_autobatcher_probe_cap_explicit_override_is_honored(monkeypatch):
+    """An explicit ``max_atoms_to_try`` wins over ``expected_max_atoms``."""
+    import torch_sim as ts
+
+    from scgo.calculators.torchsim_helpers import TorchSimBatchRelaxer
+
+    captured: dict = {}
+
+    class _FakeAutoBatcher:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+    monkeypatch.setattr(ts, "InFlightAutoBatcher", _FakeAutoBatcher)
+
+    TorchSimBatchRelaxer(
+        device="cuda",
+        model=_StubModel(),
+        expected_max_atoms=10_000,
+        max_atoms_to_try=128,
+        autobatcher=True,
+    )
+    assert captured.get("max_atoms_to_try") == 128
+
+
+def test_torchsim_autobatcher_probe_cap_defaults_to_torchsim_when_unset(monkeypatch):
+    """Without ``expected_max_atoms``/``max_atoms_to_try`` we inherit torch-sim's default."""
+    import torch_sim as ts
+
+    from scgo.calculators.torchsim_helpers import TorchSimBatchRelaxer
+
+    captured: dict = {}
+
+    class _FakeAutoBatcher:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+    monkeypatch.setattr(ts, "InFlightAutoBatcher", _FakeAutoBatcher)
+
+    TorchSimBatchRelaxer(
+        device="cuda",
+        model=_StubModel(),
+        autobatcher=True,
+    )
+    assert "max_atoms_to_try" not in captured
+
+
+def test_torchsim_autobatcher_true_on_cpu_warns_and_coerces():
+    """Passing ``autobatcher=True`` on CPU emits a RuntimeWarning and disables autobatching."""
+    import warnings
+
+    from scgo.calculators.torchsim_helpers import TorchSimBatchRelaxer
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        relaxer = TorchSimBatchRelaxer(
+            device="cpu",
+            mace_model_name="mace_matpes_0",
+            autobatcher=True,
+        )
+    runtime_warnings = [w for w in caught if issubclass(w.category, RuntimeWarning)]
+    assert any("autobatching" in str(w.message).lower() for w in runtime_warnings)
+    assert "autobatcher" not in relaxer._runner_kwargs
+
+
 def test_torchsim_optimizer_set_correctly():
     """Test that TorchSimBatchRelaxer sets optimizer correctly for different torch-sim versions.
 

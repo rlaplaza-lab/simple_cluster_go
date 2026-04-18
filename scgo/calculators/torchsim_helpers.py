@@ -137,31 +137,31 @@ def collect_ase_fixatoms_indices(atoms: Atoms) -> list[int]:
     return sorted(set(out))
 
 
-def _patch_torchsim_fixatoms_subconstraint_device() -> None:
-    """Align ``atom_idx`` device with constraint indices before ``torch.isin``.
+def _patch_torchsim_constraint_device_mismatch() -> None:
+    """Monkey-patch TorchSim ``IndexedConstraint.select_sub_constraint``.
 
-    ``torch_sim.state._split_state`` passes a CPU ``torch.arange`` into
-    ``FixAtoms.select_sub_constraint`` while batched constraints live on CUDA,
-    which makes ``torch.isin`` fail. This is applied once per process.
+    Upstream ``torch_sim.state._split_state`` builds a CPU ``atom_idx`` tensor
+    while a GPU-backed ``FixAtoms`` keeps its indices on CUDA, triggering a
+    ``RuntimeError`` inside ``torch.isin`` (device mismatch). The fix aligns
+    ``atom_idx`` with ``self.atom_idx`` before the ``isin`` call.
     """
-    # Lazy import: only patch when TorchSim is actually available/used.
-    try:
-        from torch_sim.constraints import FixAtoms as TSFixAtoms  # type: ignore
-    except Exception:
+    from torch_sim.constraints import AtomConstraint  # type: ignore
+
+    if getattr(AtomConstraint, "_scgo_device_patch", False):
         return
 
-    if getattr(TSFixAtoms.select_sub_constraint, "_scgo_patched", False):
-        return
-
-    _orig = TSFixAtoms.select_sub_constraint
-
-    def select_sub_constraint(self, atom_idx: torch.Tensor, sys_idx: int):
-        if atom_idx.device != self.atom_idx.device:
+    def select_sub_constraint(self, atom_idx, sys_idx):  # noqa: ARG001
+        if hasattr(atom_idx, "device") and atom_idx.device != self.atom_idx.device:
             atom_idx = atom_idx.to(self.atom_idx.device)
-        return _orig(self, atom_idx, sys_idx)
+        mask = torch.isin(self.atom_idx, atom_idx)
+        masked_indices = self.atom_idx[mask]
+        new_atom_idx = masked_indices - atom_idx.min()
+        if len(new_atom_idx) == 0:
+            return None
+        return type(self)(new_atom_idx)
 
-    select_sub_constraint._scgo_patched = True  # type: ignore[attr-defined]
-    TSFixAtoms.select_sub_constraint = select_sub_constraint  # type: ignore[assignment]
+    AtomConstraint.select_sub_constraint = select_sub_constraint
+    AtomConstraint._scgo_device_patch = True
 
 
 def build_torchsim_fixatoms_from_ase_batch(
@@ -170,12 +170,14 @@ def build_torchsim_fixatoms_from_ase_batch(
 ) -> object | None:
     """Map per-structure ASE ``FixAtoms`` to one TorchSim ``FixAtoms`` (global indices).
 
-    TorchSim's :func:`torch_sim.io.atoms_to_state` does **not** read
-    ``atoms.constraints``; this builds the constraint the optimizer expects.
+    :func:`torch_sim.initialize_state` (and the lower-level
+    :func:`torch_sim.io.atoms_to_state`) do not read ``atoms.constraints``, so
+    SCGO builds the TorchSim constraint explicitly here and attaches it to the
+    resulting ``SimState`` before calling ``ts.optimize``.
 
     Args:
         atoms_list: One or more ASE systems in batch order (same order as
-            :func:`torch_sim.io.atoms_to_state`).
+            :func:`torch_sim.initialize_state`).
         device: ``torch.device`` for the index tensor (match compute device).
 
     Returns:
@@ -183,6 +185,8 @@ def build_torchsim_fixatoms_from_ase_batch(
     """
     # Lazy import: do not require TorchSim until needed.
     from torch_sim.constraints import FixAtoms as TSFixAtoms  # type: ignore
+
+    _patch_torchsim_constraint_device_mismatch()
 
     merged: list[int] = []
     offset = 0
@@ -193,9 +197,6 @@ def build_torchsim_fixatoms_from_ase_batch(
         return None
     idx_t = torch.tensor(merged, device=device, dtype=torch.long)
     return TSFixAtoms(atom_idx=idx_t)
-
-
-_patch_torchsim_fixatoms_subconstraint_device()
 
 
 def _load_default_mace_model(
@@ -251,18 +252,19 @@ def _load_default_fairchem_model(
 
 @dataclass(eq=False)
 class TorchSimBatchRelaxer:
-    """Batched relaxer that offloads geometry optimization to TorchSim.
+    """Batched relaxer that offloads geometry optimization to :func:`torch_sim.optimize`.
 
     ASE :class:`ase.constraints.FixAtoms` on input structures are translated to
-    TorchSim's internal ``FixAtoms`` before optimization (TorchSim's ASE reader
-    does not import ``atoms.constraints``).
+    TorchSim's internal ``FixAtoms`` before optimization, since
+    :func:`torch_sim.initialize_state` does not import ``atoms.constraints``.
 
     Parameters
     ----------
     device:
         Optional torch device. Defaults to CUDA when available, otherwise CPU.
     dtype:
-        Torch dtype. Defaults to float32, matching TorchSim defaults for MLIPs.
+        Torch dtype. Defaults to ``torch.float64`` for parity with the ASE MACE
+        wrapper; override to ``torch.float32`` for speed at the cost of accuracy.
     model:
         Optional TorchSim model implementing ``ModelInterface``. If omitted, a
         MACE foundation model specified by ``mace_model_name`` is loaded.
@@ -272,14 +274,41 @@ class TorchSimBatchRelaxer:
     optimizer_name:
         Name of TorchSim optimizer (e.g., "fire"), resolved to ``ts.Optimizer.*``.
     force_tol:
-        Force convergence threshold (eV/Å). ``None`` uses TorchSim defaults.
+        Force convergence threshold (eV/Å) passed to
+        :func:`torch_sim.generate_force_convergence_fn`. ``None`` uses the
+        torch-sim default energy-based convergence.
+    autobatcher:
+        Whether to use :class:`torch_sim.InFlightAutoBatcher` when calling
+        :func:`torch_sim.optimize`. ``None`` (the default) enables it on CUDA and
+        disables it on CPU, matching the torch-sim recommendation that
+        autobatching is "generally not supported on CPUs". ``True``/``False``
+        force the choice; passing ``True`` on CPU triggers a one-time warning
+        and coerces back to ``False``. Only :class:`InFlightAutoBatcher` is
+        accepted by :func:`torch_sim.optimize`.
+    memory_scales_with, max_memory_scaler:
+        Advanced knobs forwarded to :class:`torch_sim.InFlightAutoBatcher` when
+        autobatching is active.
     expected_max_atoms:
-        Optional atom count for upfront memory probing (e.g., ``cluster_size * population_size``).
-        If provided, probes GPU memory at initialization time to cache the ``max_memory_scaler``,
-        avoiding expensive re-probing (~1s) on first ``relax_batch()`` call. Recommended for
-        GA/BH campaigns with known population sizes.
+        Optional atom count (e.g. ``cluster_size * population_size``) used both
+        to warm the on-disk memory-scaler cache at init time and to cap the
+        autobatcher's GPU probe via ``max_atoms_to_try`` (see
+        :class:`torch_sim.InFlightAutoBatcher`). Without this cap, the probe
+        can geometrically climb to its 500k-atom default and OOM small GPUs.
+        Recommended for GA/BH campaigns with known population sizes.
+    max_atoms_to_try:
+        Explicit override for the autobatcher's probe cap. Defaults to
+        ``expected_max_atoms`` when that is set; otherwise falls back to
+        torch-sim's default (500,000). Always pass a tight value on GPUs
+        with limited memory.
+    init_kwargs:
+        Extra kwargs forwarded to the torch-sim optimizer init function via
+        the ``init_kwargs`` argument of :func:`torch_sim.optimize`.
+    optimizer_kwargs:
+        Extra kwargs forwarded to the torch-sim optimizer step function via
+        ``**optimizer_kwargs`` of :func:`torch_sim.optimize`.
     runner_kwargs:
-        Extra keyword arguments forwarded to ``torch_sim.optimize``.
+        Extra keyword arguments forwarded directly to
+        :func:`torch_sim.optimize` (overrides anything set above).
 
     """
 
@@ -293,18 +322,20 @@ class TorchSimBatchRelaxer:
     optimizer_name: str = "fire"
     force_tol: float | None = 0.05
     max_steps: int | None = 100
-    # Autobatching controls; use "binning" to let TorchSim pick optimal batch sizes
-    autobatch_strategy: str | None = "binning"  # options: "binning", "inflight", None
+    # Autobatching: None -> enable on CUDA / disable on CPU (matches docs).
+    autobatcher: bool | None = None
     memory_scales_with: str = "n_atoms_x_density"
     max_memory_scaler: float | None = None
     expected_max_atoms: int | None = (
         None  # Probe memory upfront with this atom count (cluster_size * pop_size)
     )
+    # Hard cap on the InFlightAutoBatcher GPU probe. None -> fall back to
+    # expected_max_atoms (if set) or torch-sim's 500k default.
+    max_atoms_to_try: int | None = None
     init_kwargs: dict | None = None
-    step_kwargs: dict | None = None
+    optimizer_kwargs: dict | None = None  # forwarded as **optimizer_kwargs to step-fn
     runner_kwargs: dict | None = None
     seed: int | None = None
-    compile_model: bool = False  # torch.compile can speed up MACE but adds startup cost
 
     def __post_init__(self) -> None:
         self._torch = torch
@@ -359,31 +390,51 @@ class TorchSimBatchRelaxer:
                 )
         self._patch_model_for_cuda()
 
-        if self.compile_model:
-            self.model = torch.compile(self.model, mode="reduce-overhead")
-
         # Store device string for cache key (e.g., "cuda" or "cpu")
         self._device_str = str(self.device).split(":")[0]
 
         self._runner_kwargs = dict(self.runner_kwargs or {})
-        if self.autobatch_strategy and "autobatcher" not in self._runner_kwargs:
-            if self.autobatch_strategy in ("binning", "inflight"):
-                if str(self.device).split(":")[0] == "cpu":
-                    autobatcher = None
-                else:
-                    autobatcher = self._ts.InFlightAutoBatcher(
-                        model=self.model,
-                        memory_scales_with=self.memory_scales_with,
-                        max_memory_scaler=self.max_memory_scaler,
-                    )
-            else:
-                autobatcher = None
-            if autobatcher is not None:
-                self._runner_kwargs["autobatcher"] = autobatcher
+
+        # Resolve autobatcher policy: only InFlightAutoBatcher is accepted by
+        # ts.optimize; on CPU torch-sim recommends disabling it altogether.
+        on_cpu = str(self.device).split(":")[0] == "cpu"
+        if self.autobatcher is None:
+            use_autobatcher = not on_cpu
+        else:
+            use_autobatcher = bool(self.autobatcher)
+            if use_autobatcher and on_cpu:
+                warnings.warn(
+                    "TorchSim autobatching is not supported on CPU; disabling "
+                    "the autobatcher. Pass autobatcher=False to silence this warning.",
+                    RuntimeWarning,
+                    stacklevel=2,
+                )
+                use_autobatcher = False
+        if use_autobatcher and "autobatcher" not in self._runner_kwargs:
+            # Cap the autobatcher's probe at the actual workload so small GPUs
+            # don't get pushed toward the 500k-atom default. Prefer the explicit
+            # knob, then expected_max_atoms; leave unset to inherit torch-sim's
+            # default when the caller can't give us a bound.
+            probe_cap = self.max_atoms_to_try
+            if probe_cap is None and self.expected_max_atoms is not None:
+                probe_cap = int(self.expected_max_atoms)
+            autobatcher_kwargs: dict = {
+                "model": self.model,
+                "memory_scales_with": self.memory_scales_with,
+                "max_memory_scaler": self.max_memory_scaler,
+            }
+            if probe_cap is not None:
+                autobatcher_kwargs["max_atoms_to_try"] = probe_cap
+            self._runner_kwargs["autobatcher"] = self._ts.InFlightAutoBatcher(
+                **autobatcher_kwargs
+            )
+
         if self.init_kwargs and "init_kwargs" not in self._runner_kwargs:
             self._runner_kwargs["init_kwargs"] = dict(self.init_kwargs)
-        if self.step_kwargs and "step_kwargs" not in self._runner_kwargs:
-            self._runner_kwargs["step_kwargs"] = dict(self.step_kwargs)
+        # ts.optimize forwards **optimizer_kwargs to the step function; flatten them in.
+        if self.optimizer_kwargs:
+            for key, value in self.optimizer_kwargs.items():
+                self._runner_kwargs.setdefault(key, value)
         if self.force_tol is not None and "convergence_fn" not in self._runner_kwargs:
             self._runner_kwargs["convergence_fn"] = ts.generate_force_convergence_fn(
                 force_tol=self.force_tol,
@@ -395,46 +446,42 @@ class TorchSimBatchRelaxer:
 
         # Probe memory upfront if expected_max_atoms provided (avoids runtime probing cost)
         if self.expected_max_atoms is not None and self.max_memory_scaler is None:
-            self._probe_memory_upfront(self.expected_max_atoms)
+            self._warm_autobatcher_memory_scaler(self.expected_max_atoms)
 
-    def _probe_memory_upfront(self, n_atoms: int) -> None:
-        """Probe GPU memory with a dummy structure at init time to cache memory scaler.
+    def _warm_autobatcher_memory_scaler(self, n_atoms: int) -> None:
+        """Pre-populate the InFlight autobatcher's ``max_memory_scaler``.
 
-        This avoids expensive probing (~1s) on first relax_batch() call. The probing
-        only happens once; subsequent calls use the cached value.
+        Uses the on-disk cache when present; otherwise runs a one-step dummy
+        optimization so torch-sim's autobatcher probes GPU memory, then stores
+        the resulting scaler on disk so subsequent processes skip probing.
 
-        Args:
-            n_atoms: Atom count to probe with (typically: cluster_size * population_size).
+        No-ops when the autobatcher is not active (e.g. CPU runs) or when the
+        user already supplied ``max_memory_scaler``.
         """
-        if (
-            self.max_memory_scaler is not None
-            or "autobatcher" not in self._runner_kwargs
-        ):
-            return  # Skip if already set or autobatcher not in use
+        autobatcher = self._runner_kwargs.get("autobatcher")
+        if autobatcher is None or self.max_memory_scaler is not None:
+            return
+
+        cached_scaler = _GLOBAL_MEMORY_SCALER_CACHE.get(
+            n_atoms=n_atoms,
+            model_name=self._cache_model_name(),
+            memory_scales_with=self.memory_scales_with,
+            device=self._device_str,
+        )
+        if cached_scaler is not None:
+            autobatcher.max_memory_scaler = cached_scaler
+            logger.info("Used cached memory scaler from disk (avoided probing)")
+            return
 
         try:
-            # Check if already cached from previous runs
-            cached_scaler = _GLOBAL_MEMORY_SCALER_CACHE.get(
-                n_atoms=n_atoms,
-                model_name=self._cache_model_name(),
-                memory_scales_with=self.memory_scales_with,
-                device=self._device_str,
-            )
-            if cached_scaler is not None:
-                self._runner_kwargs["autobatcher"].max_memory_scaler = cached_scaler
-                logger.info("Used cached memory scaler from disk (avoided probing)")
-                return
-
-            # Create a dummy structure with n_atoms for probing
-            dummy = bulk(
-                "Cu", "fcc", a=3.61, cubic=True
-            )  # Use Cu for generic structure
+            # Build a dummy system of the requested size to trigger torch-sim's
+            # memory estimation (see autobatching tutorial).
+            dummy = bulk("Cu", "fcc", a=3.61, cubic=True)
             while len(dummy) < n_atoms:
                 dummy = dummy.repeat((2, 2, 2))
-            dummy = dummy[:n_atoms]  # Trim to exact size
+            dummy = dummy[:n_atoms]
             dummy.center(vacuum=3.0)
 
-            # Run a single-step optimization to trigger memory estimation
             logger.info(
                 f"Probing GPU memory with {n_atoms} atoms (cluster_size * population)..."
             )
@@ -448,13 +495,7 @@ class TorchSimBatchRelaxer:
             )
             probe_time = time.time() - initial_time
 
-            # Extract and cache the computed memory scaler
-            autobatcher = self._runner_kwargs.get("autobatcher")
-            if (
-                autobatcher
-                and hasattr(autobatcher, "max_memory_scaler")
-                and autobatcher.max_memory_scaler
-            ):
+            if getattr(autobatcher, "max_memory_scaler", None):
                 _GLOBAL_MEMORY_SCALER_CACHE.set(
                     n_atoms=n_atoms,
                     model_name=self._cache_model_name(),
@@ -466,7 +507,13 @@ class TorchSimBatchRelaxer:
                     f"Memory probing complete ({probe_time:.2f}s). "
                     f"Scaler cached for {n_atoms} atoms."
                 )
-        except Exception as e:
+        except (
+            RuntimeError,
+            ValueError,
+            OSError,
+            AttributeError,
+            torch.cuda.OutOfMemoryError,
+        ) as e:
             logger.warning(
                 f"Memory probing failed (non-fatal): {e}. Will retry on first relax_batch()."
             )
@@ -507,7 +554,7 @@ class TorchSimBatchRelaxer:
 
         atoms_seq = list(atoms_list)
 
-        # torch_sim.io.atoms_to_state ignores ASE constraints; map FixAtoms -> TorchSim.
+        # torch_sim.initialize_state ignores ASE constraints; map FixAtoms -> TorchSim.
         ts_fix = build_torchsim_fixatoms_from_ase_batch(atoms_seq, self.device)
         if ts_fix is not None:
             system_in = self._ts.initialize_state(
@@ -519,10 +566,11 @@ class TorchSimBatchRelaxer:
         else:
             system_in = atoms_seq
 
-        # `steps=0` is intentionally used as a single-point mode in TS/NEB paths
-        # (endpoint energies and batched force evaluations). Some torch-sim versions
-        # emit a generic warning about max steps reached in this mode; suppress only
-        # that specific, non-actionable warning.
+        # `steps=0` is our single-point mode (endpoint energies and batched force
+        # evaluations in NEB/TS paths). We intentionally stay on ts.optimize rather
+        # than ts.static because we need the final SimState with positions/forces;
+        # ts.static returns property dicts only. torch-sim emits a benign
+        # "max steps reached: 0" UserWarning in this mode — silence just that one.
         max_steps_now = runner_kwargs.get("max_steps", self.max_steps)
         if max_steps_now == 0:
             with warnings.catch_warnings():
@@ -616,10 +664,6 @@ class TorchSimBatchRelaxer:
             results.append((energy, relaxed))
         return results
 
-    def __deepcopy__(self, memo):  # pragma: no cover - deepcopy helper
-        memo[id(self)] = self
-        return self
-
     def _cache_model_name(self) -> str:
         mk = str(self.model_kind or "mace").strip().lower()
         if mk == "mace":
@@ -628,13 +672,22 @@ class TorchSimBatchRelaxer:
             return str(self.fairchem_model_name or "fairchem")
         return str(mk)
 
+    def __deepcopy__(self, memo):  # pragma: no cover - deepcopy helper
+        """Treat the relaxer as a singleton under ``deepcopy``.
+
+        ``TorchSimBatchRelaxer`` holds a live PyTorch model and caches that are
+        not safely picklable (modules, CUDA tensors, runner kwargs with module
+        references). Callers typically deepcopy parameter dicts containing the
+        relaxer for bookkeeping — short-circuiting to ``self`` gives them a
+        usable reference without attempting to clone the model.
+        """
+        memo[id(self)] = self
+        return self
+
     def _patch_model_for_cuda(self) -> None:
         """Ensure TorchSim models handle CUDA atomic numbers safely."""
         setup_fn = getattr(self.model, "setup_from_system_idx", None)
-        if setup_fn is None:
-            return
-
-        if getattr(setup_fn, "__wrapped_scgo__", False):  # already patched
+        if setup_fn is None or getattr(type(self.model), "_scgo_setup_patched", False):
             return
 
         @functools.wraps(setup_fn)
@@ -645,14 +698,13 @@ class TorchSimBatchRelaxer:
                 atomic_numbers = atomic_numbers.cpu()
             result = setup_fn(atomic_numbers, system_idx)
             if original_device is not None and hasattr(self.model, "atomic_numbers"):
-                # Restore tensors expected on the model device after CPU work.
                 self.model.atomic_numbers = self.model.atomic_numbers.to(
                     original_device,
                 )
             return result
 
-        patched_setup.__wrapped_scgo__ = True  # type: ignore[attr-defined]
         self.model.setup_from_system_idx = patched_setup  # type: ignore[assignment]
+        type(self.model)._scgo_setup_patched = True
 
 
 def get_global_memory_scaler_cache() -> MemoryScalerCache:

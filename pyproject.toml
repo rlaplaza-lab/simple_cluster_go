@@ -28,7 +28,7 @@ classifiers = [
 dependencies = [
     "ase>=3.22.0",
     "ase-ga>=0.1.0",
-    "numpy>=2.4.3",
+    "numpy>=2.2",
     "scipy>=1.17.1",
     "tqdm>=4.60.0",
 ]

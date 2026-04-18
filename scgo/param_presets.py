@@ -207,10 +207,33 @@ def get_uma_ga_benchmark_params(
     model_name: str = "uma-s-1p2",
     task_name: str = "oc25",
 ) -> dict[str, Any]:
-    """GA benchmark parameters matching :func:`_get_base_ga_benchmark_params` but with UMA (ASE GA)."""
+    """GA benchmark parameters matching :func:`_get_base_ga_benchmark_params` but with UMA.
+
+    Installs a fairchem-backed :class:`TorchSimBatchRelaxer` so the benchmark
+    runs on the TorchSim GA path (same code as the MACE preset), enabling
+    apples-to-apples profiling between MACE and UMA backends.
+    """
     params = _get_base_ga_benchmark_params(seed)
     params["calculator"] = "UMA"
     params["calculator_kwargs"] = {"model_name": model_name, "task_name": task_name}
+
+    from scgo.calculators.torchsim_helpers import TorchSimBatchRelaxer
+
+    ga = params["optimizer_params"]["ga"]
+    fmax_val = float(ga.get("fmax", 0.05))
+    niter_local = ga.get("niter_local_relaxation", 200)
+    max_steps = 200 if niter_local == "auto" else int(niter_local)
+    ga["relaxer"] = TorchSimBatchRelaxer(
+        model_kind="fairchem",
+        fairchem_model_name=model_name,
+        fairchem_task_name=task_name,
+        force_tol=fmax_val,
+        optimizer_name="fire",
+        max_steps=max_steps,
+        dtype=None,
+        autobatcher=True,
+        expected_max_atoms=600,
+    )
     return params
 
 
@@ -377,8 +400,6 @@ def get_ts_search_params(
             "neb_climb": False,
             "neb_interpolation_method": "idpp",
             "neb_tangent_method": DEFAULT_NEB_TANGENT_METHOD,
-            "validate_ts_by_frequency": False,
-            "imag_freq_threshold": 50.0,
             # TS minima deduplication defaults (keeps behavior consistent with
             # global-optimization `run_minima.py` and helpers.filter_unique_minima)
             "dedupe_minima": True,
@@ -486,8 +507,6 @@ def get_ts_run_kwargs(ts_params: dict[str, Any] | None = None) -> dict[str, Any]
         "neb_climb": False,
         "neb_interpolation_method": "idpp",
         "neb_tangent_method": DEFAULT_NEB_TANGENT_METHOD,
-        "validate_ts_by_frequency": False,
-        "imag_freq_threshold": 50.0,
     }
     for key, def_val in default_keys.items():
         kwargs[key] = ts_params.get(key, def_val)

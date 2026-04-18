@@ -479,15 +479,12 @@ def _cluster_ts_candidates_globally(
         for idx, (rep_energy, rep_atoms) in enumerate(representatives):
             if abs(float(energy) - float(rep_energy)) > energy_tolerance:
                 continue
-            try:
-                _cum, _maxd, are_similar = calculate_structure_similarity(
-                    rep_atoms,
-                    atoms,
-                    tolerance=similarity_tolerance,
-                    pair_cor_max=similarity_pair_cor_max,
-                )
-            except (ValueError, TypeError, RuntimeError):
-                are_similar = False
+            _cum, _maxd, are_similar = calculate_structure_similarity(
+                rep_atoms,
+                atoms,
+                tolerance=similarity_tolerance,
+                pair_cor_max=similarity_pair_cor_max,
+            )
             if are_similar:
                 matched_idx = idx
                 break
@@ -654,15 +651,7 @@ def write_final_unique_ts(
         else:
             filename = f"{formula}_ts_{rank:02d}_pair_{first_edge['pair_id']}.xyz"
         filepath = os.path.join(final_dir, filename)
-        log_id = (
-            ",".join(str(e["pair_id"]) for e in connected_edges)
-            if len(connected_edges) > 1
-            else first_edge["pair_id"]
-        )
-        try:
-            ase_write(filepath, atoms_clean)
-        except OSError as exc:
-            logger.warning("Failed to write TS %s to %s: %s", log_id, filepath, exc)
+        ase_write(filepath, atoms_clean)
 
         item: dict[str, Any] = {
             "pair_id": pair_id,
@@ -694,17 +683,13 @@ def write_final_unique_ts(
     summary_data.update({"formula": formula, "unique_ts": serializable_summary})
     if minima_base_dir is not None:
         summary_data["minima_base_dir"] = minima_base_dir
-    try:
-        with open(summary_path, "w") as f:
-            json.dump(summary_data, f, indent=2)
-    except (OSError, TypeError) as e:
-        logger.warning("Failed to write TS summary %s: %s", summary_path, e)
-    else:
-        logger.info(
-            "Unique TS: %d structures in %s, summary %s",
-            len(summary_list),
-            final_dir,
-            summary_path,
-        )
+    with open(summary_path, "w") as f:
+        json.dump(summary_data, f, indent=2)
+    logger.info(
+        "Unique TS: %d structures in %s, summary %s",
+        len(summary_list),
+        final_dir,
+        summary_path,
+    )
 
     return summary_list

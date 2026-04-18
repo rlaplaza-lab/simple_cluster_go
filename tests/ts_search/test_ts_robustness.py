@@ -57,7 +57,6 @@ def test_run_transition_state_search_handles_cuda_oom(monkeypatch):
     GPU cleanup is attempted. This test sets up a minimal mock DB locally.
     """
     require_cuda()
-    from pathlib import Path
 
     from ase import Atoms
     from ase.calculators.emt import EMT
@@ -142,97 +141,6 @@ def test_run_transition_state_search_handles_cuda_oom(monkeypatch):
                 assert ts.calc is None
 
 
-def test_retry_mechanism_triggers_on_oom(monkeypatch):
-    """If the first TS attempt raises an OOM, the search should retry once."""
-    require_cuda()
-    from ase import Atoms
-    from ase.calculators.emt import EMT
-    from ase_ga.data import DataConnection
-
-    from scgo.database.metadata import add_metadata, update_metadata
-
-    # prepare minimal database with two minima
-    with tempfile.TemporaryDirectory() as tmpdir:
-        run_dir = Path(tmpdir) / "run_20260101_120000"
-        run_dir.mkdir()
-        db_path = run_dir / "candidates.db"
-
-        db = create_preparedb(Atoms("Cu2"), db_path, population_size=20)
-        pairs = [
-            ([[0, 0, 0], [2.5, 0, 0]], 1),
-            ([[0, 0, 0], [1.8, 1.8, 0]], 2),
-        ]
-        for pos, confid in pairs:
-            atoms = Atoms("Cu2", positions=pos)
-            atoms.center(vacuum=5.0)
-            atoms.calc = EMT()
-            add_metadata(atoms, raw_score=-10.0)
-            atoms.info["confid"] = confid
-            db.add_unrelaxed_candidate(atoms, description=f"Cu2_{confid}")
-        da = DataConnection(str(db_path))
-        while da.get_number_of_unrelaxed_candidates() > 0:
-            a = da.get_an_unrelaxed_candidate()
-            a.calc = EMT()
-            update_metadata(a, raw_score=-a.get_potential_energy())
-            da.add_relaxed_step(a)
-
-        mark_test_minima_as_final(db_path)
-
-        # track cleanup calls
-        cleanup_calls = {"count": 0}
-
-        def fake_cleanup(logger=None):
-            cleanup_calls["count"] += 1
-
-        monkeypatch.setattr(
-            "scgo.ts_search.transition_state_run.cleanup_torch_cuda", fake_cleanup
-        )
-
-        # simulate OOM on first invocation, then succeed
-        call_count = {"n": 0}
-
-        def fake_find(*args, **kwargs):
-            call_count["n"] += 1
-            if call_count["n"] == 1:
-                raise RuntimeError("CUDA out of memory: simulated")
-            return {
-                "status": "success",
-                "pair_id": "0_1",
-                "neb_converged": True,
-                "n_images": 3,
-                "spring_constant": 0.05,
-                "reactant_energy": -1.0,
-                "product_energy": -0.9,
-                "ts_energy": -0.8,
-                "barrier_height": 0.1,
-                "transition_state": None,
-                "error": None,
-            }
-
-        monkeypatch.setattr(
-            "scgo.ts_search.transition_state_run.find_transition_state", fake_find
-        )
-
-        params = {"calculator": "EMT", "calculator_kwargs": {}}
-        results = run_transition_state_search(
-            composition=["Cu", "Cu"],
-            base_dir=tmpdir,
-            params=params,
-            verbosity=0,
-            max_pairs=1,
-            neb_n_images=3,
-            neb_fmax=0.5,
-            neb_steps=10,
-        )
-
-        assert isinstance(results, list)
-        assert results and results[0].get("status") == "success"
-        # cleanup should have been called at least once for retry
-        assert cleanup_calls["count"] >= 1
-        # fake find should have been invoked twice (initial + retry)
-        assert call_count["n"] == 2
-
-
 def test_pairwise_cleanup_even_without_errors(monkeypatch):
     """GPU cleanup should be attempted after every pair, not only on OOMs.
 
@@ -242,7 +150,6 @@ def test_pairwise_cleanup_even_without_errors(monkeypatch):
     cleanup added by https://github.com/.../issue/xxx.
     """
     require_cuda()
-    from pathlib import Path
 
     from ase import Atoms
     from ase.calculators.emt import EMT

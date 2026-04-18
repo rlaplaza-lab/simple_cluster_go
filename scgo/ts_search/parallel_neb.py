@@ -68,8 +68,9 @@ class ParallelNEBBatch:
             for _ in self.neb_instances
         ]
 
+        step_cap = min(self.max_total_steps, int(max_steps))
         try:
-            while self.active_nebs and self.step_count < self.max_total_steps:
+            while self.active_nebs and self.step_count < step_cap:
                 # Collect images from all active NEBs
                 all_images = []
                 neb_image_map = []
@@ -104,11 +105,8 @@ class ParallelNEBBatch:
                         results[neb_idx]["error"] = str(e)
                     break
 
-                # Record batched relaxer invocation on per-NEB counters so
-                # `TorchSimNEB.get_force_calls()` reflects batched evaluations
-                # in addition to direct NEB-invoked evaluations.
                 for neb_idx, _, _ in neb_image_map:
-                    self.neb_instances[neb_idx].increment_force_calls()
+                    self.neb_instances[neb_idx]._force_calls += 1
 
                 # Redistribute forces/energies back to individual NEBs
                 for neb_idx, start_idx, end_idx in neb_image_map:
@@ -165,57 +163,11 @@ class ParallelNEBBatch:
                                     neb, logfile=None, trajectory=None
                                 )
 
-                            try:
-                                # NEB forces are already cached in SinglePointCalculator on
-                                # each image; step() will call neb.get_forces() internally.
-                                self._optimizers[neb_idx].step()
-                            except (
-                                RuntimeError,
-                                ValueError,
-                                TypeError,
-                                AttributeError,
-                            ) as e:
-                                logger.error(
-                                    f"NEB {neb_idx} optimizer step failed: {type(e).__name__}: {e}"
-                                )
-                                results[neb_idx]["error"] = str(e)
-                                self.failed_nebs[neb_idx] = str(e)
-                                continue
+                            self._optimizers[neb_idx].step()
+                            still_active.append(neb_idx)
 
-                            # Do NOT recompute NEB forces per-NEB here: that
-                            # triggers an individual TorchSim evaluation per NEB,
-                            # defeating the batched GPU strategy.  The next outer
-                            # loop iteration will batch-evaluate all active NEBs
-                            # together.  For the final iteration the pre-step fmax
-                            # is a conservative (over-)estimate of residual forces.
-
-                            if self.step_count < max_steps - 1:
-                                still_active.append(neb_idx)
-                            else:
-                                # Last allowed iteration: use pre-step fmax as a
-                                # conservative convergence proxy (true post-step
-                                # fmax would require an extra evaluation).
-                                results[neb_idx]["converged"] = (
-                                    results[neb_idx]["final_fmax"] < fmax
-                                )
-                                if results[neb_idx]["converged"]:
-                                    self.converged_nebs[neb_idx] = True
-
-                    except RuntimeError as e:
-                        logger.debug(f"NEB {neb_idx} force computation error: {e}")
-                        self.failed_nebs[neb_idx] = str(e)
-                        results[neb_idx]["error"] = str(e)
-                    except ValueError as e:
-                        logger.debug(f"NEB {neb_idx} invalid force calculation: {e}")
-                        self.failed_nebs[neb_idx] = str(e)
-                        results[neb_idx]["error"] = str(e)
-                    except KeyboardInterrupt:
-                        raise
-                    except (AttributeError, TypeError) as e:
-                        # Treat unexpected attribute/type errors as NEB-specific failures
-                        logger.error(
-                            f"Unexpected NEB {neb_idx} step error ({type(e).__name__}): {e}"
-                        )
+                    except (RuntimeError, ValueError) as e:
+                        logger.debug(f"NEB {neb_idx} step failed: {e}")
                         self.failed_nebs[neb_idx] = str(e)
                         results[neb_idx]["error"] = str(e)
 

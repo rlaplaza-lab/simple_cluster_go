@@ -29,6 +29,57 @@ from scgo.utils.ts_provenance import ts_output_provenance
 logger = get_logger(__name__)
 
 
+def _stamp_ts_metadata(
+    ts_atoms: Atoms,
+    *,
+    ts_energy: float,
+    minima_idx_1: int,
+    minima_idx_2: int,
+    pair_id: str,
+    barrier_height: float,
+    neb_converged: bool,
+    canonical_ts: bool,
+    endpoint_provenance: list[dict[str, Any]] | None,
+) -> None:
+    """Write TS annotations into both ``info["metadata"]`` and ``info["key_value_pairs"]``."""
+    md = ts_atoms.info.setdefault("metadata", {})
+    md.update(
+        {
+            "potential_energy": ts_energy,
+            "ts_connects_minima": f"{minima_idx_1}_{minima_idx_2}",
+            "ts_pair_id": pair_id,
+            "ts_barrier_height": barrier_height,
+            "is_transition_state": True,
+            "ts_neb_converged": neb_converged,
+        }
+    )
+    if canonical_ts:
+        md["final_unique_ts"] = True
+
+    add_metadata(
+        ts_atoms,
+        source="ts_search",
+        connects=[minima_idx_1, minima_idx_2],
+        pair_id=pair_id,
+    )
+
+    if endpoint_provenance is not None:
+        provenance_copy = [dict(p) for p in endpoint_provenance]
+        add_metadata(ts_atoms, ts_endpoint_provenance=provenance_copy)
+        ts_atoms.info.setdefault("key_value_pairs", {})
+        ts_atoms.info["key_value_pairs"]["ts_endpoint_provenance_json"] = json.dumps(
+            provenance_copy
+        )
+
+    ts_atoms.info.setdefault("data", {})
+    kvp = ts_atoms.info.setdefault("key_value_pairs", {})
+    kvp["is_transition_state"] = True
+    kvp["ts_neb_converged"] = neb_converged
+    if canonical_ts:
+        kvp["final_unique_ts"] = True
+    kvp["raw_score"] = -float(ts_energy)
+
+
 def add_ts_to_database(
     ts_structure: Atoms,
     ts_energy: float,
@@ -84,52 +135,24 @@ def add_ts_to_database(
         if "tags" in ts_atoms.arrays:
             del ts_atoms.arrays["tags"]
 
-        # Store TS connection metadata in unified metadata storage
-        ts_atoms.info.setdefault("metadata", {})
-        ts_atoms.info["metadata"].update(
-            {
-                "potential_energy": ts_energy,
-                "ts_connects_minima": f"{minima_idx_1}_{minima_idx_2}",
-                "ts_pair_id": pair_id,
-                "ts_barrier_height": barrier_height,
-                "is_transition_state": True,
-                "ts_neb_converged": neb_converged,
-            }
-        )
-        if canonical_ts:
-            ts_atoms.info["metadata"]["final_unique_ts"] = True
-
-        add_metadata(
+        _stamp_ts_metadata(
             ts_atoms,
-            source="ts_search",
-            connects=[minima_idx_1, minima_idx_2],
+            ts_energy=ts_energy,
+            minima_idx_1=minima_idx_1,
+            minima_idx_2=minima_idx_2,
             pair_id=pair_id,
+            barrier_height=barrier_height,
+            neb_converged=neb_converged,
+            canonical_ts=canonical_ts,
+            endpoint_provenance=endpoint_provenance,
         )
-        if endpoint_provenance is not None:
-            provenance_copy = [dict(p) for p in endpoint_provenance]
-            add_metadata(ts_atoms, ts_endpoint_provenance=provenance_copy)
-            ts_atoms.info.setdefault("key_value_pairs", {})
-            ts_atoms.info["key_value_pairs"]["ts_endpoint_provenance_json"] = (
-                json.dumps(provenance_copy)
-            )
+
         run_id_src = get_metadata(ts_atoms, "run_id")
         trial_src = get_metadata(ts_atoms, "trial") or get_metadata(
             ts_atoms, "trial_id"
         )
         if run_id_src is not None or trial_src is not None:
             persist_provenance(ts_atoms, run_id=run_id_src, trial_id=trial_src)
-
-        # Ensure minimal GA/ASE metadata expected by DataConnection.add_relaxed_candidate
-        ts_atoms.info.setdefault("data", {})
-        ts_atoms.info.setdefault("key_value_pairs", {})
-
-        # Persistent marker so DB queries can reliably identify TS entries
-        ts_atoms.info["key_value_pairs"]["is_transition_state"] = True
-        ts_atoms.info["key_value_pairs"]["ts_neb_converged"] = neb_converged
-        if canonical_ts:
-            ts_atoms.info["key_value_pairs"]["final_unique_ts"] = True
-
-        ts_atoms.info["key_value_pairs"]["raw_score"] = -float(ts_energy)
 
         def _add() -> bool:
             ts_db_atoms = ts_atoms.copy()

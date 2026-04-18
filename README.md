@@ -264,7 +264,6 @@ ts_results = run_transition_state_search(
     max_pairs=10,
     neb_fmax=0.05,
     neb_steps=500,
-    validate_ts_by_frequency=False,  # Optional: validate TS has exactly 1 imaginary frequency
     use_torchsim=True  # Optional: TorchSim batched NEB (CPU or GPU)
 )
 # Returns: list of dicts with TS info (barrier, TS structure, etc.)
@@ -281,8 +280,6 @@ ts_results = run_transition_state_search(
 - `neb_perturb_sigma`: Interior-image perturbation (Å) applied after interpolation (default: 0.0)
 - `neb_fmax`: Force convergence criterion (default: 0.05 eV/Å)
 - `neb_steps`: Max optimization steps (default: 500)
-- `validate_ts_by_frequency` (bool): If True, validate each TS by vibrational analysis — only accept structures with exactly one significant imaginary frequency. Default: False.
-- `imag_freq_threshold` (float): Threshold (cm⁻¹) for identifying significant imaginary frequencies. Default: 50.0 cm⁻¹.
 - `use_torchsim` (bool): Use TorchSim for batched NEB (works on CPU or GPU). Default: False.
 - `torchsim_params` (dict): Parameters for TorchSim relaxer (if use_torchsim=True).
 
@@ -295,7 +292,6 @@ ts_results = run_transition_state_search(
 - `"minima_indices"`, `"minima_provenance"`: traceability back to GO databases when attached
 - `"ts_image_index"`, `"final_fmax"`, `"steps_taken"`, `"force_calls"`: NEB diagnostics when present
 - `"use_torchsim"`, `"neb_backend"`, interpolation/climb/MIC flags: echo NEB configuration
-- If `validate_ts_by_frequency=True`: `"ts_vib_validated"`, `"ts_vib_frequencies"`, and related vibrational fields
 
 #### `run_transition_state_campaign(compositions, output_dir=None, ...)`
 

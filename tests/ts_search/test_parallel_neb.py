@@ -60,7 +60,7 @@ class TestParallelNEBBatch:
             mace_model_name="mace_matpes_0",
             force_tol=0.1,
             max_steps=100,
-            autobatch_strategy="binning",
+            autobatcher=True,
         )
 
         # Create three NEB paths

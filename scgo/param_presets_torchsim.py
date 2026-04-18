@@ -26,8 +26,8 @@ def get_torchsim_ga_params_impl(seed: int) -> dict[str, Any]:
                 seed=seed,
                 max_steps=niter_local,
                 dtype=torch.float32,
-                autobatch_strategy="binning",
-                compile_model=False,
+                autobatcher=True,
+                expected_max_atoms=600,
             ),
         },
     )

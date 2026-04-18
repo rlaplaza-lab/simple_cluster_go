@@ -11,10 +11,13 @@ def test_import_scgo_without_eager_torchsim():
 
 
 def test_lazy_ga_go_torchsim_import_error_message():
+    """``ga_go_torchsim`` is importable whenever ``torch_sim`` is available
+    (either the ``[mace]`` or ``[uma]`` extra). When neither is installed the
+    lazy attribute should raise an ``ImportError`` pointing at ``scgo[mace]``.
+    """
     import importlib.util
 
-    if importlib.util.find_spec("mace") is not None:
-        # MACE stack installed; lazy import should succeed.
+    if importlib.util.find_spec("torch_sim") is not None:
         from scgo.algorithms import ga_go_torchsim
 
         assert ga_go_torchsim is not None

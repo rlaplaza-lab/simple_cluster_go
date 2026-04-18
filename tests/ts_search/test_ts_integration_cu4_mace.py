@@ -128,7 +128,7 @@ def test_full_workflow_cu4_mace_database_persistence():
         # TorchSim parameters for GPU-batched NEB
         torchsim_params = {
             "mace_model_name": "mace_matpes_0",
-            "autobatch_strategy": "binning",
+            "autobatcher": True,
             "max_steps": 120,
         }
 
@@ -508,7 +508,7 @@ def test_ts_search_reproducibility_with_mace():
 
             torchsim_params = {
                 "mace_model_name": "mace_matpes_0",
-                "autobatch_strategy": "binning",
+                "autobatcher": True,
                 "max_steps": 50,
             }
 

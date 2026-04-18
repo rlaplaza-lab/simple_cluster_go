@@ -167,12 +167,9 @@ def test_find_transition_state_records_align_and_perturb(
 
 
 def test_find_ts_endpoint_marked_not_converged(temp_output_dir, h2_reactant):
-    """If the highest-energy image is an endpoint (or endpoints are identical),
-    NEB should be marked non-converged with an endpoint-related error message.
-    """
+    """Identical endpoints raise a structured failure (no interior saddle)."""
     a = h2_reactant.copy()
-    b = h2_reactant.copy()  # identical endpoints -> no interior saddle
-    # ensure calculators are attached to copies (ASE .copy() does not preserve .calc)
+    b = h2_reactant.copy()
     a.calc = EMT()
     b.calc = EMT()
 
@@ -188,16 +185,11 @@ def test_find_ts_endpoint_marked_not_converged(temp_output_dir, h2_reactant):
         verbosity=0,
     )
 
-    # NEB should be treated as non-converged when TS is endpoint
     assert result["neb_converged"] is False
     assert result["status"] == "failed"
-    assert result.get("error") is not None
-    assert "endpoint" in result.get("error").lower()
-    assert result.get("ts_image_index") in (0, 3)
-    # calculator should be detached
-    ts = result.get("transition_state")
-    if ts is not None:
-        assert ts.calc is None
+    error = result.get("error")
+    assert error is not None
+    assert "endpoint" in error.lower() or "identical" in error.lower()
 
 
 def test_interpolate_path_different_lengths_fails():
@@ -752,7 +744,7 @@ def test_find_ts_mace_gpu_torchsim(cu3_triangle, cu3_linear, temp_output_dir):
         torchsim_params={
             "device": device,
             "mace_model_name": "mace_matpes_0",
-            "autobatch_strategy": "binning",  # GPU batching enabled
+            "autobatcher": True,  # GPU batching enabled
             "max_steps": 100,
         },
         verbosity=0,
@@ -815,7 +807,7 @@ class TestTorchSimNEB:
             torchsim_params={
                 "device": device,
                 "mace_model_name": "mace_matpes_0",
-                "autobatch_strategy": "binning",  # Use autobatching for GPU efficiency
+                "autobatcher": True,  # Use autobatching for GPU efficiency
                 "max_steps": 100,
             },
             verbosity=0,

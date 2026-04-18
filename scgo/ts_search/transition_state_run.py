@@ -105,25 +105,16 @@ def _build_failed_ts_result(
     error: Exception,
     energy_i: float | None,
     energy_j: float | None,
-    neb_n_images: int,
-    neb_spring_constant: float,
-    use_torchsim: bool,
-    neb_fmax: float,
-    neb_steps: int | str,
-    neb_interpolation_method: str,
-    neb_climb: bool,
-    neb_align_endpoints: bool,
-    neb_perturb_sigma: float,
-    neb_interpolation_mic: bool,
-    neb_tangent_method: str = DEFAULT_NEB_TANGENT_METHOD,
+    ts_config: dict[str, Any],
 ) -> dict[str, Any]:
     """Build a normalized failed-result payload for TS search."""
+    neb_steps = ts_config.get("neb_steps")
     return {
         "status": "failed",
         "pair_id": pair_id,
         "neb_converged": False,
-        "n_images": neb_n_images,
-        "spring_constant": neb_spring_constant,
+        "n_images": ts_config["neb_n_images"],
+        "spring_constant": ts_config["neb_spring_constant"],
         "reactant_energy": float(energy_i) if energy_i is not None else None,
         "product_energy": float(energy_j) if energy_j is not None else None,
         "ts_energy": None,
@@ -133,18 +124,18 @@ def _build_failed_ts_result(
         "transition_state": None,
         "ts_image_index": None,
         "error": str(error),
-        "use_torchsim": use_torchsim,
+        "use_torchsim": ts_config["use_torchsim"],
         "use_parallel_neb": False,
-        "fmax": neb_fmax,
+        "fmax": ts_config["neb_fmax"],
         "neb_steps": int(neb_steps)
         if isinstance(neb_steps, (int, np.integer))
         else neb_steps,
-        "interpolation_method": neb_interpolation_method,
-        "climb": neb_climb,
-        "align_endpoints": neb_align_endpoints,
-        "perturb_sigma": neb_perturb_sigma,
-        "neb_interpolation_mic": neb_interpolation_mic,
-        "neb_tangent_method": neb_tangent_method,
+        "interpolation_method": ts_config["neb_interpolation_method"],
+        "climb": ts_config["neb_climb"],
+        "align_endpoints": ts_config["neb_align_endpoints"],
+        "perturb_sigma": ts_config["neb_perturb_sigma"],
+        "neb_interpolation_mic": ts_config["neb_interpolation_mic"],
+        "neb_tangent_method": ts_config["neb_tangent_method"],
         "final_fmax": None,
         "steps_taken": None,
     }
@@ -173,8 +164,6 @@ def run_transition_state_search(
     use_torchsim: bool = False,
     use_parallel_neb: bool = False,
     torchsim_params: dict | None = None,
-    validate_ts_by_frequency: bool = False,
-    imag_freq_threshold: float = 50.0,
     # Post-processing controls
     dedupe_minima: bool = True,
     minima_energy_tolerance: float = DEFAULT_ENERGY_TOLERANCE,
@@ -466,17 +455,13 @@ def run_transition_state_search(
                 "neb_tangent_method": neb_tangent_method,
             }
 
-            # Extract TS as the highest-energy image (energies should be available via SinglePointCalculator)
             images = neb.images
             max_energy = -float("inf")
             max_idx = None
             ts_atoms = None
             for idx_img, atoms in enumerate(images):
-                try:
-                    e = float(atoms.get_potential_energy())
-                except (AttributeError, RuntimeError, TypeError, ValueError):
-                    e = None
-                if e is not None and e > max_energy:
+                e = float(atoms.get_potential_energy())
+                if e > max_energy:
                     max_energy = e
                     max_idx = idx_img
                     ts_atoms = atoms
@@ -562,6 +547,19 @@ def run_transition_state_search(
         cleanup_torch_cuda(logger=logger)
 
     else:
+        ts_config: dict[str, Any] = {
+            "neb_n_images": neb_n_images,
+            "neb_spring_constant": neb_spring_constant,
+            "use_torchsim": use_torchsim,
+            "neb_fmax": neb_fmax,
+            "neb_steps": neb_steps,
+            "neb_interpolation_method": neb_interpolation_method,
+            "neb_climb": neb_climb,
+            "neb_align_endpoints": neb_align_endpoints,
+            "neb_perturb_sigma": neb_perturb_sigma,
+            "neb_interpolation_mic": neb_interpolation_mic,
+            "neb_tangent_method": neb_tangent_method,
+        }
         for idx, (i, j) in enumerate(pairs, 1):
             cleanup_torch_cuda(logger=logger)
 
@@ -583,89 +581,57 @@ def run_transition_state_search(
                     f"{energy_j:.6f}" if energy_j is not None else "None",
                 )
 
-            result: dict[str, Any] | None = None
             calculator: Any = None
-            for attempt in range(2):
-                react_ep, prod_ep = _neb_endpoint_copies(
-                    atoms_i, atoms_j, surface_config
+            react_ep, prod_ep = _neb_endpoint_copies(atoms_i, atoms_j, surface_config)
+            if not use_torchsim:
+                calculator = calculator_class(**calculator_kwargs)
+                react_ep.calc = calculator
+                prod_ep.calc = calculator
+            try:
+                result = find_transition_state(
+                    react_ep,
+                    prod_ep,
+                    calculator if not use_torchsim else None,
+                    output_dir=str(result_dir),
+                    pair_id=pair_id,
+                    rng=rng,
+                    n_images=neb_n_images,
+                    spring_constant=neb_spring_constant,
+                    fmax=neb_fmax,
+                    neb_steps=neb_steps,
+                    climb=neb_climb,
+                    interpolation_method=neb_interpolation_method,
+                    align_endpoints=neb_align_endpoints,
+                    perturb_sigma=neb_perturb_sigma,
+                    neb_interpolation_mic=neb_interpolation_mic,
+                    neb_tangent_method=neb_tangent_method,
+                    use_torchsim=use_torchsim,
+                    torchsim_params=torchsim_params,
+                    verbosity=verbosity,
                 )
-                if not use_torchsim:
-                    calculator = calculator_class(**calculator_kwargs)
-                    react_ep.calc = calculator
-                    prod_ep.calc = calculator
-                try:
-                    result = find_transition_state(
-                        react_ep,
-                        prod_ep,
-                        calculator if not use_torchsim else None,
-                        output_dir=str(result_dir),
-                        pair_id=pair_id,
-                        rng=rng,
-                        n_images=neb_n_images,
-                        spring_constant=neb_spring_constant,
-                        fmax=neb_fmax,
-                        neb_steps=neb_steps,
-                        climb=neb_climb,
-                        interpolation_method=neb_interpolation_method,
-                        align_endpoints=neb_align_endpoints,
-                        perturb_sigma=neb_perturb_sigma,
-                        neb_interpolation_mic=neb_interpolation_mic,
-                        neb_tangent_method=neb_tangent_method,
-                        use_torchsim=use_torchsim,
-                        torchsim_params=torchsim_params,
-                        verbosity=verbosity,
-                        validate_ts_by_frequency=validate_ts_by_frequency,
-                        imag_freq_threshold=imag_freq_threshold,
+            except (
+                RuntimeError,
+                ValueError,
+                KeyError,
+                AttributeError,
+                TypeError,
+            ) as e:
+                logger.exception(
+                    "Unexpected error while finding TS for pair %s: %s", pair_id, e
+                )
+                if is_cuda_oom_error(e):
+                    cleanup_torch_cuda(logger=logger)
+                    logger.warning(
+                        "Detected CUDA OOM for pair %s; freed cached GPU memory",
+                        pair_id,
                     )
-                    break
-                except KeyboardInterrupt:
-                    raise
-                except (
-                    RuntimeError,
-                    ValueError,
-                    KeyError,
-                    AttributeError,
-                    TypeError,
-                ) as e:
-                    oom = is_cuda_oom_error(e)
-                    if oom and attempt == 0:
-                        logger.warning(
-                            "OOM during TS search for pair %s (attempt %d): %s; clearing cache and retrying",
-                            pair_id,
-                            attempt + 1,
-                            e,
-                        )
-                        cleanup_torch_cuda(logger=logger)
-                        continue
-
-                    logger.exception(
-                        "Unexpected error while finding TS for pair %s: %s", pair_id, e
-                    )
-                    if oom:
-                        cleanup_torch_cuda(logger=logger)
-                        logger.warning(
-                            "Detected CUDA OOM for pair %s; freed cached GPU memory",
-                            pair_id,
-                        )
-
-                    result = _build_failed_ts_result(
-                        pair_id=pair_id,
-                        error=e,
-                        energy_i=energy_i,
-                        energy_j=energy_j,
-                        neb_n_images=neb_n_images,
-                        neb_spring_constant=neb_spring_constant,
-                        use_torchsim=use_torchsim,
-                        neb_fmax=neb_fmax,
-                        neb_steps=neb_steps,
-                        neb_interpolation_method=neb_interpolation_method,
-                        neb_climb=neb_climb,
-                        neb_align_endpoints=neb_align_endpoints,
-                        neb_perturb_sigma=neb_perturb_sigma,
-                        neb_interpolation_mic=neb_interpolation_mic,
-                        neb_tangent_method=neb_tangent_method,
-                    )
-                    break
+                result = _build_failed_ts_result(
+                    pair_id=pair_id,
+                    error=e,
+                    energy_i=energy_i,
+                    energy_j=energy_j,
+                    ts_config=ts_config,
+                )
 
             if result.get("transition_state") is not None:
                 _detach_calc(result["transition_state"])
@@ -674,7 +640,6 @@ def run_transition_state_search(
 
             ts_results.append(result)
 
-            # Save result
             save_neb_result(result, str(result_dir), pair_id)
 
             if not use_torchsim and calculator is not None:
@@ -963,61 +928,31 @@ def run_transition_state_campaign(
     verbosity: int = 1,
     neb_params: dict | None = None,
 ) -> dict[str, list[dict[str, Any]]]:
-    """Run transition state search across multiple compositions.
+    """Run :func:`run_transition_state_search` for multiple compositions in sequence.
 
-    Convenience function to run TS searches for multiple cluster compositions
-    in sequence.
-
-    Args:
-        compositions: List of compositions, each a list of atomic symbols.
-            E.g., [["Pt"], ["Pt", "Pt"], ["Pt", "Au"]]
-        output_dir: Base output directory. Minima are read from
-            ``{output_dir}/{formula}_searches``. If None, uses ``{formula}_searches``
-            per composition under the current working directory.
-        params: Global optimization parameters with "calculator" field.
-        seed: Random seed. Default None.
-        verbosity: Logging verbosity (0, 1, or 2). Default 1.
-        neb_params: Dictionary of NEB-specific parameters forwarded to
-            :func:`run_transition_state_search` (same keys as that function's kwargs),
-            including ``surface_config`` to align slab ``FixAtoms`` with GA.
-
-            The TS results for each composition will have calculators detached
-            before being stored in the returned mapping to prevent memory leaks
-            when running many compositions in sequence.
-            - "max_pairs": Maximum structure pairs to evaluate
-            - "energy_gap_threshold": Energy cutoff for pairing
-            - "neb_n_images": Number of intermediate images
-            - "neb_spring_constant": Spring constant
-            - "neb_fmax": Force convergence criterion
-            - "neb_steps": Maximum optimization steps
-            - "neb_tangent_method": ASE NEB tangent method (e.g. ``improvedtangent``)
-            - "surface_config": Optional :class:`scgo.surface.config.SurfaceSystemConfig`
-
-    Returns:
-        Dictionary mapping formula strings to lists of TS result dictionaries.
+    Minima are read from ``{output_dir}/{formula}_searches`` (or just
+    ``{formula}_searches`` when ``output_dir`` is None). Per-composition NEB
+    kwargs are forwarded via ``neb_params``. Failures for one composition never
+    abort the whole campaign — they are logged and that formula gets an empty
+    result list.
     """
     configure_logging(verbosity)
     logger = get_logger(__name__)
 
     neb_params = neb_params or {}
-
-    campaign_results = {}
+    campaign_results: dict[str, list[dict[str, Any]]] = {}
 
     for composition in compositions:
         formula = get_cluster_formula(composition)
-
+        comp_output_dir = (
+            str(Path(output_dir) / f"{formula}_searches")
+            if output_dir is not None
+            else f"{formula}_searches"
+        )
         if verbosity >= 1:
             logger.info("Running TS search campaign for %s", formula)
 
-        if output_dir is not None:
-            comp_output_dir = str(Path(output_dir) / f"{formula}_searches")
-        else:
-            comp_output_dir = f"{formula}_searches"
-
         try:
-            logger.debug(
-                "Using minima base directory for %s: %s", formula, comp_output_dir
-            )
             results = run_transition_state_search(
                 composition,
                 base_dir=comp_output_dir,
@@ -1026,16 +961,14 @@ def run_transition_state_campaign(
                 verbosity=verbosity,
                 **neb_params,
             )
-            for r in results:
-                if r.get("transition_state") is not None:
-                    _detach_calc(r["transition_state"])
-            campaign_results[formula] = results
-        except KeyboardInterrupt:
-            raise
         except (ValueError, RuntimeError, ImportError) as e:
-            logger.error(
-                f"Failed to run TS search for {formula}: {type(e).__name__}: {e}"
-            )
+            logger.error("Failed to run TS search for %s: %s", formula, e)
             campaign_results[formula] = []
+            continue
+
+        for r in results:
+            if r.get("transition_state") is not None:
+                _detach_calc(r["transition_state"])
+        campaign_results[formula] = results
 
     return campaign_results

@@ -19,7 +19,6 @@ from ase.io import write
 from ase.mep import NEB
 from ase.optimize import FIRE
 from ase.optimize.optimize import Optimizer
-from ase.vibrations import Vibrations
 from scipy.optimize import linear_sum_assignment
 
 from scgo.constants import (
@@ -70,6 +69,18 @@ def attach_singlepoint_from_relax_output(
             "TorchSim did not return forces. Ensure the model is loaded with compute_forces=True."
         )
     atoms.calc = SinglePointCalculator(atoms, energy=energy)
+
+
+def _image_has_cached_forces(img: Atoms) -> bool:
+    """True when ``img`` already carries PES forces (array or calculator cache)."""
+    if img.arrays.get("forces") is not None:
+        return True
+    calc = img.calc
+    if calc is None:
+        return False
+    with contextlib.suppress(AttributeError, NotImplementedError, RuntimeError):
+        return calc.get_forces(img) is not None
+    return False
 
 
 def _make_torchsim_relaxer(**kwargs: Any) -> Any:
@@ -160,32 +171,13 @@ class TorchSimNEB(NEB):
     def get_forces(self) -> np.ndarray:
         """Batch-evaluate PES forces with TorchSim and return NEB forces.
 
-        Optimization note: when images already carry PES forces (for example
-        because a caller such as `ParallelNEBBatch` just evaluated them in a
-        single batched call), avoid re-invoking the TorchSim relaxer. The
-        relaxer and `_force_calls` are only updated when we actually perform a
-        TorchSim evaluation here.
+        When images already carry PES forces (for example because
+        ``ParallelNEBBatch`` just evaluated them in a single batched call),
+        reuse the cached arrays instead of re-invoking TorchSim.
         """
-
-        def _has_cached_forces(atoms: Atoms) -> bool:
-            if "forces" in atoms.arrays and atoms.arrays["forces"] is not None:
-                return True
-            if atoms.calc is None:
-                return False
-            f = None
-            with contextlib.suppress(
-                AttributeError,
-                NotImplementedError,
-                RuntimeError,
-                ValueError,
-            ):
-                f = atoms.get_forces()
-            return f is not None and getattr(f, "size", 0) > 0
-
-        if all(_has_cached_forces(img) for img in self.images):
+        if all(_image_has_cached_forces(img) for img in self.images):
             return super().get_forces()
 
-        # Otherwise perform actual TorchSim batched evaluation
         self._force_calls += 1
         results = self.relaxer.relax_batch(self.images, steps=0)
 
@@ -194,22 +186,11 @@ class TorchSimNEB(NEB):
                 atoms, energy, relaxed_atoms, require_forces=True
             )
 
-        # Compute NEB forces (includes spring/tangent contributions)
         return super().get_forces()
 
     def get_force_calls(self) -> int:
         """Return the number of times forces have been evaluated."""
         return self._force_calls
-
-    def increment_force_calls(self, n: int = 1) -> None:
-        """Increment the internal force-evaluation call counter.
-
-        This allows external batched runners (for example
-        `ParallelNEBBatch`) to record that a relaxer evaluation covered this
-        NEB's images so that `get_force_calls()` reflects both direct NEB
-        evaluations and aggregated/batched evaluations.
-        """
-        self._force_calls += int(n)
 
 
 def _local_distance_fingerprints(atoms: Atoms) -> np.ndarray:
@@ -260,15 +241,9 @@ def _match_atoms_by_fingerprint(a1: Atoms, a2: Atoms) -> list[int]:
 
 def _kabsch_rotation(P: np.ndarray, Q: np.ndarray) -> np.ndarray:
     """Return rotation matrix R that minimizes ||P - Q @ R|| (P and Q are centered)."""
-    C = P.T @ Q
-    U, S, Vt = np.linalg.svd(C)
-    d = np.linalg.det(U @ Vt)
-    # Guard against degenerate case where det is exactly zero (singular SVD);
-    # treat as proper rotation (sign +1) to avoid a singular D matrix.
-    sign_d = np.sign(d) if d != 0.0 else 1.0
-    D = np.diag([1.0, 1.0, sign_d])
-    R = U @ D @ Vt
-    return R
+    U, _, Vt = np.linalg.svd(P.T @ Q)
+    D = np.diag([1.0, 1.0, np.sign(np.linalg.det(U @ Vt)) or 1.0])
+    return U @ D @ Vt
 
 
 def _fixed_atom_mask(atoms: Atoms) -> np.ndarray:
@@ -365,6 +340,25 @@ def interpolate_path(
     return images
 
 
+def _empty_ts_result(**overrides: Any) -> dict[str, Any]:
+    """Build a zeroed TS-result dict with stable key ordering."""
+    base: dict[str, Any] = {
+        "status": "failed",
+        "barrier_height": None,
+        "barrier_forward": None,
+        "barrier_reverse": None,
+        "transition_state": None,
+        "ts_energy": None,
+        "ts_image_index": None,
+        "reactant_energy": None,
+        "product_energy": None,
+        "neb_converged": False,
+        "error": None,
+    }
+    base.update(overrides)
+    return base
+
+
 def find_transition_state(
     atoms1: Atoms,
     atoms2: Atoms,
@@ -386,8 +380,6 @@ def find_transition_state(
     align_endpoints: bool = True,
     perturb_sigma: float = 0.0,
     neb_interpolation_mic: bool = False,
-    validate_ts_by_frequency: bool = False,
-    imag_freq_threshold: float = 50.0,
     neb_tangent_method: str = DEFAULT_NEB_TANGENT_METHOD,
 ) -> dict[str, Any]:
     """Run NEB to locate a transition state between two structures.
@@ -458,33 +450,24 @@ def find_transition_state(
         if product_energy is not None:
             logger.info(f"  Product energy: {product_energy:.6f} eV")
 
-    result = {
-        "status": "failed",
-        "barrier_height": None,
-        "barrier_forward": None,
-        "barrier_reverse": None,
-        "transition_state": None,
-        "ts_energy": None,
-        "ts_image_index": None,
-        "reactant_energy": reactant_energy,
-        "product_energy": product_energy,
-        "neb_converged": False,
-        "error": None,
-        "pair_id": pair_id,
-        "n_images": n_images,
-        "spring_constant": spring_constant,
-        "use_torchsim": use_torchsim,
-        "climb": climb,
-        "align_endpoints": bool(align_endpoints),
-        "perturb_sigma": float(perturb_sigma),
-        "neb_interpolation_mic": bool(neb_interpolation_mic),
-        "neb_tangent_method": neb_tangent_method,
-        "fmax": float(fmax),
-        "neb_steps": int(neb_steps)
+    result = _empty_ts_result(
+        pair_id=pair_id,
+        n_images=n_images,
+        spring_constant=spring_constant,
+        use_torchsim=use_torchsim,
+        climb=climb,
+        align_endpoints=bool(align_endpoints),
+        perturb_sigma=float(perturb_sigma),
+        neb_interpolation_mic=bool(neb_interpolation_mic),
+        neb_tangent_method=neb_tangent_method,
+        fmax=float(fmax),
+        neb_steps=int(neb_steps)
         if isinstance(neb_steps, (int, np.integer))
         else neb_steps,
-        "interpolation_method": interpolation_method,
-    }
+        interpolation_method=interpolation_method,
+        reactant_energy=reactant_energy,
+        product_energy=product_energy,
+    )
 
     try:
         # Generate initial path using specified interpolation method
@@ -505,32 +488,12 @@ def find_transition_state(
             rng=rng,
         )
 
-        pos0 = images[0].get_positions()
-        posN = images[-1].get_positions()
-        if np.allclose(pos0, posN, atol=1e-8):
-            if verbosity >= 1:
-                logger.warning(
-                    "Endpoints are identical for pair %s; skipping NEB and "
-                    "marking as endpoint failure",
-                    pair_id,
-                )
-
-            result["neb_converged"] = False
-            result["status"] = "failed"
-            result["error"] = "endpoints identical; no interior TS (endpoint)"
-            result["transition_state"] = deepcopy(images[0])
-            _detach_calc(result["transition_state"])
-            ep_e = extract_energy_from_atoms(images[0])
-            result["ts_energy"] = float(ep_e) if ep_e is not None else None
-            result["ts_image_index"] = 0
-            result["barrier_height"] = 0.0
-            result["barrier_forward"] = 0.0
-            result["barrier_reverse"] = 0.0
-            result["reactant_structure"] = deepcopy(images[0])
-            result["product_structure"] = deepcopy(images[0])
-            _detach_calc(result["reactant_structure"])
-            _detach_calc(result["product_structure"])
-            return result
+        if np.allclose(
+            images[0].get_positions(), images[-1].get_positions(), atol=1e-8
+        ):
+            raise ValueError(
+                f"Endpoints are identical for pair {pair_id}; no interior TS"
+            )
 
         neb: NEB
         if use_torchsim:
@@ -588,23 +551,7 @@ def find_transition_state(
         result["final_fmax"] = final_fmax
         result["neb_converged"] = final_fmax is not None and final_fmax < fmax
 
-        # Record optimizer step count when available so callers can see how far
-        # the NEB progressed (ASE Optimizer implementations commonly expose
-        # `.nsteps` or `.get_number_of_steps()`). This is useful because the
-        # ASE optimizer output is usually silenced in library runs.
-        steps_taken = None
-        try:
-            if hasattr(dyn, "get_number_of_steps") and callable(
-                dyn.get_number_of_steps
-            ):
-                steps_taken = int(dyn.get_number_of_steps())
-            elif hasattr(dyn, "nsteps"):
-                steps_taken = int(dyn.nsteps)
-            else:
-                steps_taken = None
-        except (TypeError, ValueError):
-            steps_taken = None
-
+        steps_taken = int(dyn.nsteps)
         result["steps_taken"] = steps_taken
 
         # If NEB did not converge, mark the run as failed so callers don't
@@ -614,21 +561,20 @@ def find_transition_state(
                 f"NEB did not converge (final_fmax={final_fmax}, fmax={fmax})"
             )
 
-        # Log a concise convergence summary so users can quickly see progress
-        # even when ASE optimizer logging is suppressed.
         if verbosity >= 1:
+            fmax_str = f"{final_fmax:.6f}" if final_fmax is not None else "unknown"
             if result["neb_converged"]:
                 logger.info(
-                    "NEB converged in %s steps (final_fmax=%.6f < %.6f)",
-                    steps_taken if steps_taken is not None else "unknown",
-                    final_fmax if final_fmax is not None else float("nan"),
+                    "NEB converged in %d steps (final_fmax=%s < %.6f)",
+                    steps_taken,
+                    fmax_str,
                     fmax,
                 )
             else:
                 logger.warning(
-                    "NEB not converged after %s steps (final_fmax=%s, target_fmax=%.6f)",
-                    steps_taken if steps_taken is not None else neb_steps,
-                    f"{final_fmax:.6f}" if final_fmax is not None else "unknown",
+                    "NEB not converged after %d steps (final_fmax=%s, target_fmax=%.6f)",
+                    steps_taken,
+                    fmax_str,
                     fmax,
                 )
         # Find TS as the highest-energy image
@@ -711,77 +657,6 @@ def find_transition_state(
                     logger.info(
                         "  GPU-batched force calls: %s",
                         result["force_calls"],
-                    )
-
-        if (
-            result["status"] == "success"
-            and validate_ts_by_frequency
-            and ts_atoms is not None
-            and calculator is not None
-        ):
-            try:
-                ts_atoms_check = ts_atoms.copy()
-                ts_atoms_check.calc = calculator
-                vib = Vibrations(ts_atoms_check, name=f"ts_vib_{pair_id}")
-                vib.run()
-                frequencies = vib.get_frequencies()
-                vib.clean()
-
-                # Count significant imaginary frequencies (more negative than -threshold)
-                # Small imaginary frequencies between -threshold and 0 are treated as numerical noise
-                imag_mask_significant = frequencies < -imag_freq_threshold
-                num_significant_imag = int(np.sum(imag_mask_significant))
-
-                # Count all imaginary frequencies (including small numerical noise)
-                imag_mask_all = frequencies < 0.0
-                num_all_imag = int(np.sum(imag_mask_all))
-
-                if verbosity >= 1:
-                    logger.info(
-                        f"TS vibrational analysis for pair {pair_id}: "
-                        f"{num_significant_imag} significant imaginary freq (< -{imag_freq_threshold} cm-1), "
-                        f"{num_all_imag} total imaginary (< 0 cm-1)"
-                    )
-                    if num_all_imag > num_significant_imag:
-                        small_imag = frequencies[
-                            (frequencies < 0.0) & (frequencies >= -imag_freq_threshold)
-                        ]
-                        logger.debug(
-                            f"  {len(small_imag)} small imaginary modes (noise, threshold {imag_freq_threshold} cm-1): "
-                            f"{np.round(small_imag, 1)}"
-                        )
-
-                # TS must have exactly 1 significant imaginary frequency
-                if num_significant_imag != 1:
-                    result["status"] = "failed"
-                    result["error"] = (
-                        f"TS validation failed: expected exactly 1 significant imaginary frequency "
-                        f"(threshold -{imag_freq_threshold} cm-1), found {num_significant_imag}. "
-                        f"Total imaginary modes: {num_all_imag}."
-                    )
-                    result["ts_vib_frequencies"] = frequencies.tolist()
-                    result["ts_vib_num_imag"] = num_all_imag
-                    result["ts_vib_num_significant_imag"] = num_significant_imag
-                    result["ts_vib_validated"] = False
-                    if verbosity >= 1:
-                        logger.info("TS rejected: %s", result["error"])
-                else:
-                    result["ts_vib_frequencies"] = frequencies.tolist()
-                    result["ts_vib_num_imag"] = num_all_imag
-                    result["ts_vib_num_significant_imag"] = num_significant_imag
-                    result["ts_vib_validated"] = True
-                    if verbosity >= 1:
-                        logger.info(
-                            "TS validated: exactly one significant imaginary frequency"
-                        )
-
-            except (OSError, RuntimeError, ValueError) as e:
-                result["status"] = "failed"
-                result["error"] = f"TS vibrational analysis failed: {e}"
-                result["ts_vib_validated"] = False
-                if verbosity >= 1:
-                    logger.error(
-                        f"TS vibrational analysis failed for pair {pair_id}: {e}"
                     )
 
     except KeyboardInterrupt:

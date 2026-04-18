@@ -39,6 +39,9 @@ benchmark/neb_tight*.jsonl
 # Ad-hoc NEB experiment dumps (keep tracked suites under benchmark_files_*)
 benchmark/neb_*.json
 benchmark/neb_*.log
+# Local benchmark log dumps and profiling artifacts
+benchmark/logs/
+benchmark/profiling_logs/
 
 # Coverage reports
 .coverage
