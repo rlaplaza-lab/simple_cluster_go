@@ -16,21 +16,16 @@ Use :func:`run_transition_state_search` from this package, for example::
 from __future__ import annotations
 
 import contextlib
-import glob
 import os
 import sqlite3
 from pathlib import Path
 from typing import Any
-
-import numpy as np
-from ase import Atoms
 
 from scgo.constants import (
     DEFAULT_COMPARATOR_TOL,
     DEFAULT_ENERGY_TOLERANCE,
     DEFAULT_NEB_TANGENT_METHOD,
 )
-from scgo.database.metadata import add_metadata, get_metadata
 from scgo.surface.config import SurfaceSystemConfig
 from scgo.surface.constraints import (
     attach_slab_constraints_from_surface_config,
@@ -49,17 +44,15 @@ from scgo.utils.torchsim_policy import resolve_ts_torchsim_flags
 from scgo.utils.ts_provenance import is_cuda_oom_error
 from scgo.utils.validation import validate_composition
 
-from .parallel_neb import ParallelNEBBatch
+from .parallel_neb import run_parallel_neb_search
 from .transition_state import (
-    TorchSimNEB,
     _detach_calc,
-    _make_torchsim_relaxer,
     find_transition_state,
-    interpolate_path,
+    make_ts_result,
+    minima_provenance_dict,
     save_neb_result,
 )
 from .transition_state_io import (
-    _minima_provenance_dict,
     load_minima_by_composition,
     save_transition_state_results,
     select_structure_pairs,
@@ -68,21 +61,14 @@ from .transition_state_io import (
 from .ts_network import (
     add_ts_to_database,
     save_ts_network_metadata,
+    tag_unique_ts_in_databases,
 )
 
-
-def _neb_endpoint_copies(
-    atoms_i: Atoms,
-    atoms_j: Atoms,
-    surface_config: SurfaceSystemConfig | None,
-) -> tuple[Atoms, Atoms]:
-    """Copy minima endpoints and, when requested, match GO slab ``FixAtoms`` policy."""
-    react = atoms_i.copy()
-    prod = atoms_j.copy()
-    if surface_config is not None:
-        attach_slab_constraints_from_surface_config(react, surface_config)
-        attach_slab_constraints_from_surface_config(prod, surface_config)
-    return react, prod
+__all__ = [
+    "run_transition_state_search",
+    "run_transition_state_campaign",
+    "integrate_ts_to_database",
+]
 
 
 def _attach_minima_traceability(
@@ -94,51 +80,139 @@ def _attach_minima_traceability(
     """Record list indices and per-endpoint GO provenance on a TS result dict."""
     result["minima_indices"] = [int(i), int(j)]
     result["minima_provenance"] = [
-        _minima_provenance_dict(minima, i),
-        _minima_provenance_dict(minima, j),
+        minima_provenance_dict(minima, i),
+        minima_provenance_dict(minima, j),
     ]
 
 
-def _build_failed_ts_result(
+def _run_serial_neb_search(
+    pairs: list[tuple[int, int]],
+    minima: list[tuple[float, Any]],
     *,
-    pair_id: str,
-    error: Exception,
-    energy_i: float | None,
-    energy_j: float | None,
-    ts_config: dict[str, Any],
-) -> dict[str, Any]:
-    """Build a normalized failed-result payload for TS search."""
-    neb_steps = ts_config.get("neb_steps")
-    return {
-        "status": "failed",
-        "pair_id": pair_id,
-        "neb_converged": False,
-        "n_images": ts_config["neb_n_images"],
-        "spring_constant": ts_config["neb_spring_constant"],
-        "reactant_energy": float(energy_i) if energy_i is not None else None,
-        "product_energy": float(energy_j) if energy_j is not None else None,
-        "ts_energy": None,
-        "barrier_height": None,
-        "barrier_forward": None,
-        "barrier_reverse": None,
-        "transition_state": None,
-        "ts_image_index": None,
-        "error": str(error),
-        "use_torchsim": ts_config["use_torchsim"],
-        "use_parallel_neb": False,
-        "fmax": ts_config["neb_fmax"],
-        "neb_steps": int(neb_steps)
-        if isinstance(neb_steps, (int, np.integer))
-        else neb_steps,
-        "interpolation_method": ts_config["neb_interpolation_method"],
-        "climb": ts_config["neb_climb"],
-        "align_endpoints": ts_config["neb_align_endpoints"],
-        "perturb_sigma": ts_config["neb_perturb_sigma"],
-        "neb_interpolation_mic": ts_config["neb_interpolation_mic"],
-        "neb_tangent_method": ts_config["neb_tangent_method"],
-        "final_fmax": None,
-        "steps_taken": None,
-    }
+    result_dir: Path,
+    calculator_class: Any,
+    calculator_kwargs: dict[str, Any],
+    surface_config: SurfaceSystemConfig | None,
+    rng: Any,
+    use_torchsim: bool,
+    torchsim_params: dict[str, Any],
+    neb_n_images: int,
+    neb_spring_constant: float,
+    neb_fmax: float,
+    neb_steps: int,
+    neb_climb: bool,
+    neb_interpolation_method: str,
+    neb_align_endpoints: bool,
+    neb_perturb_sigma: float,
+    neb_interpolation_mic: bool,
+    neb_tangent_method: str,
+    verbosity: int,
+) -> list[dict[str, Any]]:
+    """Run NEBs sequentially via :func:`find_transition_state` (one calc per pair)."""
+    logger = get_logger(__name__)
+    ts_results: list[dict[str, Any]] = []
+
+    for idx, (i, j) in enumerate(pairs, 1):
+        cleanup_torch_cuda(logger=logger)
+
+        energy_i, atoms_i = minima[i]
+        energy_j, atoms_j = minima[j]
+        pair_id = f"{i}_{j}"
+
+        if verbosity >= 1:
+            logger.info("[%d/%d] Finding TS for pair %s", idx, len(pairs), pair_id)
+            logger.info(
+                "  Structure %d: %s eV",
+                i,
+                f"{energy_i:.6f}" if energy_i is not None else "None",
+            )
+            logger.info(
+                "  Structure %d: %s eV",
+                j,
+                f"{energy_j:.6f}" if energy_j is not None else "None",
+            )
+
+        react_ep = atoms_i.copy()
+        prod_ep = atoms_j.copy()
+        if surface_config is not None:
+            attach_slab_constraints_from_surface_config(react_ep, surface_config)
+            attach_slab_constraints_from_surface_config(prod_ep, surface_config)
+
+        calculator: Any = None
+        if not use_torchsim:
+            calculator = calculator_class(**calculator_kwargs)
+            react_ep.calc = calculator
+            prod_ep.calc = calculator
+
+        try:
+            result = find_transition_state(
+                react_ep,
+                prod_ep,
+                calculator if not use_torchsim else None,
+                output_dir=str(result_dir),
+                pair_id=pair_id,
+                rng=rng,
+                n_images=neb_n_images,
+                spring_constant=neb_spring_constant,
+                fmax=neb_fmax,
+                neb_steps=neb_steps,
+                climb=neb_climb,
+                interpolation_method=neb_interpolation_method,
+                align_endpoints=neb_align_endpoints,
+                perturb_sigma=neb_perturb_sigma,
+                neb_interpolation_mic=neb_interpolation_mic,
+                neb_tangent_method=neb_tangent_method,
+                use_torchsim=use_torchsim,
+                torchsim_params=torchsim_params,
+                verbosity=verbosity,
+            )
+        except (
+            RuntimeError,
+            ValueError,
+            KeyError,
+            AttributeError,
+            TypeError,
+        ) as e:
+            logger.exception(
+                "Unexpected error while finding TS for pair %s: %s", pair_id, e
+            )
+            if is_cuda_oom_error(e):
+                cleanup_torch_cuda(logger=logger)
+                logger.warning(
+                    "Detected CUDA OOM for pair %s; freed cached GPU memory",
+                    pair_id,
+                )
+            result = make_ts_result(
+                pair_id=pair_id,
+                n_images=neb_n_images,
+                spring_constant=neb_spring_constant,
+                use_torchsim=use_torchsim,
+                fmax=neb_fmax,
+                neb_steps=neb_steps,
+                interpolation_method=neb_interpolation_method,
+                climb=neb_climb,
+                align_endpoints=neb_align_endpoints,
+                perturb_sigma=neb_perturb_sigma,
+                neb_interpolation_mic=neb_interpolation_mic,
+                neb_tangent_method=neb_tangent_method,
+                reactant_energy=energy_i,
+                product_energy=energy_j,
+                error=str(e),
+            )
+
+        if result.get("transition_state") is not None:
+            _detach_calc(result["transition_state"])
+
+        _attach_minima_traceability(result, minima, i, j)
+        ts_results.append(result)
+        save_neb_result(result, str(result_dir), pair_id)
+
+        if not use_torchsim and calculator is not None:
+            del calculator
+
+        cleanup_torch_cuda(logger=logger)
+
+    return ts_results
 
 
 def run_transition_state_search(
@@ -190,55 +264,32 @@ def run_transition_state_search(
         seed: Integer seed for random number generation. Default None.
         verbosity: Logging verbosity (0=quiet, 1=normal, 2=debug, 3=trace). Default 1.
         max_pairs: Maximum number of structure pairs to evaluate. If None, evaluates all pairs.
-            Default None.
         energy_gap_threshold: Only pair structures with energy gap below this threshold (eV).
-            If None, pairs all structures. Default 1.0.
         similarity_tolerance: Cumulative difference tolerance for structure comparison.
-            Structures with cumulative difference below this are considered too similar to pair.
-            Default `DEFAULT_COMPARATOR_TOL`.
         similarity_pair_cor_max: Maximum single distance difference tolerance for similarity.
-            Default 0.1 Å.
         neb_n_images: Number of intermediate NEB images. Default 3 (recommended).
-        neb_spring_constant: Spring constant for NEB band (eV/Ų). Default 0.1 (MACE gas sweep).
+        neb_spring_constant: Spring constant for NEB band (eV/Ų). Default 0.1.
         neb_fmax: Maximum force convergence for NEB (eV/Å). Default 0.05.
         neb_steps: Maximum NEB optimization steps. Default 'auto' (resolved with auto_niter_ts).
         neb_climb: Use climbing image NEB for better TS convergence. Default False.
         neb_interpolation_method: Path interpolation method ('idpp' or 'linear'). Default 'idpp'.
         neb_interpolation_mic: If True, use minimum-image convention for NEB path
-            interpolation (ASE ``NEB.interpolate(mic=True)``). Use for periodic cells
-            (e.g. slabs). Default False (gas-phase clusters).
-        neb_tangent_method: ASE NEB tangent method (``ase.mep.neb.NEB`` ``method``).
-            Default ``improvedtangent``.
-        use_torchsim: Use TorchSim for GPU-efficient batched force evaluation (MACE only).
-            For ``calculator="UMA"`` (or without ``scgo[mace]``), this is coerced to
-            ``False`` and ASE NEB with the selected calculator is used instead.
-        torchsim_params: Optional parameters for TorchSimBatchRelaxer when use_torchsim=True. If
-            `torchsim_params['max_steps']` is 'auto', it will be resolved the same way as `neb_steps`.
+            interpolation. Use for periodic cells (e.g. slabs). Default False.
+        neb_tangent_method: ASE NEB tangent method.
+        use_torchsim: Use TorchSim for GPU-efficient batched force evaluation (MACE/UMA only).
+        torchsim_params: Optional parameters for TorchSimBatchRelaxer when use_torchsim=True.
         surface_config: When set, the same :class:`scgo.surface.config.SurfaceSystemConfig`
-            used for GA (``optimizer_params["ga"]["surface_config"]``). Endpoint structures
-            are copied per pair and :func:`attach_slab_constraints_from_surface_config`
-            is applied so NEB slab fixing matches global optimization (fully frozen slab,
-            bottom-N layers fixed, or fully mobile slab per config). Default None leaves
-            constraints on loaded minima unchanged.
+            used for GA. Endpoint structures are copied per pair and slab
+            constraints are applied to match GO behavior.
 
     Returns:
-        List of result dictionaries from find_transition_state(). Each contains:
-        - "status": "success" or "failed"
-        - "pair_id": Structure pair identifier
-        - "barrier_height": Activation energy (eV)
-        - "transition_state": Atoms object of TS (if successful).  The returned
-            Atoms will have any attached calculator removed to avoid holding GPU
-            memory across calls.
-        - "reactant_energy" / "product_energy": Endpoint energies (eV)
-        - "neb_converged": Whether NEB converged
-        - Other metadata fields
+        List of result dictionaries from :func:`find_transition_state`.
 
     Raises:
         ValueError: If composition is empty or invalid, or calculator is unavailable.
     """
     configure_logging(verbosity)
     logger = get_logger(__name__)
-
     cleanup_torch_cuda(logger=logger)
 
     validate_composition(composition, allow_empty=False)
@@ -248,19 +299,14 @@ def run_transition_state_search(
         raise ValueError("use_parallel_neb requires use_torchsim=True")
 
     formula = get_cluster_formula(composition)
-    if base_dir is not None:
-        ts_output_dir = str(Path(base_dir))
-    else:
-        ts_output_dir = str(Path(f"{formula}_searches"))
+    ts_output_dir = (
+        str(Path(base_dir))
+        if base_dir is not None
+        else str(Path(f"{formula}_searches"))
+    )
 
-    # Default params if not provided
     if params is None:
         params = {"calculator": "EMT", "calculator_kwargs": {}}
-
-    # Initialize calculator class once; actual instances will be created per
-    # pair so that any internal caches (weights, layers, autograd graphs) are
-    # freed promptly when the object is deleted.  This avoids slow memory
-    # growth when a single calculator is reused across many NEBs.
     calculator_name = params.get("calculator", "EMT")
     calculator_kwargs = params.get("calculator_kwargs", {})
 
@@ -268,7 +314,6 @@ def run_transition_state_search(
         calculator_name,
         use_torchsim,
         use_parallel_neb,
-        logger=logger,
     )
 
     try:
@@ -277,7 +322,6 @@ def run_transition_state_search(
         logger.error(f"Failed to locate calculator class {calculator_name}: {e}")
         raise ValueError(f"Cannot initialize calculator: {e}") from e
 
-    # Load minima from database
     if verbosity >= 1:
         logger.info(f"Loading minima for composition {formula}")
 
@@ -285,14 +329,10 @@ def run_transition_state_search(
         ts_output_dir, composition, prefer_final_unique=True
     )
 
-    # Resolve any 'auto' step-counts to concrete integers using the
-    # TS-specific heuristic (`auto_niter_ts`) which provides a larger NEB budget.
     if neb_steps in ("auto", None):
         neb_steps = auto_niter_ts(composition)
 
-    # Ensure we don't mutate caller dict; prefer a concise ternary as suggested by ruff
     torchsim_params = {} if torchsim_params is None else dict(torchsim_params)
-
     if torchsim_params.get("max_steps") in ("auto", None):
         torchsim_params["max_steps"] = auto_niter_ts(composition)
 
@@ -325,9 +365,6 @@ def run_transition_state_search(
 
     minima = minima_by_formula.get(formula, [])
 
-    # Deduplicate minima coming from multiple run_* databases to avoid
-    # quadratic blow-up during pairwise similarity filtering. This mirrors the
-    # final deduplication performed in `run_minima.py` for global optimization results.
     if dedupe_minima:
         original_count = len(minima)
         minima = filter_unique_minima(minima, minima_energy_tolerance)
@@ -344,7 +381,6 @@ def run_transition_state_search(
     if verbosity >= 1:
         logger.info(f"Found {len(minima)} minima for {formula}")
 
-    # Select structure pairs
     pairs = select_structure_pairs(
         minima,
         max_pairs=max_pairs,
@@ -362,291 +398,53 @@ def run_transition_state_search(
     if verbosity >= 1:
         logger.info(f"Selected {len(pairs)} structure pairs for TS search")
 
-    # Find transition states
-    ts_results = []
     result_dir = Path(ts_output_dir) / f"ts_results_{formula}"
     result_dir.mkdir(parents=True, exist_ok=True)
 
-    # If requested, run multiple TorchSim NEBs together using ParallelNEBBatch.
     if use_parallel_neb:
-        ts_params = torchsim_params or {}
-        relaxer = _make_torchsim_relaxer(**ts_params)
-
-        # Prepare endpoint batch (collect reactant/product images for all pairs)
-        endpoints = []
-        pair_end_idx = []  # (start_idx, end_idx) per pair in endpoints list
-        for i, j in pairs:
-            ri, rj = _neb_endpoint_copies(minima[i][1], minima[j][1], surface_config)
-            endpoints.append(ri)
-            endpoints.append(rj)
-            pair_end_idx.append((len(endpoints) - 2, len(endpoints)))
-
-        # Compute endpoint single-point energies with the shared relaxer
-        ep_results = relaxer.relax_batch(endpoints, steps=0)
-
-        # Map endpoint energies back to pairs
-        pair_endpoint_energies: list[tuple[float, float]] = []
-        for start, end in pair_end_idx:
-            react_e = ep_results[start][0]
-            prod_e = ep_results[end - 1][0]
-            pair_endpoint_energies.append((float(react_e), float(prod_e)))
-
-        # Build TorchSimNEB instances for all pairs (images copied so callers' atoms not mutated)
-        neb_instances: list[TorchSimNEB] = []
-        pair_ids: list[str] = []
-        pair_meta: list[dict] = []
-        for idx_pair, (i, j) in enumerate(pairs):
-            energy_i, atoms_i = minima[i]
-            energy_j, atoms_j = minima[j]
-            pair_id = f"{i}_{j}"
-            react_ep, prod_ep = _neb_endpoint_copies(atoms_i, atoms_j, surface_config)
-            images = interpolate_path(
-                react_ep,
-                prod_ep,
-                n_images=neb_n_images,
-                method=neb_interpolation_method,
-                mic=neb_interpolation_mic,
-                align_endpoints=neb_align_endpoints,
-                perturb_sigma=neb_perturb_sigma,
-                rng=rng,
-            )
-
-            neb = TorchSimNEB(
-                images,
-                relaxer,
-                k=neb_spring_constant,
-                climb=neb_climb,
-                method=neb_tangent_method,
-            )
-            neb_instances.append(neb)
-            pair_ids.append(pair_id)
-
-            # Store reactant/product energy (from batch) for later result construction
-            react_e, prod_e = pair_endpoint_energies[idx_pair]
-            pair_meta.append({"reactant_energy": react_e, "product_energy": prod_e})
-
-        # Run parallel NEB optimization (global step cap scaled by number of NEBs)
-        neb_steps_i = int(neb_steps)
-        max_total = neb_steps_i * max(1, len(neb_instances))
-        batch = ParallelNEBBatch(neb_instances, relaxer, max_total_steps=max_total)
-        batch_results = batch.run_optimization(fmax=neb_fmax, max_steps=neb_steps)
-
-        # Convert ParallelNEBBatch summaries to find_transition_state-like results
-        for neb_idx, neb in enumerate(neb_instances):
-            summary = batch_results[neb_idx]
-            result: dict[str, Any] = {
-                "status": "failed",
-                "barrier_height": None,
-                "barrier_forward": None,
-                "barrier_reverse": None,
-                "transition_state": None,
-                "ts_energy": None,
-                "ts_image_index": None,
-                "reactant_energy": pair_meta[neb_idx]["reactant_energy"],
-                "product_energy": pair_meta[neb_idx]["product_energy"],
-                "neb_converged": bool(summary.get("converged", False)),
-                "error": summary.get("error"),
-                "pair_id": pair_ids[neb_idx],
-                "n_images": neb_n_images,
-                "spring_constant": neb_spring_constant,
-                "use_torchsim": True,
-                "climb": neb_climb,
-                "neb_interpolation_mic": bool(neb_interpolation_mic),
-                "neb_tangent_method": neb_tangent_method,
-            }
-
-            images = neb.images
-            max_energy = -float("inf")
-            max_idx = None
-            ts_atoms = None
-            for idx_img, atoms in enumerate(images):
-                e = float(atoms.get_potential_energy())
-                if e > max_energy:
-                    max_energy = e
-                    max_idx = idx_img
-                    ts_atoms = atoms
-
-            if max_idx is not None:
-                result["ts_energy"] = float(max_energy)
-                result["ts_image_index"] = int(max_idx)
-                result["transition_state"] = ts_atoms.copy()
-
-                # Compute barriers relative to lower endpoint
-                min_endpoint = min(result["reactant_energy"], result["product_energy"])
-                result["barrier_height"] = float(result["ts_energy"] - min_endpoint)
-                result["barrier_forward"] = (
-                    float(result["ts_energy"] - result["reactant_energy"])
-                    if result.get("reactant_energy") is not None
-                    else None
-                )
-                result["barrier_reverse"] = (
-                    float(result["ts_energy"] - result["product_energy"])
-                    if result.get("product_energy") is not None
-                    else None
-                )
-
-            # Endpoint-as-TS is considered non-converged/failed for consistency
-            # with the serial find_transition_state() path.
-            endpoint_ts = (
-                max_idx in (0, len(images) - 1) if max_idx is not None else False
-            )
-            if endpoint_ts:
-                result["neb_converged"] = False
-                result["error"] = (
-                    f"NEB returned endpoint as TS (image {max_idx}); "
-                    "no interior saddle located"
-                )
-
-            # Final status: only treat as success if NEB converged, TS energy exists,
-            # and the TS is interior to the band.
-            if (
-                result["neb_converged"]
-                and result.get("ts_energy") is not None
-                and not endpoint_ts
-            ):
-                result["status"] = "success"
-            else:
-                # If NEB reports converged but no TS energy was extracted, mark failed
-                if result["neb_converged"] and result.get("ts_energy") is None:
-                    logger.warning(
-                        "Parallel NEB converged but no TS energy for pair %s; marking as failed",
-                        result.get("pair_id"),
-                    )
-
-            # Add optimizer/force call metadata when available
-            result["final_fmax"] = summary.get("final_fmax")
-            result["force_calls"] = summary.get("force_calls")
-            result["steps_taken"] = summary.get("steps_taken")
-            result["fmax"] = neb_fmax
-            result["neb_steps"] = (
-                int(neb_steps) if isinstance(neb_steps, int) else neb_steps
-            )
-            result["interpolation_method"] = neb_interpolation_method
-            result["use_parallel_neb"] = True
-            result["align_endpoints"] = neb_align_endpoints
-            result["perturb_sigma"] = neb_perturb_sigma
-            react_atoms = neb.images[0].copy()
-            prod_atoms = neb.images[-1].copy()
-            _detach_calc(react_atoms)
-            _detach_calc(prod_atoms)
-            result["reactant_structure"] = react_atoms
-            result["product_structure"] = prod_atoms
-
-            # drop any calculator from the copied TS returned by ParallelNEBBatch
-            if result.get("transition_state") is not None:
-                _detach_calc(result["transition_state"])
-
-            pi, pj = pairs[neb_idx]
-            _attach_minima_traceability(result, minima, pi, pj)
-
-            ts_results.append(result)
-
-            # Save result (same behavior as non-parallel path)
-            save_neb_result(result, str(result_dir), result["pair_id"])
-
+        ts_results = run_parallel_neb_search(
+            pairs,
+            minima,
+            result_dir=result_dir,
+            surface_config=surface_config,
+            rng=rng,
+            neb_n_images=neb_n_images,
+            neb_spring_constant=neb_spring_constant,
+            neb_fmax=neb_fmax,
+            neb_steps=int(neb_steps),
+            neb_climb=neb_climb,
+            neb_interpolation_method=neb_interpolation_method,
+            neb_align_endpoints=neb_align_endpoints,
+            neb_perturb_sigma=neb_perturb_sigma,
+            neb_interpolation_mic=neb_interpolation_mic,
+            neb_tangent_method=neb_tangent_method,
+            torchsim_params=torchsim_params,
+        )
         cleanup_torch_cuda(logger=logger)
-
     else:
-        ts_config: dict[str, Any] = {
-            "neb_n_images": neb_n_images,
-            "neb_spring_constant": neb_spring_constant,
-            "use_torchsim": use_torchsim,
-            "neb_fmax": neb_fmax,
-            "neb_steps": neb_steps,
-            "neb_interpolation_method": neb_interpolation_method,
-            "neb_climb": neb_climb,
-            "neb_align_endpoints": neb_align_endpoints,
-            "neb_perturb_sigma": neb_perturb_sigma,
-            "neb_interpolation_mic": neb_interpolation_mic,
-            "neb_tangent_method": neb_tangent_method,
-        }
-        for idx, (i, j) in enumerate(pairs, 1):
-            cleanup_torch_cuda(logger=logger)
+        ts_results = _run_serial_neb_search(
+            pairs,
+            minima,
+            result_dir=result_dir,
+            calculator_class=calculator_class,
+            calculator_kwargs=calculator_kwargs,
+            surface_config=surface_config,
+            rng=rng,
+            use_torchsim=use_torchsim,
+            torchsim_params=torchsim_params,
+            neb_n_images=neb_n_images,
+            neb_spring_constant=neb_spring_constant,
+            neb_fmax=neb_fmax,
+            neb_steps=int(neb_steps) if isinstance(neb_steps, int) else neb_steps,
+            neb_climb=neb_climb,
+            neb_interpolation_method=neb_interpolation_method,
+            neb_align_endpoints=neb_align_endpoints,
+            neb_perturb_sigma=neb_perturb_sigma,
+            neb_interpolation_mic=neb_interpolation_mic,
+            neb_tangent_method=neb_tangent_method,
+            verbosity=verbosity,
+        )
 
-            energy_i, atoms_i = minima[i]
-            energy_j, atoms_j = minima[j]
-
-            pair_id = f"{i}_{j}"
-
-            if verbosity >= 1:
-                logger.info("[%d/%d] Finding TS for pair %s", idx, len(pairs), pair_id)
-                logger.info(
-                    "  Structure %d: %s eV",
-                    i,
-                    f"{energy_i:.6f}" if energy_i is not None else "None",
-                )
-                logger.info(
-                    "  Structure %d: %s eV",
-                    j,
-                    f"{energy_j:.6f}" if energy_j is not None else "None",
-                )
-
-            calculator: Any = None
-            react_ep, prod_ep = _neb_endpoint_copies(atoms_i, atoms_j, surface_config)
-            if not use_torchsim:
-                calculator = calculator_class(**calculator_kwargs)
-                react_ep.calc = calculator
-                prod_ep.calc = calculator
-            try:
-                result = find_transition_state(
-                    react_ep,
-                    prod_ep,
-                    calculator if not use_torchsim else None,
-                    output_dir=str(result_dir),
-                    pair_id=pair_id,
-                    rng=rng,
-                    n_images=neb_n_images,
-                    spring_constant=neb_spring_constant,
-                    fmax=neb_fmax,
-                    neb_steps=neb_steps,
-                    climb=neb_climb,
-                    interpolation_method=neb_interpolation_method,
-                    align_endpoints=neb_align_endpoints,
-                    perturb_sigma=neb_perturb_sigma,
-                    neb_interpolation_mic=neb_interpolation_mic,
-                    neb_tangent_method=neb_tangent_method,
-                    use_torchsim=use_torchsim,
-                    torchsim_params=torchsim_params,
-                    verbosity=verbosity,
-                )
-            except (
-                RuntimeError,
-                ValueError,
-                KeyError,
-                AttributeError,
-                TypeError,
-            ) as e:
-                logger.exception(
-                    "Unexpected error while finding TS for pair %s: %s", pair_id, e
-                )
-                if is_cuda_oom_error(e):
-                    cleanup_torch_cuda(logger=logger)
-                    logger.warning(
-                        "Detected CUDA OOM for pair %s; freed cached GPU memory",
-                        pair_id,
-                    )
-                result = _build_failed_ts_result(
-                    pair_id=pair_id,
-                    error=e,
-                    energy_i=energy_i,
-                    energy_j=energy_j,
-                    ts_config=ts_config,
-                )
-
-            if result.get("transition_state") is not None:
-                _detach_calc(result["transition_state"])
-
-            _attach_minima_traceability(result, minima, i, j)
-
-            ts_results.append(result)
-
-            save_neb_result(result, str(result_dir), pair_id)
-
-            if not use_torchsim and calculator is not None:
-                del calculator
-
-            cleanup_torch_cuda(logger=logger)
-    # Save summary
     save_transition_state_results(
         ts_results,
         str(result_dir),
@@ -654,8 +452,6 @@ def run_transition_state_search(
         run_context=run_context,
     )
 
-    # Also save TS network metadata (used by downstream analysis and by tests)
-    # `minima` is the list of minima loaded earlier in this function.
     save_ts_network_metadata(
         ts_results,
         str(result_dir),
@@ -666,7 +462,6 @@ def run_transition_state_search(
         run_context=run_context,
     )
 
-    # --- Post-processing: deduplicate unique TSs and optionally tag DBs ---
     if dedupe_ts or tag_ts_in_db:
         unique_ts = write_final_unique_ts(
             ts_results,
@@ -679,153 +474,8 @@ def run_transition_state_search(
         )
 
         if tag_ts_in_db and unique_ts:
-            db_files = glob.glob(
-                os.path.join(ts_output_dir, "run_*", "**", "*.db"), recursive=True
-            )
-            basename_to_path = {os.path.basename(p): p for p in db_files}
-            logger.debug(
-                "Tagging: discovered DB basenames for %s: %s",
-                ts_output_dir,
-                list(basename_to_path.keys()),
-            )
+            tag_unique_ts_in_databases(unique_ts, minima, ts_output_dir)
 
-            for item in unique_ts:
-                ts_energy = item.get("ts_energy")
-                atoms_obj = item.get("_atoms_obj")
-
-                edge_list: list[dict[str, Any]] = list(
-                    item.get("connected_edges") or []
-                )
-                if not edge_list:
-                    logger.warning(
-                        "Skipping unique TS without connected_edges while tagging DB: %s",
-                        item.get("filename"),
-                    )
-                    continue
-
-                for edge in edge_list:
-                    pair_id = edge.get("pair_id")
-                    mi = edge.get("minima_indices")
-                    if (
-                        pair_id is None
-                        or not isinstance(mi, (list, tuple))
-                        or len(mi) != 2
-                    ):
-                        continue
-                    i, j = int(mi[0]), int(mi[1])
-                    barrier = edge.get("barrier_height")
-                    neb_conv = edge.get("neb_converged")
-                    endpoint_prov = edge.get("minima_provenance")
-                    if ts_energy is None or barrier is None:
-                        logger.warning(
-                            "Skipping TS %s for DB tag due to missing energies: ts=%s barrier=%s",
-                            pair_id,
-                            ts_energy,
-                            barrier,
-                        )
-                        continue
-
-                    db_candidate = None
-                    src_db_i = None
-                    src_db_j = None
-                    if 0 <= i < len(minima):
-                        src_db_i = get_metadata(minima[i][1], "source_db")
-                    if 0 <= j < len(minima):
-                        src_db_j = get_metadata(minima[j][1], "source_db")
-
-                    if src_db_i and src_db_i in basename_to_path:
-                        db_candidate = basename_to_path[src_db_i]
-                    elif src_db_j and src_db_j in basename_to_path:
-                        db_candidate = basename_to_path[src_db_j]
-
-                    if db_candidate is None:
-                        logger.warning(
-                            "No minima DB found to tag TS %s (searched run_*/*.db under %s); "
-                            "available_db_basenames=%s src_db_i=%s src_db_j=%s",
-                            pair_id,
-                            ts_output_dir,
-                            list(basename_to_path.keys()),
-                            src_db_i,
-                            src_db_j,
-                        )
-                        continue
-
-                    try:
-                        atoms_for_db = (
-                            atoms_obj.copy() if atoms_obj is not None else None
-                        )
-
-                        if atoms_for_db is not None:
-
-                            def _get_min_id(idx: int, key: str):
-                                if not (0 <= idx < len(minima)):
-                                    return None
-                                return get_metadata(minima[idx][1], key)
-
-                            # Persist GO provenance on TS so add_ts_to_database can store it
-                            run_id_src = _get_min_id(i, "run_id") or _get_min_id(
-                                j, "run_id"
-                            )
-                            trial_src = (
-                                _get_min_id(i, "trial")
-                                or _get_min_id(i, "trial_id")
-                                or _get_min_id(j, "trial")
-                                or _get_min_id(j, "trial_id")
-                            )
-                            if run_id_src is not None or trial_src is not None:
-                                add_metadata(
-                                    atoms_for_db,
-                                    run_id=run_id_src,
-                                    trial_id=trial_src,
-                                )
-
-                            add_metadata(
-                                atoms_for_db,
-                                connects=[i, j],
-                                minima_source_db=[src_db_i, src_db_j],
-                                minima_confids=[
-                                    _get_min_id(i, "confid"),
-                                    _get_min_id(j, "confid"),
-                                ],
-                                minima_unique_ids=[
-                                    _get_min_id(i, "unique_id"),
-                                    _get_min_id(j, "unique_id"),
-                                ],
-                                ts_connects_minima=f"{i}_{j}",
-                            )
-
-                        success = add_ts_to_database(
-                            ts_structure=atoms_for_db,
-                            ts_energy=float(ts_energy),
-                            minima_idx_1=int(i),
-                            minima_idx_2=int(j),
-                            db_file=db_candidate,
-                            pair_id=str(pair_id),
-                            barrier_height=float(barrier),
-                            endpoint_provenance=endpoint_prov,
-                            canonical_ts=True,
-                            neb_converged=bool(neb_conv),
-                        )
-                        if not success:
-                            logger.warning(
-                                "add_ts_to_database returned False for %s -> %s",
-                                pair_id,
-                                db_candidate,
-                            )
-                    except (
-                        sqlite3.DatabaseError,
-                        sqlite3.OperationalError,
-                        OSError,
-                        ValueError,
-                    ) as e:
-                        logger.exception(
-                            "Failed to add TS %s to DB %s (%s)",
-                            pair_id,
-                            db_candidate,
-                            type(e).__name__,
-                        )
-
-    # Final summary for TS search
     if verbosity >= 1:
         num_success = sum(1 for r in ts_results if r.get("status") == "success")
         logger.info(
@@ -845,8 +495,8 @@ def integrate_ts_to_database(
 ) -> int:
     """Add found transition states to the minima database.
 
-    Iterates over ``ts_results`` and calls the module-level ``add_ts_to_database`` for
-    each successful TS. Returns the number of TS entries successfully added.
+    Iterates over ``ts_results`` and calls the module-level :func:`add_ts_to_database`
+    for each successful TS. Returns the number of TS entries successfully added.
 
     Row-level failures are logged and skipped; systemic filesystem/DB errors
     cause an early return (or are re-raised by underlying helpers).
@@ -886,8 +536,6 @@ def integrate_ts_to_database(
                 with contextlib.suppress(ValueError, TypeError):
                     minima_idx_1, minima_idx_2 = validate_pair_id(str(pair_id))
 
-            endpoint_provenance = result.get("minima_provenance")
-
             success = add_ts_to_database(
                 ts_structure=ts_structure,
                 ts_energy=float(ts_energy),
@@ -896,7 +544,7 @@ def integrate_ts_to_database(
                 db_file=minima_database_file,
                 pair_id=pair_id,
                 barrier_height=float(barrier),
-                endpoint_provenance=endpoint_provenance,
+                endpoint_provenance=result.get("minima_provenance"),
                 canonical_ts=False,
                 neb_converged=bool(result.get("neb_converged", False)),
             )

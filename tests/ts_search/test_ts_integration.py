@@ -336,7 +336,7 @@ def test_run_transition_state_search_parallel_neb_forwards_rng_and_perturb(
         captured.append(kwargs)
         return real_interp(a1, a2, n_images=n_images, method=method, **kwargs)
 
-    monkeypatch.setattr("scgo.ts_search.transition_state_run.interpolate_path", wrapper)
+    monkeypatch.setattr("scgo.ts_search.parallel_neb.interpolate_path", wrapper)
 
     params = {"calculator": "MACE", "calculator_kwargs": {}}
 

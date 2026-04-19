@@ -6,7 +6,9 @@ benchmark_Pt and benchmark variants.
 
 from __future__ import annotations
 
+import argparse
 import json
+import os
 from copy import deepcopy
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -80,12 +82,55 @@ def resolve_pt_cluster_benchmark_output_dir(
     return path
 
 
-def _parse_atom_count(cluster_formula: str) -> int:
+def parse_atom_count(cluster_formula: str) -> int:
     """Extract the integer atom count from a cluster formula like 'Pt7'."""
     digits = "".join(filter(str.isdigit, cluster_formula))
     if not digits:
         raise ValueError(f"Cluster formula '{cluster_formula}' missing atom count.")
     return int(digits)
+
+
+def add_common_benchmark_cli(parser: argparse.ArgumentParser) -> None:
+    """Register CLI flags shared by all Pt benchmark scripts."""
+    parser.add_argument(
+        "--backend",
+        choices=("mace", "uma"),
+        default=os.environ.get("SCGO_BENCHMARK_BACKEND", "mace"),
+        help=(
+            "mace: TorchSim GA + MACE (GPU-friendly default for ML potentials); "
+            "uma: ASE GA + UMA (install scgo[uma] in a separate env)."
+        ),
+    )
+    parser.add_argument(
+        "--model-name",
+        default=None,
+        help="Override calculator model_name (default UMA: uma-s-1p2; MACE: preset default).",
+    )
+    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument(
+        "--uma-task",
+        default="oc25",
+        help="UMA task_name (only used when --backend uma).",
+    )
+    parser.add_argument(
+        "--clusters",
+        nargs="*",
+        default=None,
+        metavar="FORMULA",
+        help="Optional subset (e.g. Pt4 Pt5). Default: full DEFAULT_CLUSTERS list.",
+    )
+    parser.add_argument(
+        "--niter",
+        type=int,
+        default=10,
+        help="GA generations per benchmark campaign.",
+    )
+    parser.add_argument(
+        "--population-size",
+        type=int,
+        default=50,
+        help="GA population size per benchmark campaign.",
+    )
 
 
 @dataclass
@@ -400,7 +445,7 @@ def evaluate_cluster(
         total_ground_truth=0,
     )
 
-    n_atoms = _parse_atom_count(cluster_formula)
+    n_atoms = parse_atom_count(cluster_formula)
     benchmark_file = BENCHMARK_DIR / f"{cluster_formula}.xyz"
     ground_truth_minima = load_ground_truth_minima(
         benchmark_file,
@@ -565,7 +610,7 @@ def run_benchmark_suite(
 
     results: list[BenchmarkResult] = []
     for cluster_formula in clusters:
-        n_atoms = _parse_atom_count(cluster_formula)
+        n_atoms = parse_atom_count(cluster_formula)
         resolved_out = resolve_pt_cluster_benchmark_output_dir(
             cluster_formula, params, output_dir
         )

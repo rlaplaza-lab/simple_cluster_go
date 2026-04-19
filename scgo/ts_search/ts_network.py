@@ -21,7 +21,7 @@ from ase_ga.data import DataConnection
 
 from scgo.database.metadata import add_metadata, get_metadata, persist_provenance
 from scgo.database.sync import retry_with_backoff
-from scgo.ts_search.transition_state_io import _minima_provenance_dict
+from scgo.ts_search.transition_state import minima_provenance_dict
 from scgo.utils.helpers import get_cluster_formula
 from scgo.utils.logging import get_logger
 from scgo.utils.ts_provenance import ts_output_provenance
@@ -41,37 +41,36 @@ def _stamp_ts_metadata(
     canonical_ts: bool,
     endpoint_provenance: list[dict[str, Any]] | None,
 ) -> None:
-    """Write TS annotations into both ``info["metadata"]`` and ``info["key_value_pairs"]``."""
-    md = ts_atoms.info.setdefault("metadata", {})
-    md.update(
-        {
-            "potential_energy": ts_energy,
-            "ts_connects_minima": f"{minima_idx_1}_{minima_idx_2}",
-            "ts_pair_id": pair_id,
-            "ts_barrier_height": barrier_height,
-            "is_transition_state": True,
-            "ts_neb_converged": neb_converged,
-        }
-    )
+    """Stamp TS annotations into ``info["metadata"]`` and (for ASE DB) ``key_value_pairs``."""
+    md_payload: dict[str, Any] = {
+        "potential_energy": ts_energy,
+        "ts_connects_minima": f"{minima_idx_1}_{minima_idx_2}",
+        "ts_pair_id": pair_id,
+        "ts_barrier_height": barrier_height,
+        "is_transition_state": True,
+        "ts_neb_converged": neb_converged,
+    }
     if canonical_ts:
-        md["final_unique_ts"] = True
+        md_payload["final_unique_ts"] = True
 
     add_metadata(
         ts_atoms,
         source="ts_search",
         connects=[minima_idx_1, minima_idx_2],
         pair_id=pair_id,
+        **md_payload,
     )
 
     if endpoint_provenance is not None:
         provenance_copy = [dict(p) for p in endpoint_provenance]
         add_metadata(ts_atoms, ts_endpoint_provenance=provenance_copy)
-        ts_atoms.info.setdefault("key_value_pairs", {})
-        ts_atoms.info["key_value_pairs"]["ts_endpoint_provenance_json"] = json.dumps(
-            provenance_copy
-        )
+        ts_atoms.info.setdefault("key_value_pairs", {})[
+            "ts_endpoint_provenance_json"
+        ] = json.dumps(provenance_copy)
 
     ts_atoms.info.setdefault("data", {})
+    # ASE DB persists the key_value_pairs column; mirror the booleans/score
+    # downstream queries rely on (metadata writes above are not auto-mirrored).
     kvp = ts_atoms.info.setdefault("key_value_pairs", {})
     kvp["is_transition_state"] = True
     kvp["ts_neb_converged"] = neb_converged
@@ -104,7 +103,7 @@ def add_ts_to_database(
         pair_id: Identifier for this pair (e.g., "0_1").
         barrier_height: Barrier height from minimum to TS (eV).
         endpoint_provenance: Optional list of two dicts (one per endpoint minimum)
-            with DB/run identifiers, e.g. from ``_minima_provenance_dict``, so TS
+            with DB/run identifiers, e.g. from ``minima_provenance_dict``, so TS
             rows can be traced back to the exact GO minima used for the NEB pair.
         canonical_ts: If True, tag the row as ``final_unique_ts`` (deduplicated
             converged TS from the standard pipeline). Integrator-only writes
@@ -184,6 +183,148 @@ def add_ts_to_database(
     except (sqlite3.DatabaseError, sqlite3.OperationalError, OSError, ValueError):
         logger.exception("Error adding TS %s to database", pair_id)
         return False
+
+
+def tag_unique_ts_in_databases(
+    unique_ts: list[dict[str, Any]],
+    minima: list,
+    base_dir: str,
+) -> int:
+    """Persist deduplicated TS entries into discovered ``run_*/*.db`` minima databases.
+
+    Iterates each unique TS edge, picks a candidate database that contains one
+    of the two endpoint minima (matched on ``source_db`` basename), augments
+    the TS Atoms with GO provenance, and calls :func:`add_ts_to_database`.
+
+    Returns the number of successful row insertions.
+    """
+    import glob
+
+    db_files = glob.glob(os.path.join(base_dir, "run_*", "**", "*.db"), recursive=True)
+    basename_to_path = {os.path.basename(p): p for p in db_files}
+    logger.debug(
+        "Tagging: discovered DB basenames for %s: %s",
+        base_dir,
+        list(basename_to_path.keys()),
+    )
+
+    added = 0
+
+    def _get_min_id(idx: int, key: str):
+        if not (0 <= idx < len(minima)):
+            return None
+        return get_metadata(minima[idx][1], key)
+
+    for item in unique_ts:
+        ts_energy = item.get("ts_energy")
+        atoms_obj = item.get("_atoms_obj")
+        edge_list: list[dict[str, Any]] = list(item.get("connected_edges") or [])
+        if not edge_list:
+            logger.warning(
+                "Skipping unique TS without connected_edges while tagging DB: %s",
+                item.get("filename"),
+            )
+            continue
+
+        for edge in edge_list:
+            pair_id = edge.get("pair_id")
+            mi = edge.get("minima_indices")
+            if pair_id is None or not isinstance(mi, (list, tuple)) or len(mi) != 2:
+                continue
+            i, j = int(mi[0]), int(mi[1])
+            barrier = edge.get("barrier_height")
+            neb_conv = edge.get("neb_converged")
+            endpoint_prov = edge.get("minima_provenance")
+            if ts_energy is None or barrier is None:
+                logger.warning(
+                    "Skipping TS %s for DB tag due to missing energies: ts=%s barrier=%s",
+                    pair_id,
+                    ts_energy,
+                    barrier,
+                )
+                continue
+
+            src_db_i = _get_min_id(i, "source_db")
+            src_db_j = _get_min_id(j, "source_db")
+            db_candidate = basename_to_path.get(src_db_i) or basename_to_path.get(
+                src_db_j
+            )
+            if db_candidate is None:
+                logger.warning(
+                    "No minima DB found to tag TS %s (searched run_*/*.db under %s); "
+                    "available_db_basenames=%s src_db_i=%s src_db_j=%s",
+                    pair_id,
+                    base_dir,
+                    list(basename_to_path.keys()),
+                    src_db_i,
+                    src_db_j,
+                )
+                continue
+
+            try:
+                atoms_for_db = atoms_obj.copy() if atoms_obj is not None else None
+
+                if atoms_for_db is not None:
+                    run_id_src = _get_min_id(i, "run_id") or _get_min_id(j, "run_id")
+                    trial_src = (
+                        _get_min_id(i, "trial")
+                        or _get_min_id(i, "trial_id")
+                        or _get_min_id(j, "trial")
+                        or _get_min_id(j, "trial_id")
+                    )
+                    if run_id_src is not None or trial_src is not None:
+                        add_metadata(
+                            atoms_for_db, run_id=run_id_src, trial_id=trial_src
+                        )
+
+                    add_metadata(
+                        atoms_for_db,
+                        connects=[i, j],
+                        minima_source_db=[src_db_i, src_db_j],
+                        minima_confids=[
+                            _get_min_id(i, "confid"),
+                            _get_min_id(j, "confid"),
+                        ],
+                        minima_unique_ids=[
+                            _get_min_id(i, "unique_id"),
+                            _get_min_id(j, "unique_id"),
+                        ],
+                        ts_connects_minima=f"{i}_{j}",
+                    )
+
+                success = add_ts_to_database(
+                    ts_structure=atoms_for_db,
+                    ts_energy=float(ts_energy),
+                    minima_idx_1=int(i),
+                    minima_idx_2=int(j),
+                    db_file=db_candidate,
+                    pair_id=str(pair_id),
+                    barrier_height=float(barrier),
+                    endpoint_provenance=endpoint_prov,
+                    canonical_ts=True,
+                    neb_converged=bool(neb_conv),
+                )
+                if success:
+                    added += 1
+                else:
+                    logger.warning(
+                        "add_ts_to_database returned False for %s -> %s",
+                        pair_id,
+                        db_candidate,
+                    )
+            except (
+                sqlite3.DatabaseError,
+                sqlite3.OperationalError,
+                OSError,
+                ValueError,
+            ):
+                logger.exception(
+                    "Failed to add TS %s to DB %s",
+                    pair_id,
+                    db_candidate,
+                )
+
+    return added
 
 
 def save_ts_network_metadata(
@@ -278,8 +419,8 @@ def save_ts_network_metadata(
         }
         if minima is not None:
             connection["minima_provenance"] = [
-                _minima_provenance_dict(minima, min_idx_1),
-                _minima_provenance_dict(minima, min_idx_2),
+                minima_provenance_dict(minima, min_idx_1),
+                minima_provenance_dict(minima, min_idx_2),
             ]
 
         network["ts_connections"].append(connection)

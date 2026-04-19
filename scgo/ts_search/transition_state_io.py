@@ -26,7 +26,10 @@ from scgo.utils.helpers import get_cluster_formula, validate_pair_id
 from scgo.utils.logging import get_logger
 from scgo.utils.ts_provenance import ts_output_provenance
 
-from .transition_state import calculate_structure_similarity
+from .transition_state import (
+    calculate_structure_similarity,
+    minima_provenance_dict,
+)
 
 
 def _relative_db_path(db_file: str, base_dir: str) -> str:
@@ -498,26 +501,6 @@ def _cluster_ts_candidates_globally(
     return clusters
 
 
-def _minima_provenance_dict(minima: list, idx: int) -> dict[str, Any]:
-    """Extract provenance for minimum at index for JSON serialization."""
-    if not minima or idx < 0 or idx >= len(minima):
-        return {}
-
-    energy, atoms = minima[idx]
-    return {
-        "run_id": get_metadata(atoms, "run_id"),
-        "trial": get_metadata(atoms, "trial") or get_metadata(atoms, "trial_id"),
-        "source_db": get_metadata(atoms, "source_db"),
-        "source_db_relpath": get_metadata(atoms, "source_db_relpath"),
-        "systems_row_id": get_metadata(atoms, "systems_row_id"),
-        "confid": get_metadata(atoms, "confid"),
-        "gaid": get_metadata(atoms, "gaid"),
-        "unique_id": get_metadata(atoms, "unique_id"),
-        "final_id": get_metadata(atoms, "final_id"),
-        "energy": float(energy) if energy is not None else None,
-    }
-
-
 def write_final_unique_ts(
     ts_results: list[dict[str, Any]],
     output_dir: str,
@@ -617,8 +600,8 @@ def write_final_unique_ts(
             if minima is not None:
                 i, j = minima_indices
                 edge["minima_provenance"] = [
-                    _minima_provenance_dict(minima, i),
-                    _minima_provenance_dict(minima, j),
+                    minima_provenance_dict(minima, i),
+                    minima_provenance_dict(minima, j),
                 ]
             connected_edges.append(edge)
 
@@ -667,8 +650,8 @@ def write_final_unique_ts(
         if minima is not None:
             i, j = minima_indices
             item["minima_provenance"] = [
-                _minima_provenance_dict(minima, i),
-                _minima_provenance_dict(minima, j),
+                minima_provenance_dict(minima, i),
+                minima_provenance_dict(minima, j),
             ]
         summary_list.append(item)
 

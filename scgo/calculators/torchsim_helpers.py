@@ -448,6 +448,25 @@ class TorchSimBatchRelaxer:
         if self.expected_max_atoms is not None and self.max_memory_scaler is None:
             self._warm_autobatcher_memory_scaler(self.expected_max_atoms)
 
+    def _persist_autobatcher_scaler(self, n_atoms: int) -> None:
+        """Persist the current autobatcher's ``max_memory_scaler`` to the disk cache.
+
+        No-op when the autobatcher is not active or has not produced a scaler.
+        """
+        autobatcher = self._runner_kwargs.get("autobatcher")
+        if autobatcher is None:
+            return
+        scaler = getattr(autobatcher, "max_memory_scaler", None)
+        if not scaler:
+            return
+        _GLOBAL_MEMORY_SCALER_CACHE.set(
+            n_atoms=n_atoms,
+            model_name=self._cache_model_name(),
+            memory_scales_with=self.memory_scales_with,
+            device=self._device_str,
+            value=float(scaler),
+        )
+
     def _warm_autobatcher_memory_scaler(self, n_atoms: int) -> None:
         """Pre-populate the InFlight autobatcher's ``max_memory_scaler``.
 
@@ -496,13 +515,7 @@ class TorchSimBatchRelaxer:
             probe_time = time.time() - initial_time
 
             if getattr(autobatcher, "max_memory_scaler", None):
-                _GLOBAL_MEMORY_SCALER_CACHE.set(
-                    n_atoms=n_atoms,
-                    model_name=self._cache_model_name(),
-                    memory_scales_with=self.memory_scales_with,
-                    device=self._device_str,
-                    value=float(autobatcher.max_memory_scaler),
-                )
+                self._persist_autobatcher_scaler(n_atoms)
                 logger.info(
                     f"Memory probing complete ({probe_time:.2f}s). "
                     f"Scaler cached for {n_atoms} atoms."
@@ -594,19 +607,8 @@ class TorchSimBatchRelaxer:
             )
 
         # Cache the memory scaler if we computed a new estimate (avoid ~70s re-probing)
-        if self.max_memory_scaler is None and "autobatcher" in self._runner_kwargs:
-            autobatcher = self._runner_kwargs["autobatcher"]
-            if (
-                hasattr(autobatcher, "max_memory_scaler")
-                and autobatcher.max_memory_scaler
-            ):
-                _GLOBAL_MEMORY_SCALER_CACHE.set(
-                    n_atoms=max_atoms_in_batch,
-                    model_name=self._cache_model_name(),
-                    memory_scales_with=self.memory_scales_with,
-                    device=self._device_str,
-                    value=float(autobatcher.max_memory_scaler),
-                )
+        if self.max_memory_scaler is None:
+            self._persist_autobatcher_scaler(max_atoms_in_batch)
 
         energies_tensor = getattr(state, "energy", None)
         if energies_tensor is None:

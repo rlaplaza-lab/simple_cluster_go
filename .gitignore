@@ -20,6 +20,8 @@ test_output/
 
 # Search result directories
 *_searches/
+runners/results/
+runners/logs/
 orca_calcs/
 out_dir/
 results_summary.json

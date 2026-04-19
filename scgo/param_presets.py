@@ -433,7 +433,6 @@ def get_ts_search_params(
         str(params["calculator"]),
         params.get("use_torchsim"),
         params.get("use_parallel_neb"),
-        logger=None,
     )
     params["use_torchsim"] = us
     params["use_parallel_neb"] = up
@@ -458,7 +457,6 @@ def get_ts_run_kwargs(ts_params: dict[str, Any] | None = None) -> dict[str, Any]
         calc_name,
         ts_params.get("use_torchsim"),
         ts_params.get("use_parallel_neb"),
-        logger=None,
     )
 
     kwargs = {

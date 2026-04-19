@@ -14,7 +14,6 @@ from __future__ import annotations
 import argparse
 import os
 import time
-from pathlib import Path
 
 import pytest
 
@@ -22,6 +21,7 @@ from benchmark.benchmark_common import (
     DEFAULT_CLUSTERS,
     MIN_RECOVERY_RATE,
     NUM_GROUND_TRUTH,
+    add_common_benchmark_cli,
     evaluate_cluster,
     get_benchmark_params,
     run_benchmark_suite,
@@ -69,63 +69,9 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description="Pt cluster geometric recovery benchmark (MACE/TorchSim or UMA/ASE GA).",
     )
-    parser.add_argument(
-        "--backend",
-        choices=("mace", "uma"),
-        default=os.environ.get("SCGO_BENCHMARK_BACKEND", "mace"),
-        help=(
-            "mace: TorchSim GA + MACE (GPU-friendly default for ML potentials); "
-            "uma: ASE GA + UMA (install scgo[uma] in a separate env)."
-        ),
-    )
-    parser.add_argument(
-        "--model-name",
-        default=None,
-        help="Override calculator model_name (default UMA: uma-s-1p2; MACE: preset default).",
-    )
-    parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument(
-        "--uma-task",
-        default="oc25",
-        help="UMA task_name (only used when --backend uma).",
-    )
-    parser.add_argument(
-        "--clusters",
-        nargs="*",
-        default=None,
-        metavar="FORMULA",
-        help="Optional subset (e.g. Pt4 Pt5). Default: full DEFAULT_CLUSTERS list.",
-    )
-    parser.add_argument(
-        "--niter",
-        type=int,
-        default=10,
-        help="GA generations per benchmark campaign.",
-    )
-    parser.add_argument(
-        "--population-size",
-        type=int,
-        default=50,
-        help="GA population size per benchmark campaign.",
-    )
-    parser.add_argument(
-        "--output-root",
-        type=Path,
-        default=None,
-        help="Optional output root (default uses benchmark naming by formula/backend/model).",
-    )
-    parser.add_argument(
-        "--profile-top-n",
-        type=int,
-        default=8,
-        help="Number of top timing phases to print from ga_profile.json.",
-    )
-    parser.add_argument(
-        "--profile-compact",
-        action="store_true",
-        help="Print only compact profiling summary (disable per-phase timing table).",
-    )
+    add_common_benchmark_cli(parser)
     args = parser.parse_args()
+
     params = get_benchmark_params(
         args.seed,
         model_name=args.model_name,
@@ -141,11 +87,8 @@ def main() -> None:
         seed=args.seed,
         params=params,
         verbose=True,
-        output_dir=args.output_root,
         backend=args.backend,
         uma_task_name=args.uma_task,
-        profile_detail=not args.profile_compact,
-        profile_top_n=max(1, args.profile_top_n),
     )
     elapsed = time.perf_counter() - t0
     print(f"\nBenchmark wall time: {elapsed:.1f} s ({args.backend})")

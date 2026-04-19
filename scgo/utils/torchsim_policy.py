@@ -14,7 +14,6 @@ Design note:
 from __future__ import annotations
 
 import importlib.util
-from typing import Any
 
 from ase.calculators.calculator import Calculator
 
@@ -60,20 +59,13 @@ def resolve_ts_torchsim_flags(
     calculator_name: str,
     use_torchsim: bool | None,
     use_parallel_neb: bool | None,
-    *,
-    logger: Any | None = None,
 ) -> tuple[bool, bool]:
     """Return effective ``(use_torchsim, use_parallel_neb)`` for TS search.
-
-    Validates requested TorchSim usage.
 
     If TorchSim is **not** requested, returns ``(False, False)``.
     If TorchSim is requested but unavailable/misconfigured, raises ImportError/ValueError.
     """
-    us = bool(use_torchsim)
-    up = bool(use_parallel_neb)
-
-    if not us:
+    if not bool(use_torchsim):
         return False, False
 
     name = calculator_name.strip().upper()
@@ -86,23 +78,4 @@ def resolve_ts_torchsim_flags(
     else:
         _require_torchsim()
 
-    return True, up
-
-
-def coerce_find_transition_state_torchsim(
-    *,
-    use_torchsim: bool,
-    calculator: Calculator | None,
-    pair_id: str,
-    logger: Any,
-) -> bool:
-    """Validate TorchSim request at per-pair TS search level (no silent fallback)."""
-    if not use_torchsim:
-        return False
-    if calculator is None:
-        return True
-    if is_uma_like_calculator(calculator):
-        _require_torchsim_fairchem()
-        return True
-    _require_torchsim()
-    return True
+    return True, bool(use_parallel_neb)

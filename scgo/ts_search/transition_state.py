@@ -21,15 +21,21 @@ from ase.optimize import FIRE
 from ase.optimize.optimize import Optimizer
 from scipy.optimize import linear_sum_assignment
 
+from scgo.calculators import torchsim_helpers as _tsh
 from scgo.constants import (
     DEFAULT_COMPARATOR_TOL,
     DEFAULT_NEB_TANGENT_METHOD,
     DEFAULT_PAIR_COR_MAX,
 )
+from scgo.database.metadata import get_metadata
 from scgo.utils.helpers import extract_energy_from_atoms
 from scgo.utils.logging import get_logger
 from scgo.utils.run_helpers import cleanup_torch_cuda
-from scgo.utils.torchsim_policy import coerce_find_transition_state_torchsim
+from scgo.utils.torchsim_policy import (
+    _require_torchsim,
+    _require_torchsim_fairchem,
+    is_uma_like_calculator,
+)
 from scgo.utils.ts_provenance import is_cuda_oom_error, ts_output_provenance
 from scgo.utils.validation import validate_atoms, validate_calculator_attached
 
@@ -81,26 +87,6 @@ def _image_has_cached_forces(img: Atoms) -> bool:
     with contextlib.suppress(AttributeError, NotImplementedError, RuntimeError):
         return calc.get_forces(img) is not None
     return False
-
-
-def _make_torchsim_relaxer(**kwargs: Any) -> Any:
-    """Build a TorchSim relaxer; resolve the class via module attribute for monkeypatching."""
-    from scgo.calculators import torchsim_helpers as _tsh
-
-    return _tsh.TorchSimBatchRelaxer(**kwargs)
-
-
-def _attach_calculator_to_images(
-    images: list[Atoms], calculator: Calculator | None
-) -> None:
-    """Attach ``calculator`` to each image (deepcopy when supported)."""
-    if calculator is None:
-        return
-    for img in images:
-        try:
-            img.calc = deepcopy(calculator)
-        except (TypeError, AttributeError):
-            img.calc = calculator
 
 
 def calculate_structure_similarity(
@@ -287,12 +273,10 @@ def interpolate_path(
     validate_atoms(atoms1)
     validate_atoms(atoms2)
 
-    # Work on copies so originals are not mutated
     a1_copy = atoms1.copy()
     a2_copy = atoms2.copy()
 
     if align_endpoints:
-        # Compute permutation mapping so atom identities are consistently ordered.
         mapping = _match_atoms_by_fingerprint(a1_copy, a2_copy)
         new_pos = a2_copy.get_positions()[mapping]
         pbc_active = bool(np.any(a1_copy.pbc))
@@ -310,7 +294,6 @@ def interpolate_path(
                 disp_mic = disp_mic - fixed_shift
             a2_copy.set_positions(ref_pos + disp_mic)
         else:
-            # Non-periodic alignment: rigid Kabsch transform minimizes RMSD.
             P = a1_copy.get_positions().copy()
             Q = new_pos.copy()
             Pc = P - P.mean(axis=0)
@@ -319,7 +302,6 @@ def interpolate_path(
             Qrot = (Qc @ R.T) + P.mean(axis=0)
             a2_copy.set_positions(Qrot)
 
-    # Build images including endpoints (copies) and let ASE interpolate
     images = [a1_copy] + [a1_copy.copy() for _ in range(n_images)] + [a2_copy]
     neb = NEB(images, method=DEFAULT_NEB_TANGENT_METHOD)
     # Interpolate unconstrained positions first; endpoint/image constraints
@@ -327,7 +309,6 @@ def interpolate_path(
     neb.interpolate(method=method, mic=mic, apply_constraint=False)
     images = neb.images
 
-    # Optionally perturb interior images (endpoints unchanged)
     if perturb_sigma and perturb_sigma > 0.0:
         if rng is None:
             rng = np.random.default_rng()
@@ -340,23 +321,159 @@ def interpolate_path(
     return images
 
 
-def _empty_ts_result(**overrides: Any) -> dict[str, Any]:
-    """Build a zeroed TS-result dict with stable key ordering."""
-    base: dict[str, Any] = {
+# ---------------------------------------------------------------------------
+# Result construction
+# ---------------------------------------------------------------------------
+
+
+def _coerce_neb_steps(neb_steps: int | str | None) -> int | str | None:
+    """Coerce numpy integer step counts to plain int (JSON-friendly)."""
+    if isinstance(neb_steps, (int, np.integer)):
+        return int(neb_steps)
+    return neb_steps
+
+
+def make_ts_result(
+    *,
+    pair_id: str,
+    n_images: int,
+    spring_constant: float,
+    use_torchsim: bool,
+    fmax: float,
+    neb_steps: int | str | None,
+    interpolation_method: str,
+    climb: bool,
+    align_endpoints: bool,
+    perturb_sigma: float,
+    neb_interpolation_mic: bool,
+    neb_tangent_method: str,
+    use_parallel_neb: bool = False,
+    reactant_energy: float | None = None,
+    product_energy: float | None = None,
+    error: str | None = None,
+) -> dict[str, Any]:
+    """Build a normalized TS-result dict (failure shape, success-promoted later)."""
+    return {
         "status": "failed",
+        "pair_id": pair_id,
+        "neb_converged": False,
+        "n_images": n_images,
+        "spring_constant": spring_constant,
+        "reactant_energy": float(reactant_energy)
+        if reactant_energy is not None
+        else None,
+        "product_energy": float(product_energy) if product_energy is not None else None,
+        "ts_energy": None,
+        "ts_image_index": None,
         "barrier_height": None,
         "barrier_forward": None,
         "barrier_reverse": None,
         "transition_state": None,
-        "ts_energy": None,
-        "ts_image_index": None,
-        "reactant_energy": None,
-        "product_energy": None,
-        "neb_converged": False,
-        "error": None,
+        "error": error,
+        "use_torchsim": bool(use_torchsim),
+        "use_parallel_neb": bool(use_parallel_neb),
+        "fmax": float(fmax),
+        "neb_steps": _coerce_neb_steps(neb_steps),
+        "interpolation_method": interpolation_method,
+        "climb": bool(climb),
+        "align_endpoints": bool(align_endpoints),
+        "perturb_sigma": float(perturb_sigma),
+        "neb_interpolation_mic": bool(neb_interpolation_mic),
+        "neb_tangent_method": neb_tangent_method,
+        "final_fmax": None,
+        "steps_taken": None,
     }
-    base.update(overrides)
-    return base
+
+
+def minima_provenance_dict(minima: list, idx: int) -> dict[str, Any]:
+    """Extract per-minimum GO provenance for JSON serialization."""
+    if not minima or idx < 0 or idx >= len(minima):
+        return {}
+
+    energy, atoms = minima[idx]
+    return {
+        "run_id": get_metadata(atoms, "run_id"),
+        "trial": get_metadata(atoms, "trial") or get_metadata(atoms, "trial_id"),
+        "source_db": get_metadata(atoms, "source_db"),
+        "source_db_relpath": get_metadata(atoms, "source_db_relpath"),
+        "systems_row_id": get_metadata(atoms, "systems_row_id"),
+        "confid": get_metadata(atoms, "confid"),
+        "gaid": get_metadata(atoms, "gaid"),
+        "unique_id": get_metadata(atoms, "unique_id"),
+        "final_id": get_metadata(atoms, "final_id"),
+        "energy": float(energy) if energy is not None else None,
+    }
+
+
+def _finalize_neb_result(
+    result: dict[str, Any],
+    images: list[Atoms],
+    *,
+    logger: Any | None = None,
+) -> None:
+    """Populate ``result`` with TS / endpoint geometry, energies, and barriers.
+
+    Mutates ``result`` in place. Assumes ``reactant_energy`` and
+    ``product_energy`` are already set; raises ``RuntimeError`` otherwise.
+    Marks an endpoint-as-TS result as failed.
+    """
+    pair_id = result.get("pair_id")
+
+    react = images[0].copy()
+    prod = images[-1].copy()
+    _detach_calc(react)
+    _detach_calc(prod)
+    result["reactant_structure"] = react
+    result["product_structure"] = prod
+
+    max_energy_idx = 0
+    max_energy = -np.inf
+    ts_atoms: Atoms | None = None
+    for idx, atoms in enumerate(images):
+        energy = float(atoms.get_potential_energy())
+        if energy > max_energy:
+            max_energy = energy
+            max_energy_idx = idx
+            ts_atoms = atoms
+
+    if result.get("reactant_energy") is None or result.get("product_energy") is None:
+        raise RuntimeError(
+            f"Missing endpoint energies after NEB for pair {pair_id}: "
+            f"reactant={result.get('reactant_energy')}, product={result.get('product_energy')}"
+        )
+    if ts_atoms is None:
+        raise RuntimeError(f"No TS energy found after NEB for pair {pair_id}")
+
+    reactant_energy = float(result["reactant_energy"])
+    product_energy = float(result["product_energy"])
+    ts_energy = float(max_energy)
+    barrier_height = ts_energy - min(reactant_energy, product_energy)
+
+    ts_copy = deepcopy(ts_atoms)
+    _detach_calc(ts_copy)
+    result["transition_state"] = ts_copy
+    result["ts_energy"] = ts_energy
+    result["ts_image_index"] = int(max_energy_idx)
+    result["barrier_height"] = barrier_height
+    result["barrier_forward"] = ts_energy - reactant_energy
+    result["barrier_reverse"] = ts_energy - product_energy
+
+    endpoint_ts = max_energy_idx == 0 or max_energy_idx == len(images) - 1
+    if endpoint_ts:
+        result["status"] = "failed"
+        result["neb_converged"] = False
+        result["error"] = (
+            f"NEB returned endpoint as TS (image {max_energy_idx}); "
+            "no interior saddle located"
+        )
+        if logger is not None:
+            logger.warning(
+                "NEB reported endpoint as TS for pair %s (image %d) — marking as non-converged",
+                pair_id,
+                max_energy_idx,
+            )
+    else:
+        result["status"] = "success" if result.get("neb_converged") else "failed"
 
 
 def find_transition_state(
@@ -399,14 +516,12 @@ def find_transition_state(
     validate_atoms(atoms1)
     validate_atoms(atoms2)
 
-    use_torchsim = coerce_find_transition_state_torchsim(
-        use_torchsim=use_torchsim,
-        calculator=calculator,
-        pair_id=pair_id,
-        logger=logger,
-    )
-
-    if not use_torchsim:
+    if use_torchsim:
+        if is_uma_like_calculator(calculator):
+            _require_torchsim_fairchem()
+        else:
+            _require_torchsim()
+    else:
         validate_calculator_attached(atoms1, "NEB reactant")
         validate_calculator_attached(atoms2, "NEB product")
 
@@ -418,30 +533,21 @@ def find_transition_state(
     if trajectory is None:
         trajectory = os.path.join(output_dir, f"neb_{pair_id}.traj")
 
-    # Extract initial energies using extract_energy_from_atoms (safe for TorchSim where atoms have no calculator)
-    reactant_energy_tmp = extract_energy_from_atoms(atoms1)
-    product_energy_tmp = extract_energy_from_atoms(atoms2)
+    # Extract initial energies (safe for TorchSim where atoms have no calculator).
+    reactant_energy = extract_energy_from_atoms(atoms1)
+    product_energy = extract_energy_from_atoms(atoms2)
 
-    # For standard calculator-driven NEB we require explicit endpoint energies.
-    # For TorchSim workflows endpoints may not carry energies on the Atoms and
-    # will instead be computed by the relaxer; allow None in that case and
-    # defer strict validation to after the relaxer call.
+    # For ASE NEB we require explicit endpoint energies; for TorchSim the
+    # relaxer computes them below.
     if not use_torchsim:
-        if reactant_energy_tmp is None:
+        if reactant_energy is None:
             raise ValueError(
                 f"Cannot extract energy from reactant atoms for pair {pair_id}"
             )
-        if product_energy_tmp is None:
+        if product_energy is None:
             raise ValueError(
                 f"Cannot extract energy from product atoms for pair {pair_id}"
             )
-
-    reactant_energy = (
-        float(reactant_energy_tmp) if reactant_energy_tmp is not None else None
-    )
-    product_energy = (
-        float(product_energy_tmp) if product_energy_tmp is not None else None
-    )
 
     if verbosity >= 1:
         logger.info(f"Finding transition state for pair {pair_id}")
@@ -450,33 +556,30 @@ def find_transition_state(
         if product_energy is not None:
             logger.info(f"  Product energy: {product_energy:.6f} eV")
 
-    result = _empty_ts_result(
+    result = make_ts_result(
         pair_id=pair_id,
         n_images=n_images,
         spring_constant=spring_constant,
         use_torchsim=use_torchsim,
-        climb=climb,
-        align_endpoints=bool(align_endpoints),
-        perturb_sigma=float(perturb_sigma),
-        neb_interpolation_mic=bool(neb_interpolation_mic),
-        neb_tangent_method=neb_tangent_method,
-        fmax=float(fmax),
-        neb_steps=int(neb_steps)
-        if isinstance(neb_steps, (int, np.integer))
-        else neb_steps,
+        fmax=fmax,
+        neb_steps=neb_steps,
         interpolation_method=interpolation_method,
+        climb=climb,
+        align_endpoints=align_endpoints,
+        perturb_sigma=perturb_sigma,
+        neb_interpolation_mic=neb_interpolation_mic,
+        neb_tangent_method=neb_tangent_method,
         reactant_energy=reactant_energy,
         product_energy=product_energy,
     )
 
     try:
-        # Generate initial path using specified interpolation method
         if verbosity >= 2:
             logger.info(
                 f"Generating initial path with {interpolation_method} interpolation"
             )
         # Initial band: interpolate_path uses neb.interpolate(..., apply_constraint=False)
-        # so FixAtoms on slab endpoints do not break path construction (see docstring).
+        # so FixAtoms on slab endpoints do not break path construction.
         images = interpolate_path(
             atoms1,
             atoms2,
@@ -497,19 +600,15 @@ def find_transition_state(
 
         neb: NEB
         if use_torchsim:
-            ts_params = torchsim_params or {}
-            relaxer = _make_torchsim_relaxer(**ts_params)
+            relaxer = _tsh.TorchSimBatchRelaxer(**(torchsim_params or {}))
 
-            # Compute endpoint energies with TorchSim (single-point calculation)
-            endpoints = [images[0], images[-1]]
-            ep_results = relaxer.relax_batch(endpoints, steps=0)
-            result["reactant_energy"] = ep_results[0][0]
-            result["product_energy"] = ep_results[1][0]
+            ep_results = relaxer.relax_batch([images[0], images[-1]], steps=0)
+            result["reactant_energy"] = float(ep_results[0][0])
+            result["product_energy"] = float(ep_results[1][0])
 
             if verbosity >= 2:
                 logger.info(f"Using TorchSim batched NEB (climb={climb})")
 
-            # Create TorchSimNEB with GPU-efficient batched force evaluation
             neb = TorchSimNEB(
                 images,
                 relaxer,
@@ -518,11 +617,13 @@ def find_transition_state(
                 method=neb_tangent_method,
             )
         else:
-            # Standard ASE NEB
             if calculator is None:
                 raise ValueError("Calculator required when use_torchsim=False")
-
-            _attach_calculator_to_images(images, calculator)
+            for img in images:
+                try:
+                    img.calc = deepcopy(calculator)
+                except (TypeError, AttributeError):
+                    img.calc = calculator
 
             neb = NEB(
                 images,
@@ -531,7 +632,6 @@ def find_transition_state(
                 method=neb_tangent_method,
             )
 
-        # Run optimization (silence ASE optimizer output by default to match GA/BH)
         opt_logfile = None if verbosity <= 1 else sys.stdout
         dyn: Optimizer = optimizer(neb, trajectory=trajectory, logfile=opt_logfile)  # type: ignore[arg-type]
 
@@ -540,22 +640,16 @@ def find_transition_state(
 
         dyn.run(fmax=fmax, steps=neb_steps)
 
-        # Derive final NEB forces as a proxy for convergence instead of assuming success.
         try:
             neb_forces = neb.get_forces()
-            final_fmax = float(np.max(np.abs(neb_forces)))
+            final_fmax: float | None = float(np.max(np.abs(neb_forces)))
         except (AttributeError, RuntimeError, ValueError):
-            # Missing/invalid NEB forces — treat as non-converged
             final_fmax = None
 
         result["final_fmax"] = final_fmax
         result["neb_converged"] = final_fmax is not None and final_fmax < fmax
+        result["steps_taken"] = int(dyn.nsteps)
 
-        steps_taken = int(dyn.nsteps)
-        result["steps_taken"] = steps_taken
-
-        # If NEB did not converge, mark the run as failed so callers don't
-        # mistakenly treat a non-converged NEB as a successful TS search.
         if not result["neb_converged"] and result.get("error") is None:
             result["error"] = (
                 f"NEB did not converge (final_fmax={final_fmax}, fmax={fmax})"
@@ -566,98 +660,34 @@ def find_transition_state(
             if result["neb_converged"]:
                 logger.info(
                     "NEB converged in %d steps (final_fmax=%s < %.6f)",
-                    steps_taken,
+                    result["steps_taken"],
                     fmax_str,
                     fmax,
                 )
             else:
                 logger.warning(
                     "NEB not converged after %d steps (final_fmax=%s, target_fmax=%.6f)",
-                    steps_taken,
+                    result["steps_taken"],
                     fmax_str,
                     fmax,
                 )
-        # Find TS as the highest-energy image
-        images = neb.images
-        result["reactant_structure"] = deepcopy(images[0])
-        result["product_structure"] = deepcopy(images[-1])
-        _detach_calc(result["reactant_structure"])
-        _detach_calc(result["product_structure"])
-        max_energy_idx = 0
-        max_energy = -np.inf
 
-        ts_energy = None
-        ts_atoms = None
+        _finalize_neb_result(result, neb.images, logger=logger)
 
-        for idx, atoms in enumerate(images):
-            energy = atoms.get_potential_energy()
-            if energy > max_energy:
-                max_energy = energy
-                max_energy_idx = idx
-                ts_energy = energy
-                ts_atoms = atoms
+        if use_torchsim and result["status"] == "success":
+            result["force_calls"] = neb.get_force_calls()
 
-        # Ensure endpoint energies and TS energy are available for numeric operations
-        if (
-            result.get("reactant_energy") is None
-            or result.get("product_energy") is None
-        ):
-            raise RuntimeError(
-                f"Missing endpoint energies after NEB for pair {pair_id}: "
-                f"reactant={result.get('reactant_energy')}, product={result.get('product_energy')}"
+        if verbosity >= 1 and result["status"] == "success":
+            logger.info(
+                f"TS found at image {result['ts_image_index']}/{len(neb.images) - 1}"
             )
-        if ts_energy is None:
-            raise RuntimeError(f"No TS energy found after NEB for pair {pair_id}")
-
-        reactant_energy_result = float(result["reactant_energy"])
-        product_energy_result = float(result["product_energy"])
-        min_endpoint_energy = min(reactant_energy_result, product_energy_result)
-
-        barrier_height = ts_energy - min_endpoint_energy
-
-        if max_energy_idx == 0 or max_energy_idx == len(images) - 1:
-            result["neb_converged"] = False
-            result["status"] = "failed"
-            result["error"] = (
-                f"NEB returned endpoint as TS (image {max_energy_idx}); "
-                "no interior saddle located"
-            )
-            result["transition_state"] = deepcopy(ts_atoms)
-            _detach_calc(result["transition_state"])
-            result["ts_energy"] = float(ts_energy)
-            result["ts_image_index"] = max_energy_idx
-            result["barrier_height"] = float(barrier_height)
-            result["barrier_forward"] = float(ts_energy - reactant_energy_result)
-            result["barrier_reverse"] = float(ts_energy - product_energy_result)
-
-            if verbosity >= 1:
-                logger.warning(
-                    "NEB reported endpoint as TS for pair %s (image %d) — marking as non-converged",
-                    pair_id,
-                    max_energy_idx,
-                )
-        else:
-            result["status"] = "success" if result["neb_converged"] else "failed"
-            result["barrier_height"] = float(barrier_height)
-            result["barrier_forward"] = float(ts_energy - reactant_energy_result)
-            result["barrier_reverse"] = float(ts_energy - product_energy_result)
-            result["transition_state"] = deepcopy(ts_atoms)
-            _detach_calc(result["transition_state"])
-            result["ts_energy"] = float(ts_energy)
-            result["ts_image_index"] = max_energy_idx
-
+            logger.info(f"  TS energy: {result['ts_energy']:.6f} eV")
+            logger.info(f"  Barrier height: {result['barrier_height']:.6f} eV")
             if use_torchsim:
-                result["force_calls"] = neb.get_force_calls()
-
-            if verbosity >= 1:
-                logger.info(f"TS found at image {max_energy_idx}/{len(images) - 1}")
-                logger.info(f"  TS energy: {ts_energy:.6f} eV")
-                logger.info(f"  Barrier height: {barrier_height:.6f} eV")
-                if use_torchsim:
-                    logger.info(
-                        "  GPU-batched force calls: %s",
-                        result["force_calls"],
-                    )
+                logger.info(
+                    "  GPU-batched force calls: %s",
+                    result.get("force_calls"),
+                )
 
     except KeyboardInterrupt:
         raise
@@ -678,28 +708,24 @@ def find_transition_state(
     return result
 
 
-def _neb_provenance_extra(result: dict[str, Any]) -> dict[str, Any]:
-    """Subset of result fields useful for JSON provenance."""
-    extra: dict[str, Any] = {}
-    for key in (
-        "use_torchsim",
-        "use_parallel_neb",
-        "climb",
-        "align_endpoints",
-        "perturb_sigma",
-        "neb_interpolation_mic",
-        "interpolation_method",
-        "fmax",
-        "neb_steps",
-        "minima_indices",
-        "minima_provenance",
-    ):
-        if key in result:
-            extra[key] = result[key]
-    extra["neb_backend"] = (
-        "torchsim" if result.get("use_torchsim") else result.get("neb_backend", "ase")
-    )
-    return extra
+# ---------------------------------------------------------------------------
+# Persistence
+# ---------------------------------------------------------------------------
+
+
+_PROVENANCE_KEYS = (
+    "use_torchsim",
+    "use_parallel_neb",
+    "climb",
+    "align_endpoints",
+    "perturb_sigma",
+    "neb_interpolation_mic",
+    "interpolation_method",
+    "fmax",
+    "neb_steps",
+    "minima_indices",
+    "minima_provenance",
+)
 
 
 def save_neb_result(
@@ -737,7 +763,11 @@ def save_neb_result(
             write(ep_path, ep)
             logger.info(f"Saved {label} endpoint structure to {ep_path}")
 
-    metadata = ts_output_provenance(extra=_neb_provenance_extra(result))
+    extra = {key: result[key] for key in _PROVENANCE_KEYS if key in result}
+    extra["neb_backend"] = (
+        "torchsim" if result.get("use_torchsim") else result.get("neb_backend", "ase")
+    )
+    metadata = ts_output_provenance(extra=extra)
     metadata.update(
         {
             "pair_id": result["pair_id"],

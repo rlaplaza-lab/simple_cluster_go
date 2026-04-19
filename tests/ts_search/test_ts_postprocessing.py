@@ -477,7 +477,7 @@ def test_run_transition_state_search_skips_tagging_when_no_db(
         return True
 
     monkeypatch.setattr(
-        "scgo.ts_search.transition_state_run.add_ts_to_database",
+        "scgo.ts_search.ts_network.add_ts_to_database",
         fake_add_ts_to_database,
     )
 
@@ -576,7 +576,7 @@ def test_run_transition_state_search_records_minima_provenance(monkeypatch, tmp_
         return True
 
     monkeypatch.setattr(
-        "scgo.ts_search.transition_state_run.add_ts_to_database",
+        "scgo.ts_search.ts_network.add_ts_to_database",
         fake_add_ts_to_database,
     )
 

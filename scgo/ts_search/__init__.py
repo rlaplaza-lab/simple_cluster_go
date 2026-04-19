@@ -13,6 +13,7 @@ from .ts_network import (
     find_shortest_path,
     get_connected_components,
     save_ts_network_metadata,
+    tag_unique_ts_in_databases,
 )
 
 __all__ = [
@@ -21,6 +22,7 @@ __all__ = [
     "ParallelNEBBatch",
     "add_ts_to_database",
     "save_ts_network_metadata",
+    "tag_unique_ts_in_databases",
     "build_connectivity_graph",
     "build_connectivity_graph_from_final_unique_ts",
     "get_connected_components",

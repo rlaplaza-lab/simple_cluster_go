@@ -2,16 +2,27 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
+from ase import Atoms
 from ase.optimize import FIRE
 
-from scgo.ts_search.transition_state import (
-    TorchSimNEB,
-    attach_singlepoint_from_relax_output,
-)
+from scgo.calculators import torchsim_helpers as _tsh
+from scgo.surface.config import SurfaceSystemConfig
 from scgo.utils.logging import get_logger
+
+from .transition_state import (
+    TorchSimNEB,
+    _detach_calc,
+    _finalize_neb_result,
+    attach_singlepoint_from_relax_output,
+    interpolate_path,
+    make_ts_result,
+    minima_provenance_dict,
+    save_neb_result,
+)
 
 if TYPE_CHECKING:
     from scgo.calculators.torchsim_helpers import TorchSimBatchRelaxer
@@ -35,15 +46,14 @@ class ParallelNEBBatch:
         self.max_total_steps = max_total_steps
         self.optimizer_cls = optimizer
 
-        # Track optimization state
-        self.active_nebs = list(range(len(neb_instances)))  # Indices of active NEBs
-        self.converged_nebs: dict[int, bool] = {}  # neb_idx -> converged
-        self.failed_nebs: dict[int, str] = {}  # neb_idx -> error_msg
+        self.active_nebs = list(range(len(neb_instances)))
+        self.converged_nebs: dict[int, bool] = {}
+        self.failed_nebs: dict[int, str] = {}
         self.step_count = 0
 
         # Per-NEB optimizer instances (created lazily). Uses ASE optimizers
         # (default: FIRE) so stepping respects NEB forces / spring terms.
-        self._optimizers: dict[int, object] = {}  # neb_idx -> Optimizer instance
+        self._optimizers: dict[int, object] = {}
 
     def run_optimization(
         self,
@@ -51,8 +61,6 @@ class ParallelNEBBatch:
         max_steps: int = 500,
     ) -> list[dict[str, Any]]:
         """Optimize NEBs using batched evaluations; return per-NEB summaries."""
-
-        # Validate input
         if not self.neb_instances:
             logger.error("No NEB instances provided to run_optimization")
             return []
@@ -69,136 +77,101 @@ class ParallelNEBBatch:
         ]
 
         step_cap = min(self.max_total_steps, int(max_steps))
-        try:
-            while self.active_nebs and self.step_count < step_cap:
-                # Collect images from all active NEBs
-                all_images = []
-                neb_image_map = []
+        while self.active_nebs and self.step_count < step_cap:
+            all_images: list[Atoms] = []
+            neb_image_map: list[tuple[int, int, int]] = []
 
-                for neb_idx in self.active_nebs:
-                    neb = self.neb_instances[neb_idx]
-                    start_idx = len(all_images)
-                    all_images.extend(neb.images)
-                    end_idx = len(all_images)
-                    neb_image_map.append((neb_idx, start_idx, end_idx))
-
-                if not all_images:
-                    break
-
-                # Single batched GPU call for all images
-                logger.debug(
-                    f"Step {self.step_count}: Evaluating {len(all_images)} images "
-                    f"from {len(self.active_nebs)} active NEBs"
-                )
-
-                try:
-                    batch_results = self.relaxer.relax_batch(all_images, steps=0)
-                except (RuntimeError, ValueError) as e:
-                    kind = (
-                        "Invalid input"
-                        if isinstance(e, ValueError)
-                        else "Batched force evaluation"
-                    )
-                    logger.error("%s failed: %s", kind, e)
-                    for neb_idx in self.active_nebs:
-                        self.failed_nebs[neb_idx] = str(e)
-                        results[neb_idx]["error"] = str(e)
-                    break
-
-                for neb_idx, _, _ in neb_image_map:
-                    self.neb_instances[neb_idx]._force_calls += 1
-
-                # Redistribute forces/energies back to individual NEBs
-                for neb_idx, start_idx, end_idx in neb_image_map:
-                    neb = self.neb_instances[neb_idx]
-
-                    # Verify batch results match NEB images
-                    neb_image_count = len(neb.images)
-                    batch_image_count = end_idx - start_idx
-                    if neb_image_count != batch_image_count:
-                        raise RuntimeError(
-                            f"NEB {neb_idx}: image count mismatch. "
-                            f"NEB has {neb_image_count} images, "
-                            f"batch returned {batch_image_count} results"
-                        )
-
-                    # Update atoms with energies and forces from relaxed_atoms
-                    for atoms, (energy, relaxed_atoms) in zip(
-                        neb.images,
-                        batch_results[start_idx:end_idx],
-                        strict=True,
-                    ):
-                        attach_singlepoint_from_relax_output(
-                            atoms, energy, relaxed_atoms, require_forces=False
-                        )
-
-                # Now let each NEB compute its forces and step
-                still_active = []
-                for neb_idx in self.active_nebs:
-                    neb = self.neb_instances[neb_idx]
-
-                    try:
-                        # Use ASE NEB's get_forces to compute NEB forces from PES forces
-                        neb_result = neb.get_forces()
-                        max_force = np.max(np.abs(neb_result))
-
-                        results[neb_idx]["final_fmax"] = float(max_force)
-                        results[neb_idx]["force_calls"] += 1
-                        results[neb_idx]["steps_taken"] = self.step_count + 1
-
-                        # Use an ASE optimizer per-NEB to perform a single
-                        # adaptive optimization step. This ensures spring/tangent
-                        # contributions from `neb.get_forces()` are respected and
-                        # avoids the crude fixed-step update.
-                        if max_force < fmax:
-                            results[neb_idx]["converged"] = max_force < fmax
-                            self.converged_nebs[neb_idx] = max_force < fmax
-                            logger.debug(
-                                f"NEB {neb_idx} finished: "
-                                f"converged={max_force < fmax}, fmax={max_force:.6f}"
-                            )
-                        else:
-                            if neb_idx not in self._optimizers:
-                                self._optimizers[neb_idx] = self.optimizer_cls(
-                                    neb, logfile=None, trajectory=None
-                                )
-
-                            self._optimizers[neb_idx].step()
-                            still_active.append(neb_idx)
-
-                    except (RuntimeError, ValueError) as e:
-                        logger.debug(f"NEB {neb_idx} step failed: {e}")
-                        self.failed_nebs[neb_idx] = str(e)
-                        results[neb_idx]["error"] = str(e)
-
-                # Prepare for the next iteration: keep only still-active NEBs and
-                # advance the global step counter so the max_steps cutoff can take effect.
-                self.active_nebs = still_active
-                self.step_count += 1
-
-                # If nothing remains active, exit early
-                if not self.active_nebs:
-                    break
-
-        except (RuntimeError, OSError) as e:
-            logger.error(
-                f"Fatal error in parallel NEB optimization: {type(e).__name__}: {e}"
-            )
             for neb_idx in self.active_nebs:
-                results[neb_idx]["error"] = str(e)
+                neb = self.neb_instances[neb_idx]
+                start_idx = len(all_images)
+                all_images.extend(neb.images)
+                neb_image_map.append((neb_idx, start_idx, len(all_images)))
 
-        # Finalize results
+            if not all_images:
+                break
+
+            logger.debug(
+                f"Step {self.step_count}: Evaluating {len(all_images)} images "
+                f"from {len(self.active_nebs)} active NEBs"
+            )
+
+            try:
+                batch_results = self.relaxer.relax_batch(all_images, steps=0)
+            except (RuntimeError, ValueError) as e:
+                kind = (
+                    "Invalid input"
+                    if isinstance(e, ValueError)
+                    else "Batched force evaluation"
+                )
+                logger.error("%s failed: %s", kind, e)
+                for neb_idx in self.active_nebs:
+                    self.failed_nebs[neb_idx] = str(e)
+                    results[neb_idx]["error"] = str(e)
+                break
+
+            for neb_idx, _, _ in neb_image_map:
+                self.neb_instances[neb_idx]._force_calls += 1
+
+            for neb_idx, start_idx, end_idx in neb_image_map:
+                neb = self.neb_instances[neb_idx]
+                if len(neb.images) != end_idx - start_idx:
+                    raise RuntimeError(
+                        f"NEB {neb_idx}: image count mismatch. "
+                        f"NEB has {len(neb.images)} images, "
+                        f"batch returned {end_idx - start_idx} results"
+                    )
+                for atoms, (energy, relaxed_atoms) in zip(
+                    neb.images,
+                    batch_results[start_idx:end_idx],
+                    strict=True,
+                ):
+                    attach_singlepoint_from_relax_output(
+                        atoms, energy, relaxed_atoms, require_forces=False
+                    )
+
+            still_active: list[int] = []
+            for neb_idx in self.active_nebs:
+                neb = self.neb_instances[neb_idx]
+                try:
+                    neb_forces = neb.get_forces()
+                    max_force = float(np.max(np.abs(neb_forces)))
+
+                    results[neb_idx]["final_fmax"] = max_force
+                    results[neb_idx]["force_calls"] += 1
+                    results[neb_idx]["steps_taken"] = self.step_count + 1
+
+                    if max_force < fmax:
+                        results[neb_idx]["converged"] = True
+                        self.converged_nebs[neb_idx] = True
+                        logger.debug(
+                            f"NEB {neb_idx} finished: converged, fmax={max_force:.6f}"
+                        )
+                    else:
+                        if neb_idx not in self._optimizers:
+                            self._optimizers[neb_idx] = self.optimizer_cls(
+                                neb, logfile=None, trajectory=None
+                            )
+                        self._optimizers[neb_idx].step()
+                        still_active.append(neb_idx)
+                except (RuntimeError, ValueError) as e:
+                    logger.debug(f"NEB {neb_idx} step failed: {e}")
+                    self.failed_nebs[neb_idx] = str(e)
+                    results[neb_idx]["error"] = str(e)
+
+            self.active_nebs = still_active
+            self.step_count += 1
+
+            if not self.active_nebs:
+                break
+
         for neb_idx in range(len(self.neb_instances)):
             if neb_idx not in self.converged_nebs and neb_idx not in self.failed_nebs:
-                if (
-                    results[neb_idx]["steps_taken"]
-                    and results[neb_idx]["steps_taken"] > 0
-                ):
-                    results[neb_idx]["error"] = (
-                        f"NEB did not converge after {results[neb_idx]['steps_taken']} steps"
-                    )
-                else:
-                    results[neb_idx]["error"] = "NEB not processed"
+                steps = results[neb_idx]["steps_taken"] or 0
+                results[neb_idx]["error"] = (
+                    f"NEB did not converge after {steps} steps"
+                    if steps
+                    else "NEB not processed"
+                )
 
         logger.info(
             f"Parallel NEB batch complete: {self.step_count} steps, "
@@ -215,3 +188,154 @@ class ParallelNEBBatch:
             "failed": len(self.failed_nebs),
             "total_steps": self.step_count,
         }
+
+
+def _neb_endpoint_copies(
+    atoms_i: Atoms,
+    atoms_j: Atoms,
+    surface_config: SurfaceSystemConfig | None,
+) -> tuple[Atoms, Atoms]:
+    """Copy minima endpoints, optionally re-attaching surface FixAtoms constraints."""
+    from scgo.surface.constraints import attach_slab_constraints_from_surface_config
+
+    react = atoms_i.copy()
+    prod = atoms_j.copy()
+    if surface_config is not None:
+        attach_slab_constraints_from_surface_config(react, surface_config)
+        attach_slab_constraints_from_surface_config(prod, surface_config)
+    return react, prod
+
+
+def _attach_minima_traceability(
+    result: dict[str, Any],
+    minima: list[tuple[float, Any]],
+    i: int,
+    j: int,
+) -> None:
+    """Record list indices and per-endpoint GO provenance on a TS result dict."""
+    result["minima_indices"] = [int(i), int(j)]
+    result["minima_provenance"] = [
+        minima_provenance_dict(minima, i),
+        minima_provenance_dict(minima, j),
+    ]
+
+
+def run_parallel_neb_search(
+    pairs: list[tuple[int, int]],
+    minima: list[tuple[float, Atoms]],
+    *,
+    result_dir: Path,
+    surface_config: SurfaceSystemConfig | None,
+    rng: np.random.Generator | None,
+    neb_n_images: int,
+    neb_spring_constant: float,
+    neb_fmax: float,
+    neb_steps: int,
+    neb_climb: bool,
+    neb_interpolation_method: str,
+    neb_align_endpoints: bool,
+    neb_perturb_sigma: float,
+    neb_interpolation_mic: bool,
+    neb_tangent_method: str,
+    torchsim_params: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """Run all pairs through ParallelNEBBatch and return TS-result dicts.
+
+    Mirrors the per-pair output shape produced by the serial ``find_transition_state``
+    path so downstream summarization is uniform.
+    """
+    relaxer = _tsh.TorchSimBatchRelaxer(**torchsim_params)
+
+    # Endpoint single-point energies in one batched call.
+    endpoints: list[Atoms] = []
+    pair_endpoint_index: list[tuple[int, int]] = []
+    for i, j in pairs:
+        ri, rj = _neb_endpoint_copies(minima[i][1], minima[j][1], surface_config)
+        endpoints.append(ri)
+        endpoints.append(rj)
+        pair_endpoint_index.append((len(endpoints) - 2, len(endpoints) - 1))
+
+    ep_results = relaxer.relax_batch(endpoints, steps=0)
+    pair_endpoint_energies = [
+        (float(ep_results[a][0]), float(ep_results[b][0]))
+        for a, b in pair_endpoint_index
+    ]
+
+    neb_instances: list[TorchSimNEB] = []
+    pair_results: list[dict[str, Any]] = []
+    for (i, j), (react_e, prod_e) in zip(pairs, pair_endpoint_energies, strict=True):
+        pair_id = f"{i}_{j}"
+        react_ep, prod_ep = _neb_endpoint_copies(
+            minima[i][1], minima[j][1], surface_config
+        )
+        images = interpolate_path(
+            react_ep,
+            prod_ep,
+            n_images=neb_n_images,
+            method=neb_interpolation_method,
+            mic=neb_interpolation_mic,
+            align_endpoints=neb_align_endpoints,
+            perturb_sigma=neb_perturb_sigma,
+            rng=rng,
+        )
+        neb_instances.append(
+            TorchSimNEB(
+                images,
+                relaxer,
+                k=neb_spring_constant,
+                climb=neb_climb,
+                method=neb_tangent_method,
+            )
+        )
+        pair_results.append(
+            make_ts_result(
+                pair_id=pair_id,
+                n_images=neb_n_images,
+                spring_constant=neb_spring_constant,
+                use_torchsim=True,
+                fmax=neb_fmax,
+                neb_steps=neb_steps,
+                interpolation_method=neb_interpolation_method,
+                climb=neb_climb,
+                align_endpoints=neb_align_endpoints,
+                perturb_sigma=neb_perturb_sigma,
+                neb_interpolation_mic=neb_interpolation_mic,
+                neb_tangent_method=neb_tangent_method,
+                use_parallel_neb=True,
+                reactant_energy=react_e,
+                product_energy=prod_e,
+            )
+        )
+
+    neb_steps_i = int(neb_steps)
+    max_total = neb_steps_i * max(1, len(neb_instances))
+    batch = ParallelNEBBatch(neb_instances, relaxer, max_total_steps=max_total)
+    batch_results = batch.run_optimization(fmax=neb_fmax, max_steps=neb_steps_i)
+
+    for idx, neb in enumerate(neb_instances):
+        summary = batch_results[idx]
+        result = pair_results[idx]
+        result["neb_converged"] = bool(summary.get("converged", False))
+        result["error"] = summary.get("error")
+        result["final_fmax"] = summary.get("final_fmax")
+        result["force_calls"] = summary.get("force_calls")
+        result["steps_taken"] = summary.get("steps_taken")
+
+        try:
+            _finalize_neb_result(result, neb.images, logger=logger)
+        except RuntimeError as e:
+            result["status"] = "failed"
+            result["error"] = str(e)
+            _detach_calc(result.get("transition_state"))
+
+        if result["neb_converged"] and result.get("status") != "success":
+            logger.warning(
+                "Parallel NEB converged but no usable TS for pair %s; marking failed",
+                result.get("pair_id"),
+            )
+
+        i, j = pairs[idx]
+        _attach_minima_traceability(result, minima, i, j)
+        save_neb_result(result, str(result_dir), result["pair_id"])
+
+    return pair_results
