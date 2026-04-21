@@ -1,19 +1,6 @@
-"""Transition state finding via NEB (implementation module).
+"""Transition-state orchestration for NEB-based searches.
 
-Most users should call :func:`~scgo.runner_api.run_transition_state_search` from
-``scgo`` (composition string / :class:`~ase.Atoms` / symbol list, plus
-``ts_kwargs`` for NEB options). This module exposes the same operations with a
-flat keyword interface (symbol list composition), for example::
-
-    from scgo.ts_search import run_transition_state_search
-    from scgo.param_presets import get_default_params
-
-    results = run_transition_state_search(
-        ["Pt", "Pt", "Pt"],
-        output_dir="Pt3_searches",
-        params=get_default_params(),
-        seed=42,
-    )
+This module is the implementation layer behind ``scgo.runner_api`` TS helpers.
 """
 
 from __future__ import annotations

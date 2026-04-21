@@ -1,8 +1,4 @@
-"""I/O utilities for transition state calculations.
-
-Functions for reading minima from databases, grouping structures by composition,
-and writing TS results with full provenance tracking.
-"""
+"""I/O helpers for transition-state search outputs."""
 
 from __future__ import annotations
 
@@ -17,11 +13,11 @@ from ase.io import write as ase_write
 from scgo.constants import DEFAULT_COMPARATOR_TOL, DEFAULT_ENERGY_TOLERANCE
 from scgo.database import (
     extract_minima_from_database_file,
-    extract_transition_states_from_database_file,
 )
 from scgo.database.discovery import list_discovered_db_paths_with_run_trial
 from scgo.database.metadata import add_metadata, get_metadata
 from scgo.surface.validation import validate_stored_slab_adsorbate_metadata
+from scgo.ts_search.ts_statistics import compute_ts_statistics
 from scgo.utils.helpers import get_cluster_formula, validate_pair_id
 from scgo.utils.logging import get_logger
 from scgo.utils.ts_provenance import ts_output_provenance
@@ -138,7 +134,7 @@ def load_minima_by_composition(
             minima_by_formula[formula], key=lambda x: x[0]
         )
 
-    # Optionally prefer and deduplicate final-unique minima by canonical keys
+    # Prefer and deduplicate final-tagged minima by canonical keys.
     if prefer_final_unique:
 
         def _final_key(atoms: Atoms) -> tuple[str, str] | None:
@@ -307,65 +303,6 @@ def select_structure_pairs(
     return ranked_pairs[:max_pairs]
 
 
-def load_transition_states_by_composition(
-    base_dir: str,
-    composition: list[str] | None = None,
-    require_final_unique_ts: bool = True,
-) -> dict[str, list[tuple[float, Atoms]]]:
-    """Load transition-state rows grouped by formula from discovered databases."""
-    logger = get_logger(__name__)
-
-    if not os.path.exists(base_dir):
-        logger.warning("Output directory does not exist: %s", base_dir)
-        return {}
-
-    ts_by_formula: dict[str, list[tuple[float, Atoms]]] = {}
-    target_formula = get_cluster_formula(composition) if composition else None
-    db_files_with_run_trial = list_discovered_db_paths_with_run_trial(
-        base_dir, composition=composition, use_cache=True
-    )
-
-    for db_file, run_id, trial_id in db_files_with_run_trial:
-        try:
-            ts_list = extract_transition_states_from_database_file(
-                db_file,
-                run_id=run_id,
-                trial_id=trial_id,
-                require_final_unique_ts=require_final_unique_ts,
-            )
-            if not ts_list:
-                continue
-
-            formula = get_cluster_formula(ts_list[0][1].get_chemical_symbols())
-            if target_formula and formula != target_formula:
-                continue
-
-            ts_by_formula.setdefault(formula, [])
-            for energy, atoms in ts_list:
-                atoms_copy = atoms.copy()
-                add_metadata(
-                    atoms_copy,
-                    run_id=run_id,
-                    trial_id=trial_id,
-                    source_db=os.path.basename(db_file),
-                    source_db_relpath=_relative_db_path(db_file, base_dir),
-                )
-                ts_by_formula[formula].append((energy, atoms_copy))
-
-        except (ValueError, OSError) as e:
-            logger.warning(
-                "Failed to load transition states from %s: %s: %s",
-                db_file,
-                type(e).__name__,
-                e,
-            )
-
-    for formula in ts_by_formula:
-        ts_by_formula[formula] = sorted(ts_by_formula[formula], key=lambda x: x[0])
-
-    return ts_by_formula
-
-
 def save_transition_state_results(
     ts_results: list[dict[str, Any]],
     output_dir: str,
@@ -423,27 +360,8 @@ def save_transition_state_results(
 
         summary["results"].append(result_json)
 
-    # Compute and attach `statistics` mirroring `ts_network` for consistency
-    barriers = [
-        float(r.get("barrier_height"))
-        for r in ts_results
-        if r.get("status") == "success" and r.get("barrier_height") is not None
-    ]
-
-    stats = {
-        "total_ts_found": sum(1 for r in ts_results if r.get("status") == "success"),
-        "converged_ts": sum(
-            1
-            for r in ts_results
-            if r.get("status") == "success" and r.get("neb_converged")
-        ),
-        "successful_ts": sum(1 for r in ts_results if r.get("status") == "success"),
-        "min_barrier": float(min(barriers)) if barriers else None,
-        "max_barrier": float(max(barriers)) if barriers else None,
-        "avg_barrier": float(sum(barriers) / len(barriers)) if barriers else None,
-    }
-
-    summary["statistics"] = stats
+    # Keep statistics aligned with ts_network metadata output.
+    summary["statistics"] = compute_ts_statistics(ts_results)
 
     summary_path = os.path.join(output_dir, f"ts_search_summary_{formula}.json")
     with open(summary_path, "w") as f:

@@ -87,6 +87,12 @@ def _go_campaign(
     )
 
 
+def _resolved_path(path: str | Path | None) -> Path | None:
+    if path is None:
+        return None
+    return Path(path).expanduser().resolve()
+
+
 def normalize_backend(backend: str) -> Literal["mace", "uma"]:
     b = str(backend).strip().lower()
     if b not in ("mace", "uma"):
@@ -106,7 +112,7 @@ def resolve_runner_output_dir(
         return (
             default_output_parent / f"{default_output_subdir}_{backend_norm}"
         ).resolve()
-    return Path(output_dir).expanduser().resolve()
+    return cast(Path, _resolved_path(output_dir))
 
 
 def run_go(
@@ -243,7 +249,7 @@ def run_go_ts_campaign(
     ts_composition: list[str] | None = None,
     infer_ts_composition_from_minima: bool = False,
 ) -> dict[str, dict[str, Any]]:
-    parent = Path(output_dir).expanduser().resolve() if output_dir else None
+    parent = _resolved_path(output_dir)
     out: dict[str, dict[str, Any]] = {}
     for composition in _as_composition_list(compositions):
         formula = get_cluster_formula(composition)

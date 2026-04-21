@@ -17,6 +17,7 @@ from benchmark.benchmark_common import (
     DEFAULT_CLUSTERS,
     PT_SURFACE_GRAPHITE_RESULTS_DIR,
     add_common_benchmark_cli,
+    apply_ga_benchmark_overrides,
     format_ga_profile_lines,
     get_benchmark_params,
     load_latest_ga_profile,
@@ -65,17 +66,20 @@ def main() -> None:
         slab_repeat_xy=args.slab_repeat_xy,
     )
 
-    params = get_benchmark_params(
+    base_params = get_benchmark_params(
         seed=args.seed,
         model_name=args.model_name,
         backend=args.backend,
         uma_task=args.uma_task,
     )
-    params["optimizer_params"]["ga"]["surface_config"] = surface_config
-    params["optimizer_params"]["ga"]["n_jobs_population_init"] = -2
-    params["optimizer_params"]["ga"]["niter"] = args.niter
-    params["optimizer_params"]["ga"]["population_size"] = args.population_size
-    params["optimizer_params"]["ga"]["batch_size"] = 4
+    params = apply_ga_benchmark_overrides(
+        base_params,
+        niter=args.niter,
+        population_size=args.population_size,
+        surface_config=surface_config,
+        n_jobs_population_init=-2,
+        batch_size=4,
+    )
 
     t0 = time.perf_counter()
 

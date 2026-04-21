@@ -1,14 +1,9 @@
-"""Transition state database integration and network building.
-
-This module handles:
-1. Adding found TS structures to the minima database
-2. Creating network metadata files that track connections between minima
-3. Enabling downstream network analysis (clustering, pathways, etc.)
-"""
+"""Transition-state DB integration and connectivity utilities."""
 
 from __future__ import annotations
 
 import contextlib
+import glob
 import heapq
 import json
 import os
@@ -22,6 +17,7 @@ from ase_ga.data import DataConnection
 from scgo.database.metadata import add_metadata, get_metadata, persist_provenance
 from scgo.database.sync import retry_with_backoff
 from scgo.ts_search.transition_state import minima_provenance_dict
+from scgo.ts_search.ts_statistics import compute_ts_statistics
 from scgo.utils.helpers import get_cluster_formula
 from scgo.utils.logging import get_logger
 from scgo.utils.ts_provenance import ts_output_provenance
@@ -69,8 +65,7 @@ def _stamp_ts_metadata(
         ] = json.dumps(provenance_copy)
 
     ts_atoms.info.setdefault("data", {})
-    # ASE DB persists the key_value_pairs column; mirror the booleans/score
-    # downstream queries rely on (metadata writes above are not auto-mirrored).
+    # Mirror query-critical fields into key_value_pairs for ASE DB persistence.
     kvp = ts_atoms.info.setdefault("key_value_pairs", {})
     kvp["is_transition_state"] = True
     kvp["ts_neb_converged"] = neb_converged
@@ -198,8 +193,6 @@ def tag_unique_ts_in_databases(
 
     Returns the number of successful row insertions.
     """
-    import glob
-
     db_files = glob.glob(os.path.join(base_dir, "run_*", "**", "*.db"), recursive=True)
     basename_to_path = {os.path.basename(p): p for p in db_files}
     logger.debug(
@@ -209,6 +202,7 @@ def tag_unique_ts_in_databases(
     )
 
     added = 0
+    missing_db_pairs: list[str] = []
 
     def _get_min_id(idx: int, key: str):
         if not (0 <= idx < len(minima)):
@@ -250,15 +244,7 @@ def tag_unique_ts_in_databases(
                 src_db_j
             )
             if db_candidate is None:
-                logger.warning(
-                    "No minima DB found to tag TS %s (searched run_*/*.db under %s); "
-                    "available_db_basenames=%s src_db_i=%s src_db_j=%s",
-                    pair_id,
-                    base_dir,
-                    list(basename_to_path.keys()),
-                    src_db_i,
-                    src_db_j,
-                )
+                missing_db_pairs.append(str(pair_id))
                 continue
 
             try:
@@ -324,6 +310,15 @@ def tag_unique_ts_in_databases(
                     db_candidate,
                 )
 
+    if missing_db_pairs:
+        logger.warning(
+            "No minima DB found to tag TS for %d edge(s) under %s. "
+            "Sample pair_ids=%s",
+            len(missing_db_pairs),
+            base_dir,
+            missing_db_pairs[:5],
+        )
+
     return added
 
 
@@ -358,8 +353,6 @@ def save_ts_network_metadata(
             },
         }
     )
-
-    barriers = []
 
     for result in ts_results:
         if result.get("status") != "success":
@@ -424,20 +417,11 @@ def save_ts_network_metadata(
             ]
 
         network["ts_connections"].append(connection)
-        barriers.append(float(barrier_height))
-        network["statistics"]["successful_ts"] += 1
-        if result.get("neb_converged"):
-            network["statistics"]["converged_ts"] += 1
 
-    network["statistics"]["total_ts_found"] = len(network["ts_connections"])
+    network["statistics"] = compute_ts_statistics(network["ts_connections"])
 
     if minima_base_dir is not None:
         network["minima_base_dir"] = minima_base_dir
-
-    if barriers:
-        network["statistics"]["min_barrier"] = float(min(barriers))
-        network["statistics"]["max_barrier"] = float(max(barriers))
-        network["statistics"]["avg_barrier"] = float(sum(barriers) / len(barriers))
 
     # Save network metadata
     network_path = os.path.join(output_dir, f"ts_network_metadata_{formula}.json")
@@ -445,15 +429,15 @@ def save_ts_network_metadata(
         json.dump(network, f, indent=2)
 
     n_conn = len(network["ts_connections"])
-    if barriers:
-        st = network["statistics"]
+    stats = network["statistics"]
+    if stats.get("min_barrier") is not None:
         logger.info(
             "Wrote %s (%d edges, barriers %.4f–%.4f eV, mean %.4f eV)",
             network_path,
             n_conn,
-            st["min_barrier"],
-            st["max_barrier"],
-            st["avg_barrier"],
+            stats["min_barrier"],
+            stats["max_barrier"],
+            stats["avg_barrier"],
         )
     else:
         logger.info("Wrote %s (%d edges, no barrier stats)", network_path, n_conn)
@@ -641,10 +625,12 @@ def find_shortest_path(
     Returns:
         List of minima indices from start to end, or None if no path exists.
     """
-    adjacency = graph.get("adjacency", {})
+    adjacency: dict[int, list[int]] = graph.get("adjacency", {})
 
     if start == end:
         return [start]
+    if start not in adjacency or end not in adjacency:
+        return None
 
     queue = deque([[start]])
     visited = {start}
@@ -679,17 +665,18 @@ def find_minimum_barrier_path(
     Returns:
         Tuple of (path, total_barrier) or None if no path exists.
     """
-    adjacency = graph.get("adjacency", {})
+    adjacency: dict[int, list[int]] = graph.get("adjacency", {})
     edge_metadata = graph.get("edge_metadata", {})
 
     if start == end:
         return [start], 0.0
+    if start not in adjacency or end not in adjacency:
+        return None
 
     # Dijkstra's algorithm
-    num_nodes = graph.get("num_nodes", 0)
-    distances = dict.fromkeys(range(num_nodes), float("inf"))
+    distances = {node: float("inf") for node in adjacency}
     distances[start] = 0.0
-    parents = dict.fromkeys(range(num_nodes), None)
+    parents = {node: None for node in adjacency}
 
     priority_queue = [(0.0, start)]
 
@@ -710,7 +697,14 @@ def find_minimum_barrier_path(
 
         for neighbor in adjacency.get(node, []):
             edge_key = tuple(sorted([node, neighbor]))
-            barrier = edge_metadata.get(edge_key, {}).get("barrier", float("inf"))
+            raw_barrier = edge_metadata.get(edge_key, {}).get("barrier", float("inf"))
+            try:
+                barrier = float(raw_barrier)
+            except (TypeError, ValueError):
+                barrier = float("inf")
+            if neighbor not in distances:
+                distances[neighbor] = float("inf")
+                parents[neighbor] = None
 
             new_dist = current_dist + barrier
 

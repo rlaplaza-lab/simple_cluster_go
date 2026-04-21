@@ -194,7 +194,8 @@ def _filter_ga_kwargs_for_ase(
         Filtered and normalized dictionary suitable for ASE GA.
     """
     ase_ga_kwargs = filter_dict_keys(
-        optimizer_kwargs, {"relaxer", "batch_size", "use_torchsim"}
+        optimizer_kwargs,
+        {"relaxer", "batch_size", "use_torchsim", "n_jobs_offspring"},
     )
 
     optimizer_name = ase_ga_kwargs.get("optimizer")

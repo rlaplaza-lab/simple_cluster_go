@@ -12,8 +12,9 @@ from ase.optimize import FIRE, LBFGS
 
 from scgo.algorithms.basinhopping_go import bh_go
 from scgo.algorithms.geneticalgorithm_go import ga_go
+from scgo.algorithms.geneticalgorithm_go_torchsim import ga_go_torchsim
 from scgo.database import close_data_connection
-from scgo.initialization import create_initial_cluster
+from scgo.initialization import create_initial_cluster, create_initial_cluster_batch
 from scgo.minima_search import run_trials, scgo
 from scgo.param_presets import get_testing_params
 from scgo.run_minima import (
@@ -28,6 +29,16 @@ from tests.test_utils import (
     create_paired_rngs,
     run_algorithm_reproducibility_test,
 )
+
+
+class MockRelaxer:
+    """Minimal deterministic relaxer for fast TorchSim-path reproducibility tests."""
+
+    def __init__(self, max_steps: int | None = None):
+        self.max_steps = max_steps
+
+    def relax_batch(self, batch: list[Atoms]):
+        return [(float(i) * 0.1, a.copy()) for i, a in enumerate(batch)]
 
 
 @pytest.mark.parametrize(
@@ -144,6 +155,82 @@ def test_ga_mutation_operators_child_rngs_reproducible():
     draws2 = ops2[rattle_idx2].rng.integers(0, 2**31 - 1, size=5).tolist()
 
     assert draws1 == draws2, "Child RNGs derived from parent RNG should be reproducible"
+
+
+def test_initialization_batch_reproducible_single_vs_multi_cpu():
+    """Batch initialization must be identical for n_jobs=1 vs n_jobs=-2."""
+    import os
+
+    if (os.cpu_count() or 1) < 2:
+        pytest.skip("Requires >=2 CPUs to validate parallel initialization behavior")
+
+    composition = ["Pt"] * 5
+    n_structures = 8
+    rng_single, rng_multi = create_paired_rngs(24680)
+
+    batch_single = create_initial_cluster_batch(
+        composition=composition,
+        n_structures=n_structures,
+        rng=rng_single,
+        mode="smart",
+        n_jobs=1,
+    )
+    batch_multi = create_initial_cluster_batch(
+        composition=composition,
+        n_structures=n_structures,
+        rng=rng_multi,
+        mode="smart",
+        n_jobs=-2,
+    )
+
+    assert len(batch_single) == len(batch_multi) == n_structures
+    for a_single, a_multi in zip(batch_single, batch_multi, strict=True):
+        np.testing.assert_allclose(
+            a_single.get_positions(),
+            a_multi.get_positions(),
+            rtol=1e-12,
+            atol=1e-12,
+        )
+        assert a_single.get_chemical_symbols() == a_multi.get_chemical_symbols()
+
+
+def test_torchsim_ga_reproducible_single_vs_multi_cpu_init_and_genetic(tmp_path):
+    """TorchSim GA must be reproducible with parallel init and parallel offspring ops."""
+    import os
+
+    if (os.cpu_count() or 1) < 2:
+        pytest.skip("Requires >=2 CPUs to validate parallel GA behavior")
+
+    composition = ["Pt"] * 3
+    seed = 97531
+    kwargs = {
+        "composition": composition,
+        "calculator": EMT(),
+        "relaxer": MockRelaxer(max_steps=1),
+        "niter": 1,
+        "population_size": 3,
+        "offspring_fraction": 0.34,
+        "niter_local_relaxation": 1,
+        "batch_size": None,
+        "verbosity": 0,
+    }
+
+    minima_single = ga_go_torchsim(
+        output_dir=str(tmp_path / "torchsim_single_cpu"),
+        rng=np.random.default_rng(seed),
+        n_jobs_population_init=1,
+        n_jobs_offspring=1,
+        **kwargs,
+    )
+    minima_multi = ga_go_torchsim(
+        output_dir=str(tmp_path / "torchsim_multi_cpu"),
+        rng=np.random.default_rng(seed),
+        n_jobs_population_init=-2,
+        n_jobs_offspring=2,
+        **kwargs,
+    )
+
+    assert compare_minima_lists(minima_single, minima_multi)
 
 
 def test_full_stack_smoke(tmp_path, rng):

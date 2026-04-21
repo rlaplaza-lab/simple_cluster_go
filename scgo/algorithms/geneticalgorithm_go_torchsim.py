@@ -227,7 +227,7 @@ def ga_go_torchsim(
     population_size: int = 10,
     offspring_fraction: float = 0.5,
     n_jobs_population_init: int = -2,
-    n_jobs_offspring: int = 1,
+    n_jobs_offspring: int = -2,
     vacuum: float = 10.0,
     previous_search_glob: str = "**/*.db",
     use_adaptive_mutations: bool = True,
@@ -284,6 +284,7 @@ def ga_go_torchsim(
     profile_counters: dict[str, int] = {
         "offspring_created": 0,
         "offspring_relaxed": 0,
+        "offspring_worker_failures": 0,
     }
     per_generation: list[dict[str, Any]] = []
 
@@ -361,7 +362,7 @@ def ga_go_torchsim(
     )
 
     slab_for_pairing = slab_ref
-    pairing = create_ga_pairing(
+    _ = create_ga_pairing(
         atoms_template, n_to_optimize, rng, slab_atoms=slab_for_pairing
     )
 
@@ -399,7 +400,7 @@ def ga_go_torchsim(
         ),
     )
 
-    mutations = update_mutation_weights(
+    _ = update_mutation_weights(
         operators_list=operators_list,
         name_map=name_map,
         adaptive_config=adaptive_config,
@@ -635,7 +636,7 @@ def ga_go_torchsim(
                     aggressive_burst_multiplier=aggressive_burst_multiplier,
                     max_mutation_probability=max_mutation_probability,
                 )
-                mutations = update_mutation_weights(
+                _ = update_mutation_weights(
                     operators_list=operators_list,
                     name_map=name_map,
                     adaptive_config=adaptive_config,
@@ -651,10 +652,13 @@ def ga_go_torchsim(
 
             t_loop = perf_counter()
             t_parent_select_gen = 0.0
+            t_operator_setup_gen = 0.0
             t_crossover_gen = 0.0
             t_mutation_gen = 0.0
             t_db_unrelaxed_gen = 0.0
             t_offspring_parallel_wall_gen = 0.0
+            worker_failures_gen = 0
+            worker_failure_types_gen: dict[str, int] = {}
             while created < n_offspring and attempts < max_attempts:
                 attempts_remaining = max_attempts - attempts
                 if attempts_remaining <= 0:
@@ -683,8 +687,13 @@ def ga_go_torchsim(
 
                 n_workers = _resolve_parallel_worker_count(n_jobs_offspring, len(jobs))
 
-                def _build_offspring(job: dict[str, Any]) -> dict[str, Any]:
+                def _build_offspring(
+                    job: dict[str, Any],
+                    adaptive_config: dict[str, Any] = adaptive_config,
+                    current_mutation_probability: float = current_mutation_probability,
+                ) -> dict[str, Any]:
                     task_rng = np.random.default_rng(job["task_seed"])
+                    setup_t0 = perf_counter()
                     local_pairing = create_ga_pairing(
                         atoms_template,
                         n_to_optimize,
@@ -709,8 +718,11 @@ def ga_go_torchsim(
                         name_map=local_name_map,
                         adaptive_config=adaptive_config,
                     )
+                    operator_setup_s = perf_counter() - setup_t0
                     crossover_t0 = perf_counter()
-                    child, desc = local_pairing.get_new_individual([job["a1"], job["a2"]])
+                    child, desc = local_pairing.get_new_individual(
+                        [job["a1"], job["a2"]]
+                    )
                     crossover_s = perf_counter() - crossover_t0
                     mutation_s = 0.0
                     if child is None:
@@ -718,6 +730,7 @@ def ga_go_torchsim(
                             "index": job["index"],
                             "child": None,
                             "desc": None,
+                            "operator_setup_s": operator_setup_s,
                             "crossover_s": crossover_s,
                             "mutation_s": mutation_s,
                         }
@@ -731,6 +744,7 @@ def ga_go_torchsim(
                         "index": job["index"],
                         "child": child,
                         "desc": desc,
+                        "operator_setup_s": operator_setup_s,
                         "crossover_s": crossover_s,
                         "mutation_s": mutation_s,
                     }
@@ -742,10 +756,26 @@ def ga_go_torchsim(
                     for future in as_completed(futures):
                         try:
                             result = future.result()
-                        except Exception:
+                        except Exception as exc:
+                            worker_failures_gen += 1
+                            err_name = type(exc).__name__
+                            worker_failure_types_gen[err_name] = (
+                                worker_failure_types_gen.get(err_name, 0) + 1
+                            )
                             continue
                         job_results[result["index"]] = result
                 t_offspring_parallel_wall_gen += perf_counter() - t_parallel
+                if worker_failures_gen:
+                    profile_counters["offspring_worker_failures"] += worker_failures_gen
+                    failure_limit = max(3, len(jobs) // 2)
+                    if worker_failures_gen >= failure_limit:
+                        logger.warning(
+                            "Generation %s offspring worker failures: %d/%d (%s)",
+                            generation,
+                            worker_failures_gen,
+                            len(jobs),
+                            worker_failure_types_gen,
+                        )
 
                 for idx in range(len(jobs)):
                     if created >= n_offspring:
@@ -753,6 +783,7 @@ def ga_go_torchsim(
                     result = job_results.get(idx)
                     if result is None:
                         continue
+                    t_operator_setup_gen += float(result["operator_setup_s"])
                     t_crossover_gen += float(result["crossover_s"])
                     t_mutation_gen += float(result["mutation_s"])
                     child = result["child"]
@@ -760,8 +791,8 @@ def ga_go_torchsim(
                         continue
                     t0 = perf_counter()
                     database_retry(
-                        lambda _a3=child, _desc=result["desc"]: da.add_unrelaxed_candidate(
-                            _a3, description=_desc
+                        lambda _a3=child, _desc=result["desc"]: (
+                            da.add_unrelaxed_candidate(_a3, description=_desc)
                         ),
                         max_retries=5,
                         operation_name="add_unrelaxed_offspring",
@@ -774,6 +805,10 @@ def ga_go_torchsim(
             profile_timings["offspring_parent_select_s"] = (
                 profile_timings.get("offspring_parent_select_s", 0.0)
                 + t_parent_select_gen
+            )
+            profile_timings["offspring_operator_setup_s"] = (
+                profile_timings.get("offspring_operator_setup_s", 0.0)
+                + t_operator_setup_gen
             )
             profile_timings["offspring_crossover_s"] = (
                 profile_timings.get("offspring_crossover_s", 0.0) + t_crossover_gen
@@ -830,6 +865,7 @@ def ga_go_torchsim(
             gen_relax_s = max(0.0, post_relax - pre_relax)
             gen_db_write_s = max(0.0, post_db_write - pre_db_write)
             gen_pop_update_s_from_relax = max(0.0, post_pop_update - pre_pop_update)
+            pop_update_s = gen_pop_update_s_from_relax
             if offspring_count > 0:
                 profile_counters["offspring_relaxed"] += int(offspring_count)
                 # Attempt to report a concise triple: created_this_gen / relaxed_this_call / total_relaxed
@@ -859,13 +895,6 @@ def ga_go_torchsim(
                         offspring_count,
                     )
 
-            t_pop = perf_counter()
-            population.update()
-            pop_update_s = perf_counter() - t_pop
-            profile_timings["population_update_s"] = (
-                profile_timings.get("population_update_s", 0.0) + pop_update_s
-            )
-
             per_generation.append(
                 {
                     "generation": int(generation),
@@ -875,6 +904,7 @@ def ga_go_torchsim(
                     "offspring_relaxed_this_call": int(offspring_count),
                     "timings_s": {
                         "parent_select_s": t_parent_select_gen,
+                        "operator_setup_s": t_operator_setup_gen,
                         "crossover_s": t_crossover_gen,
                         "mutation_s": t_mutation_gen,
                         "db_unrelaxed_insert_s": t_db_unrelaxed_gen,

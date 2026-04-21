@@ -53,6 +53,33 @@ def combine_slab_adsorbate(slab: Atoms, adsorbate: Atoms) -> Atoms:
     return slab.copy() + ads
 
 
+def _random_rotation_matrix(rng: Generator) -> np.ndarray:
+    """Return a uniformly random 3D rotation matrix."""
+    rotation_axis = rng.standard_normal(3)
+    rotation_axis /= np.linalg.norm(rotation_axis)
+    rotation_angle = float(rng.uniform(0.0, 2.0 * np.pi))
+    return _generate_rotation_matrix(rotation_axis, rotation_angle)
+
+
+def _place_cluster_above_slab(
+    cluster_positions: np.ndarray,
+    slab: Atoms,
+    slab_top: float,
+    axis: int,
+    rng: Generator,
+    config: SurfaceSystemConfig,
+) -> np.ndarray:
+    """Rotate/translate centered cluster positions into a deposited position."""
+    rotated_positions = cluster_positions @ _random_rotation_matrix(rng).T
+    translated_positions = rotated_positions + _in_plane_translation(slab, axis, rng)
+    sampled_height = float(
+        rng.uniform(config.adsorption_height_min, config.adsorption_height_max)
+    )
+    cluster_min = float(np.min(translated_positions[:, axis]))
+    translated_positions[:, axis] += slab_top + sampled_height - cluster_min
+    return translated_positions
+
+
 def create_deposited_cluster(
     composition: Sequence[str],
     slab: Atoms,
@@ -73,44 +100,39 @@ def create_deposited_cluster(
     slab_top = slab_surface_extreme(slab, axis, upper=True)
 
     for _ in range(config.max_placement_attempts):
-        cluster = create_initial_cluster(
+        cluster_seed = create_initial_cluster(
             list(composition),
             vacuum=config.cluster_init_vacuum,
             rng=rng,
             previous_search_glob=previous_search_glob,
             mode=config.init_mode,
         )
-        nums = cluster.get_atomic_numbers()
-        pos = cluster.get_positions().copy()
+        atomic_numbers = cluster_seed.get_atomic_numbers()
+        cluster_positions = cluster_seed.get_positions().copy()
 
-        pos -= np.mean(pos, axis=0)
-        axis_rot = rng.standard_normal(3)
-        axis_rot /= np.linalg.norm(axis_rot)
-        angle = float(rng.uniform(0.0, 2.0 * np.pi))
-        rmat = _generate_rotation_matrix(axis_rot, angle)
-        pos = pos @ rmat.T
-
-        pos += _in_plane_translation(slab, axis, rng)
-
-        h = float(
-            rng.uniform(config.adsorption_height_min, config.adsorption_height_max)
+        cluster_positions -= np.mean(cluster_positions, axis=0)
+        deposited_positions = _place_cluster_above_slab(
+            cluster_positions=cluster_positions,
+            slab=slab,
+            slab_top=slab_top,
+            axis=axis,
+            rng=rng,
+            config=config,
         )
-        cluster_min = float(np.min(pos[:, axis]))
-        pos[:, axis] += slab_top + h - cluster_min
 
-        ads = Atoms(
-            numbers=nums,
-            positions=pos,
+        adsorbate = Atoms(
+            numbers=atomic_numbers,
+            positions=deposited_positions,
             cell=slab.get_cell(),
             pbc=slab.get_pbc(),
         )
 
-        if atoms_too_close(ads, blmin, use_tags=False):
+        if atoms_too_close(adsorbate, blmin, use_tags=False):
             continue
-        if atoms_too_close_two_sets(ads, slab, blmin):
+        if atoms_too_close_two_sets(adsorbate, slab, blmin):
             continue
 
-        return combine_slab_adsorbate(slab, ads)
+        return combine_slab_adsorbate(slab, adsorbate)
 
     logger.warning(
         "create_deposited_cluster: exceeded max_placement_attempts=%s",
@@ -161,15 +183,19 @@ def create_deposited_cluster_batch(
             )
         return out
 
-    # Parallel: each worker retries with fresh RNG draws (same spirit as sequential).
+    # Parallel: precompute deterministic per-task seeds on the main thread.
     per_worker_limit = max(config.max_placement_attempts, 50)
+    task_seeds = [
+        int(rng.integers(0, 2**63 - 1, dtype=np.int64)) for _ in range(n_structures)
+    ]
 
-    def _one() -> Atoms:
+    def _build_structure_with_seed(task_seed: int) -> Atoms:
+        task_rng = np.random.default_rng(task_seed)
         for _ in range(per_worker_limit):
             child_rng = np.random.default_rng(
-                rng.integers(0, 2**63 - 1, dtype=np.int64)
+                task_rng.integers(0, 2**63 - 1, dtype=np.int64)
             )
-            s = create_deposited_cluster(
+            structure = create_deposited_cluster(
                 composition,
                 slab,
                 blmin,
@@ -177,15 +203,22 @@ def create_deposited_cluster_batch(
                 config,
                 previous_search_glob=previous_search_glob,
             )
-            if s is not None:
-                return s
-        raise RuntimeError("Parallel deposition failed for one structure")
+            if structure is not None:
+                return structure
+        raise RuntimeError(
+            "Could not generate deposited structure in parallel worker; "
+            "try widening height range or increasing max_placement_attempts."
+        )
 
     workers = min(n_structures, n_jobs if n_jobs > 0 else 1)
-    results: list[Atoms] = []
+    ordered_results: list[Atoms | None] = [None] * n_structures
     with ThreadPoolExecutor(max_workers=workers) as ex:
-        futures = [ex.submit(_one) for _ in range(n_structures)]
-        results.extend(f.result() for f in as_completed(futures))
-    if len(results) < n_structures:
+        futures = {
+            ex.submit(_build_structure_with_seed, seed): idx
+            for idx, seed in enumerate(task_seeds)
+        }
+        for future in as_completed(futures):
+            ordered_results[futures[future]] = future.result()
+    if any(result is None for result in ordered_results):
         raise RuntimeError("Parallel batch returned too few structures")
-    return results
+    return [result for result in ordered_results if result is not None]

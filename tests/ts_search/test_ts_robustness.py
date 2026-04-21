@@ -147,7 +147,7 @@ def test_pairwise_cleanup_even_without_errors(monkeypatch):
     We simulate a minimal two-pair search and verify our patched
     `cleanup_torch_cuda` hook is invoked once per pair.  This regression test
     guards against future edits that accidentally remove the unconditional
-    cleanup added by https://github.com/.../issue/xxx.
+    cleanup added after prior regression investigations.
     """
     require_cuda()
 

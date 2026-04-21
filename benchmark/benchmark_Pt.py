@@ -22,6 +22,7 @@ from benchmark.benchmark_common import (
     MIN_RECOVERY_RATE,
     NUM_GROUND_TRUTH,
     add_common_benchmark_cli,
+    apply_ga_benchmark_overrides,
     evaluate_cluster,
     get_benchmark_params,
     run_benchmark_suite,
@@ -72,14 +73,17 @@ def main() -> None:
     add_common_benchmark_cli(parser)
     args = parser.parse_args()
 
-    params = get_benchmark_params(
+    base_params = get_benchmark_params(
         args.seed,
         model_name=args.model_name,
         backend=args.backend,
         uma_task=args.uma_task,
     )
-    params["optimizer_params"]["ga"]["niter"] = args.niter
-    params["optimizer_params"]["ga"]["population_size"] = args.population_size
+    params = apply_ga_benchmark_overrides(
+        base_params,
+        niter=args.niter,
+        population_size=args.population_size,
+    )
 
     t0 = time.perf_counter()
     run_benchmark_suite(

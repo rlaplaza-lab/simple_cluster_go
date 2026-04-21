@@ -261,6 +261,34 @@ def test_find_minimum_barrier_path(sample_ts_results):
         assert result is None
 
 
+def test_pathfinders_handle_invalid_nodes(sample_ts_results):
+    """Invalid node IDs should return no path instead of raising."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        network_file = save_ts_network_metadata(
+            sample_ts_results,
+            tmpdir,
+            composition=["Cu", "Cu", "Cu"],
+            minima_count=4,
+        )
+        graph = build_connectivity_graph(network_file)
+
+        assert find_shortest_path(graph, 99, 2) is None
+        assert find_shortest_path(graph, 0, 99) is None
+        assert find_minimum_barrier_path(graph, 99, 2) is None
+        assert find_minimum_barrier_path(graph, 0, 99) is None
+
+
+def test_find_minimum_barrier_path_sparse_node_ids():
+    """Dijkstra should support sparse/non-contiguous node keys."""
+    sparse_graph = {
+        "adjacency": {2: [10], 10: [2]},
+        "edge_metadata": {(2, 10): {"barrier": 0.75}},
+        "num_nodes": 2,
+    }
+    result = find_minimum_barrier_path(sparse_graph, 2, 10)
+    assert result == ([2, 10], pytest.approx(0.75))
+
+
 def test_network_with_no_connections():
     """Test network metadata with no successful TS found."""
     ts_results = [

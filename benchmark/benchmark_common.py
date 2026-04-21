@@ -12,6 +12,7 @@ import os
 from copy import deepcopy
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 from ase import Atoms
@@ -172,7 +173,7 @@ def _campaign_cache_key(
     return f"{element}|{min_atoms}|{max_atoms}|{seed}|{digest}|{out}"
 
 
-def _load_latest_ga_profile(
+def load_latest_ga_profile(
     output_dir: str | Path,
     cluster_formula: str,
 ) -> dict | None:
@@ -192,14 +193,6 @@ def _load_latest_ga_profile(
         return json.loads(profile_path.read_text())
     except (OSError, json.JSONDecodeError):
         return None
-
-
-def load_latest_ga_profile(
-    output_dir: str | Path,
-    cluster_formula: str,
-) -> dict | None:
-    """Load latest GA profile JSON from benchmark run outputs."""
-    return _load_latest_ga_profile(output_dir, cluster_formula)
 
 
 def format_ga_profile_lines(
@@ -379,6 +372,29 @@ def get_benchmark_params(
     if model_name is not None:
         params["calculator_kwargs"]["model_name"] = model_name
     return params
+
+
+def apply_ga_benchmark_overrides(
+    params: dict,
+    *,
+    niter: int,
+    population_size: int,
+    surface_config: Any | None = None,
+    n_jobs_population_init: int | None = None,
+    batch_size: int | None = None,
+) -> dict:
+    """Return params with standard GA benchmark overrides applied."""
+    params_copy = deepcopy(params)
+    ga_params = params_copy.setdefault("optimizer_params", {}).setdefault("ga", {})
+    ga_params["niter"] = niter
+    ga_params["population_size"] = population_size
+    if surface_config is not None:
+        ga_params["surface_config"] = surface_config
+    if n_jobs_population_init is not None:
+        ga_params["n_jobs_population_init"] = n_jobs_population_init
+    if batch_size is not None:
+        ga_params["batch_size"] = batch_size
+    return params_copy
 
 
 def load_ground_truth_minima(
@@ -561,7 +577,7 @@ def evaluate_cluster(
 
     profile_root = output_dir or resolved_out
     if profile_root is not None:
-        profile = _load_latest_ga_profile(profile_root, cluster_formula)
+        profile = load_latest_ga_profile(profile_root, cluster_formula)
         if profile:
             lines.extend(
                 format_ga_profile_lines(

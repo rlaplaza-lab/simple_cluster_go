@@ -48,7 +48,7 @@ if TYPE_CHECKING:
 
 
 def _detach_calc(atoms: Atoms | None) -> None:
-    """Best-effort removal of calculator from returned structures (frees GPU buffers)."""
+    """Remove calculator from structure when present."""
     if atoms is None:
         return
     with contextlib.suppress(AttributeError, TypeError):
@@ -255,7 +255,7 @@ def interpolate_path(
     perturb_sigma: float = 0.0,
     rng: np.random.Generator | None = None,
 ) -> list[Atoms]:
-    """Interpolate between two Atoms and return images including endpoints.
+    """Interpolate between two structures and return images including endpoints.
 
     ``align_endpoints`` (default True): reorder endpoint atoms to match reactant.
     For periodic MIC workflows (``mic=True`` + periodic cell), alignment uses
@@ -263,14 +263,9 @@ def interpolate_path(
     ``perturb_sigma``: optional Gaussian displacement (Å) on interior images only.
     ``rng``: optional NumPy Generator when ``perturb_sigma`` > 0.
 
-    **Fixed slab / supported-cluster NEB:** Endpoints often carry ``FixAtoms`` on the
-    substrate. ASE's ``NEB.interpolate`` defaults to ``apply_constraint=True``, which
-    projects each interpolation step onto constrained degrees of freedom and commonly
-    yields broken or unphysical initial bands (or failures) for slab systems. This
-    function always uses ``apply_constraint=False`` so the path is built in full
-    coordinates first; ``FixAtoms`` still constrain each image during the subsequent
-    NEB optimization because interior images are ``Atoms`` copies of the endpoints and
-    retain the same constraints.
+    For constrained slab systems we always interpolate with
+    ``apply_constraint=False``; constraints remain attached and are enforced
+    during subsequent NEB optimization.
     """
     validate_atoms(atoms1)
     validate_atoms(atoms2)
@@ -283,13 +278,11 @@ def interpolate_path(
         new_pos = a2_copy.get_positions()[mapping]
         pbc_active = bool(np.any(a1_copy.pbc))
         if mic and pbc_active:
-            # Preserve periodic geometry by pulling each product atom to the
-            # nearest MIC image relative to the matched reactant atom.
+            # Pull product atoms to nearest MIC images relative to reactant.
             ref_pos = a1_copy.get_positions().copy()
             disp = new_pos - ref_pos
             disp_mic, _ = find_mic(disp, cell=a1_copy.cell, pbc=a1_copy.pbc)
-            # For fixed slabs, anchor displacements to fixed atoms so alignment
-            # does not spuriously shift the slab reference frame.
+            # Anchor displacement to fixed atoms to keep slab frame stable.
             fixed_mask = _fixed_atom_mask(a1_copy)
             if np.any(fixed_mask):
                 fixed_shift = np.mean(disp_mic[fixed_mask], axis=0)
@@ -599,8 +592,7 @@ def find_transition_state(
             logger.info(
                 f"Generating initial path with {interpolation_method} interpolation"
             )
-        # Initial band: interpolate_path uses neb.interpolate(..., apply_constraint=False)
-        # so FixAtoms on slab endpoints do not break path construction.
+        # Keep interpolation unconstrained; constraints are applied during NEB.
         images = interpolate_path(
             atoms1,
             atoms2,

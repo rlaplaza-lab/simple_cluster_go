@@ -104,10 +104,7 @@ def test_loaders_default_to_final_unique_minima():
         extract_transition_states_from_database_file,
         load_previous_run_results,
     )
-    from scgo.ts_search.transition_state_io import (
-        load_minima_by_composition,
-        load_transition_states_by_composition,
-    )
+    from scgo.ts_search.transition_state_io import load_minima_by_composition
 
     # require_final
     assert extract_minima_from_database_file.__defaults__[1] is True
@@ -116,7 +113,6 @@ def test_loaders_default_to_final_unique_minima():
     assert load_minima_by_composition.__defaults__[1] is True
     # require_final_unique_ts
     assert extract_transition_states_from_database_file.__defaults__[1] is True
-    assert load_transition_states_by_composition.__defaults__[1] is True
 
 
 def test_build_one_element_go_ts_bundle_gas():

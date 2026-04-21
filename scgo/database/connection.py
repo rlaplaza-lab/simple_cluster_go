@@ -1,11 +1,4 @@
-"""Database connection management for SCGO (HPC-oriented).
-
-Provides unified interface for database access with:
-- Context-manager pattern for automatic cleanup
-- WAL off by default; optional WAL for local disks only
-- ``apply_shared_filesystem_sqlite_pragmas`` for rollback-journal cache/temp tuning
-- Retry-friendly busy timeouts and connection health checks
-"""
+"""Database connection management for SCGO (HPC-oriented)."""
 
 from __future__ import annotations
 
@@ -55,16 +48,6 @@ def apply_sqlite_pragmas(
             conn.execute(f"PRAGMA cache_size=-{cache_size_mb * 1024};")
 
 
-def apply_shared_filesystem_sqlite_pragmas(
-    conn: sqlite3.Connection,
-    *,
-    cache_size_mb: int = 64,
-    wal_mode: bool = False,
-) -> None:
-    """[DEPRECATED] Use apply_sqlite_pragmas instead."""
-    apply_sqlite_pragmas(conn, wal_mode=wal_mode, cache_size_mb=cache_size_mb)
-
-
 @contextmanager
 def get_connection(
     db_path: str | Path,
@@ -111,8 +94,9 @@ def get_connection(
 
     conn = getattr(getattr(da, "c", None), "connection", None)
     if conn is not None:
-        apply_shared_filesystem_sqlite_pragmas(
+        apply_sqlite_pragmas(
             conn,
+            busy_timeout=busy_timeout,
             cache_size_mb=cache_size_mb,
             wal_mode=wal_mode,
         )

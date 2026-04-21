@@ -292,9 +292,7 @@ def test_run_ts_campaign_normalizes_items(monkeypatch):
     assert captured == [["Au", "Au"], ["Pt"]]
 
 
-def test_run_go_ts_campaign_paths(
-    monkeypatch, tmp_path
-):
+def test_run_go_ts_campaign_paths(monkeypatch, tmp_path):
     calls: list[tuple[list[str], object]] = []
 
     def _fake_pipeline(composition, **kwargs):

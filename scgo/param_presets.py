@@ -112,7 +112,7 @@ def get_default_params() -> dict[str, Any]:
                 "max_mutation_probability": 0.65,
                 "early_stopping_niter": 10,  # Stop if no improvement after N generations
                 "n_jobs_population_init": -2,  # Parallel batch init: -2 = all CPUs except one
-                "n_jobs_offspring": 1,  # Conservative default; opt in for threaded offspring generation
+                "n_jobs_offspring": -2,  # Parallel default aligned with n_jobs_population_init
                 "batch_size": None,
                 "relaxer": None,
                 "fitness_strategy": None,  # None = inherit from top-level
@@ -456,7 +456,7 @@ def get_ts_run_kwargs(ts_params: dict[str, Any] | None = None) -> dict[str, Any]
 
         ts_params = get_ts_search_params()
         results = run_transition_state_search(
-            composition, params=..., ts_kwargs=get_ts_run_kwargs(ts_params)
+            composition, params=go_params, ts_kwargs=get_ts_run_kwargs(ts_params)
         )
     """
     if ts_params is None:

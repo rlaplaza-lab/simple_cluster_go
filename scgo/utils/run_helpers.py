@@ -165,6 +165,7 @@ def validate_algorithm_params(
             "population_size",
             "offspring_fraction",
             "n_jobs_population_init",
+            "n_jobs_offspring",
             "mutation_probability",
             "max_mutation_probability",
             "vacuum",
