@@ -15,31 +15,26 @@ matching ``scgo[mace]`` or ``scgo[uma]`` extra in its own environment.
 from __future__ import annotations
 
 import argparse
-import sys
 from pathlib import Path
 from time import perf_counter
+from typing import Any
 
 from ase import Atoms
 from ase.build import graphene
 
-# Allow `python runners/run_pt5_graphite.py` from the repo root to import the
-# sibling _common module without requiring `python -m runners.run_pt5_graphite`.
-_REPO_ROOT = Path(__file__).resolve().parent.parent
-if str(_REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(_REPO_ROOT))
-
-from runners._common import (  # noqa: E402
-    add_common_args,
-    make_ga_params,
-    make_ts_kwargs,
-    resolve_output_root,
+from scgo.param_presets import (
+    get_torchsim_ga_params,
+    get_ts_run_kwargs,
+    get_ts_search_params,
+    get_ts_search_params_uma,
+    get_uma_ga_benchmark_params,
 )
-from scgo.run_minima import run_scgo_campaign_one_element  # noqa: E402
-from scgo.runner_surface import read_full_composition_from_first_xyz  # noqa: E402
-from scgo.surface.config import SurfaceSystemConfig  # noqa: E402
-from scgo.ts_search import run_transition_state_search  # noqa: E402
-from scgo.utils.helpers import get_cluster_formula  # noqa: E402
-from scgo.utils.logging import get_logger  # noqa: E402
+from scgo.run_minima import run_scgo_campaign_one_element
+from scgo.runner_surface import read_full_composition_from_first_xyz
+from scgo.surface.config import SurfaceSystemConfig
+from scgo.ts_search import run_transition_state_search
+from scgo.utils.helpers import get_cluster_formula
+from scgo.utils.logging import get_logger
 
 logger = get_logger(__name__)
 
@@ -50,6 +45,81 @@ DEFAULT_SLAB_REPEAT_XY = 4
 DEFAULT_SLAB_VACUUM = 12.0
 DEFAULT_OUTPUT_PARENT = Path(__file__).resolve().parent / "results"
 DEFAULT_OUTPUT_SUBDIR = "pt5_graphite"
+
+
+def _add_common_args(
+    parser: argparse.ArgumentParser,
+    *,
+    default_niter: int,
+    default_population_size: int,
+    default_max_pairs: int,
+) -> None:
+    parser.add_argument("--backend", choices=("mace", "uma"), default="mace")
+    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--model-name", default=None)
+    parser.add_argument("--uma-task", default="oc25")
+    parser.add_argument("--niter", type=int, default=default_niter)
+    parser.add_argument("--population-size", type=int, default=default_population_size)
+    parser.add_argument("--max-pairs", type=int, default=default_max_pairs)
+    parser.add_argument("--output-root", type=Path, default=None)
+
+
+def _make_ga_params(
+    args: argparse.Namespace,
+    *,
+    surface_config: SurfaceSystemConfig,
+) -> dict[str, Any]:
+    if args.backend == "uma":
+        model_name = args.model_name or "uma-s-1p2"
+        params = get_uma_ga_benchmark_params(
+            args.seed, model_name=model_name, uma_task=args.uma_task
+        )
+    else:
+        params = get_torchsim_ga_params(seed=args.seed)
+        params["calculator"] = "MACE"
+        if args.model_name is not None:
+            params["calculator_kwargs"]["model_name"] = args.model_name
+
+    ga = params["optimizer_params"]["ga"]
+    ga["niter"] = args.niter
+    ga["population_size"] = args.population_size
+    ga["surface_config"] = surface_config
+    return params
+
+
+def _make_ts_kwargs(
+    args: argparse.Namespace,
+    *,
+    surface_config: SurfaceSystemConfig,
+) -> dict[str, Any]:
+    if args.backend == "uma":
+        model_name = args.model_name or "uma-s-1p2"
+        ts_params = get_ts_search_params_uma(
+            regime="surface",
+            surface_config=surface_config,
+            model_name=model_name,
+            uma_task=args.uma_task,
+        )
+    else:
+        ts_params = get_ts_search_params(
+            regime="surface",
+            surface_config=surface_config,
+        )
+        if args.model_name is not None:
+            ts_params["calculator_kwargs"]["model_name"] = args.model_name
+    ts_kwargs = get_ts_run_kwargs(ts_params)
+    ts_kwargs["max_pairs"] = args.max_pairs
+    return ts_kwargs
+
+
+def _resolve_output_root(args: argparse.Namespace) -> Path:
+    if args.output_root is None:
+        output_root = DEFAULT_OUTPUT_PARENT / f"{DEFAULT_OUTPUT_SUBDIR}_{args.backend}"
+    else:
+        output_root = args.output_root
+    output_root = output_root.expanduser().resolve()
+    output_root.mkdir(parents=True, exist_ok=True)
+    return output_root
 
 
 def _build_graphite_slab(
@@ -83,10 +153,8 @@ def _make_surface_config(
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
-    add_common_args(
+    _add_common_args(
         parser,
-        default_output_subdir=DEFAULT_OUTPUT_SUBDIR,
-        default_output_parent=DEFAULT_OUTPUT_PARENT,
         default_niter=6,
         default_population_size=24,
         default_max_pairs=10,
@@ -103,24 +171,19 @@ def _build_parser() -> argparse.ArgumentParser:
 
 def main() -> None:
     args = _build_parser().parse_args()
-
-    output_root = resolve_output_root(
-        args,
-        default_output_parent=DEFAULT_OUTPUT_PARENT,
-        default_output_subdir=DEFAULT_OUTPUT_SUBDIR,
-    )
+    output_root = _resolve_output_root(args)
 
     composition = [ELEMENT] * N_ATOMS
     formula = get_cluster_formula(composition)
 
     surface_config = _make_surface_config(args.slab_layers, args.slab_repeat_xy)
-    ga_params = make_ga_params(args, surface_config=surface_config)
+    ga_params = _make_ga_params(args, surface_config=surface_config)
     # Surface GA needs extra parallel-init knobs the gas-phase preset omits.
     ga = ga_params["optimizer_params"]["ga"]
     ga["n_jobs_population_init"] = -2
     ga["batch_size"] = 4
 
-    ts_kwargs = make_ts_kwargs(args, regime="surface", surface_config=surface_config)
+    ts_kwargs = _make_ts_kwargs(args, surface_config=surface_config)
 
     t_start = perf_counter()
 
