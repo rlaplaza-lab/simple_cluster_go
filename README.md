@@ -2,7 +2,7 @@
 
 [![Python](https://img.shields.io/badge/python-3.12%2B-blue.svg)](https://www.python.org/downloads/) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-A compact toolkit for global optimization of small atomic clusters using ASE. SCGO provides simple scripts and a small API for running Basin Hopping (BH) and Genetic Algorithm (GA) searches, with sensible defaults and helpers for common workflows.
+A compact toolkit for global optimization of small atomic clusters using ASE. SCGO provides a focused API for Basin Hopping (BH) and Genetic Algorithm (GA) workflows with practical defaults.
 
 ## Install (minimal)
 
@@ -57,7 +57,7 @@ pre-commit install
 
 ---
 
-## Quick start (3 lines) 💡
+## Quick start
 
 ```python
 from scgo import run_go
@@ -66,11 +66,11 @@ results = run_go(["Pt"] * 4, params=get_testing_params(), seed=42)
 ```
 
 - `results` is a list of `(energy, Atoms)` for unique minima (sorted by energy by default).
-- Sequential multi-composition GO: `run_go_campaign([...])`. Size sweeps: `run_go_element_scan` / `run_go_binary_scan`. All of these live in [`scgo.runner_api`](scgo/runner_api.py) and are re-exported from `scgo`.
+- Sequential multi-composition GO: `run_go_campaign([...])`. Size sweeps: `run_go_element_scan` / `run_go_binary_scan`. These live in [`scgo.runner_api`](scgo/runner_api.py) and are re-exported from `scgo`.
 
 ---
 
-## What to expect on disk (output) 📂
+## What to expect on disk (output)
 
 When you run a search for composition `Pt4`, SCGO writes into `Pt4_searches/` with the following structure:
 
@@ -147,8 +147,6 @@ params["optimizer_params"]["ga"]["surface_config"] = surface_config
 
 - **Direct API** (any adsorbate size): `from scgo import ga_go, SurfaceSystemConfig` and pass `surface_config=...`.
 - **`run_go`**: set `params["optimizer_params"]["ga"]["surface_config"]` to a `SurfaceSystemConfig` instance. The high-level runner only selects GA when `len(composition) >= 4`, so use **at least four adsorbate atoms** if you rely on automatic algorithm choice; for dimers/trimers, call `ga_go` directly.
-- **Example runner scripts** in `runners/` show the full workflow (minima search + TS search) on graphene slabs. Replace the inline `_make_slab()` helper with any other slab to run on a different surface.
-
 Surface workflows use `from scgo.runner_surface import make_surface_config` with your ASE slab.
 
 ### Slab motion during local relaxation
@@ -169,12 +167,25 @@ Run metadata records a JSON-safe summary of these flags (no embedded `Atoms`) un
 ## Testing
 
 ```bash
+# Fast default
 pytest tests/ -m "not slow"
+
+# Integration-only
+pytest tests/ -m integration
+
+# Slow-only
+pytest tests/ -m slow
+```
+
+For long GA/TorchSim tests, run in foreground with live output (`-s`) and an explicit timeout to avoid “looks stalled” sessions:
+
+```bash
+timeout 5400 pytest tests/ -m "not slow" -vv -s
 ```
 
 ---
 
-## High-Level API 📚
+## High-Level API
 
 Canonical workflow entry points are defined in [`scgo/runner_api.py`](scgo/runner_api.py) and imported from the `scgo` package. Composition arguments may be a **formula string** (`"Pt3Au"`), a **symbol list**, or **`ase.Atoms`** (only symbols are used for GO).
 
@@ -248,7 +259,7 @@ Same pattern: pass `ts_kwargs={...}` for per-run options forwarded to each compo
 - `run_go_ts(composition, *, ga_params, ts_kwargs, ...)`
 - `run_go_ts_campaign(compositions, *, ga_params, ts_kwargs, ...)`
 
-Preset one-element jobs: `run_go_ts_one_element` (see `runners/`).
+Preset one-element jobs: `run_go_ts_one_element`.
 
 ### Advanced / internals
 
@@ -261,7 +272,7 @@ Preset one-element jobs: `run_go_ts_one_element` (see `runners/`).
 
 - TorchSim is an optional tool that provides GPU-accelerated batched optimization when available; SCGO works with EMT (CPU) out of the box for quick tests.
 - For reproducible results, pass `seed=` to the workflow functions above.
-- See `runners/` directory for complete working examples and the `tests/` directory for usage patterns.
+- See `tests/` for concrete usage patterns.
 
 ---
 
