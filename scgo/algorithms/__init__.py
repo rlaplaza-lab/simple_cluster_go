@@ -11,7 +11,7 @@ adapted for atomic cluster structure search:
 
 .. warning::
     These functions are primarily for internal use. Most users should use the
-    high-level API in :mod:`scgo.run_minima` (e.g., :func:`run_scgo_trials`) instead
+    high-level API in :mod:`scgo.runner_api` (e.g., :func:`~scgo.runner_api.run_go`) instead
     of calling these algorithm functions directly.
 """
 

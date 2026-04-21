@@ -19,7 +19,7 @@ from ase.io import read
 from ase.units import Hartree
 
 from scgo.param_presets import get_torchsim_ga_params, get_uma_ga_benchmark_params
-from scgo.run_minima import run_scgo_campaign_one_element
+from scgo.runner_api import run_go_element_scan
 from scgo.utils.atoms_helpers import parse_energy_from_xyz_comment
 from scgo.utils.comparators import (
     PureInteratomicDistanceComparator as InteratomicDistanceComparator,
@@ -110,7 +110,7 @@ def add_common_benchmark_cli(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--uma-task",
         default="oc25",
-        help="UMA task_name (only used when --backend uma).",
+        help="UMA task (only used when --backend uma).",
     )
     parser.add_argument(
         "--clusters",
@@ -173,11 +173,11 @@ def _campaign_cache_key(
 
 
 def _load_latest_ga_profile(
-    output_root: str | Path,
+    output_dir: str | Path,
     cluster_formula: str,
 ) -> dict | None:
     """Load latest GA profile JSON from benchmark run outputs."""
-    root = Path(output_root)
+    root = Path(output_dir)
     run_dirs = sorted(
         (root / f"{cluster_formula}_searches").glob("run_*"),
         key=lambda p: p.name,
@@ -195,11 +195,11 @@ def _load_latest_ga_profile(
 
 
 def load_latest_ga_profile(
-    output_root: str | Path,
+    output_dir: str | Path,
     cluster_formula: str,
 ) -> dict | None:
     """Load latest GA profile JSON from benchmark run outputs."""
-    return _load_latest_ga_profile(output_root, cluster_formula)
+    return _load_latest_ga_profile(output_dir, cluster_formula)
 
 
 def format_ga_profile_lines(
@@ -351,7 +351,7 @@ def _get_campaign_results(
         return cached
 
     params_copy = deepcopy(params)
-    results = run_scgo_campaign_one_element(
+    results = run_go_element_scan(
         element,
         min_atoms,
         max_atoms,
@@ -368,12 +368,12 @@ def get_benchmark_params(
     model_name: str | None = None,
     *,
     backend: str = "mace",
-    uma_task_name: str = "oc25",
+    uma_task: str = "oc25",
 ) -> dict:
     """Build benchmark params: TorchSim GA + MACE (``backend=mace``) or ASE GA + UMA."""
     if backend == "uma":
         mn = model_name or "uma-s-1p2"
-        return get_uma_ga_benchmark_params(seed, model_name=mn, task_name=uma_task_name)
+        return get_uma_ga_benchmark_params(seed, model_name=mn, uma_task=uma_task)
     params = get_torchsim_ga_params(seed=seed)
     params["calculator"] = "MACE"
     if model_name is not None:
@@ -589,7 +589,7 @@ def run_benchmark_suite(
     output_dir: str | Path | None = None,
     *,
     backend: str = "mace",
-    uma_task_name: str = "oc25",
+    uma_task: str = "oc25",
     profile_detail: bool = True,
     profile_top_n: int = 8,
 ) -> list[BenchmarkResult]:
@@ -600,7 +600,7 @@ def run_benchmark_suite(
             seed,
             model_name=model_name,
             backend=backend,
-            uma_task_name=uma_task_name,
+            uma_task=uma_task,
         )
 
     if not clusters:

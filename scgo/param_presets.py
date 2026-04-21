@@ -46,6 +46,9 @@ __all__ = [
     "get_default_uma_params",
     "get_ts_search_params_uma",
     "get_uma_ga_benchmark_params",
+    "build_one_element_go_ts_bundle",
+    "pt5_gas_go_ts_defaults",
+    "pt5_graphite_go_ts_defaults",
 ]
 
 
@@ -109,6 +112,7 @@ def get_default_params() -> dict[str, Any]:
                 "max_mutation_probability": 0.65,
                 "early_stopping_niter": 10,  # Stop if no improvement after N generations
                 "n_jobs_population_init": -2,  # Parallel batch init: -2 = all CPUs except one
+                "n_jobs_offspring": 1,  # Conservative default; opt in for threaded offspring generation
                 "batch_size": None,
                 "relaxer": None,
                 "fitness_strategy": None,  # None = inherit from top-level
@@ -205,7 +209,7 @@ def get_uma_ga_benchmark_params(
     seed: int,
     *,
     model_name: str = "uma-s-1p2",
-    task_name: str = "oc25",
+    uma_task: str = "oc25",
 ) -> dict[str, Any]:
     """GA benchmark parameters matching :func:`_get_base_ga_benchmark_params` but with UMA.
 
@@ -215,7 +219,7 @@ def get_uma_ga_benchmark_params(
     """
     params = _get_base_ga_benchmark_params(seed)
     params["calculator"] = "UMA"
-    params["calculator_kwargs"] = {"model_name": model_name, "task_name": task_name}
+    params["calculator_kwargs"] = {"model_name": model_name, "task_name": uma_task}
 
     from scgo.calculators.torchsim_helpers import TorchSimBatchRelaxer
 
@@ -226,7 +230,7 @@ def get_uma_ga_benchmark_params(
     ga["relaxer"] = TorchSimBatchRelaxer(
         model_kind="fairchem",
         fairchem_model_name=model_name,
-        fairchem_task_name=task_name,
+        fairchem_task_name=uma_task,
         force_tol=fmax_val,
         optimizer_name="fire",
         max_steps=max_steps,
@@ -270,12 +274,12 @@ def get_ts_search_params_uma(
     regime: TsSearchRegime = "gas",
     surface_config: SurfaceSystemConfig | None = None,
     model_name: str = "uma-s-1p2",
-    task_name: str | None = "oc25",
+    uma_task: str | None = "oc25",
 ) -> dict[str, Any]:
-    """TS preset for UMA: ASE NEB (no TorchSim); use with ``scgo[uma]`` only."""
+    """TS preset for UMA (FairChem); same NEB defaults as MACE, for ``scgo[uma]``."""
     return get_ts_search_params(
         calculator="UMA",
-        calculator_kwargs={"model_name": model_name, "task_name": task_name},
+        calculator_kwargs={"model_name": model_name, "task_name": uma_task},
         regime=regime,
         surface_config=surface_config,
     )
@@ -332,24 +336,30 @@ def get_ts_search_params(
     Parameters
     ----------
     calculator:
-        ``"MACE"`` enables TorchSim batched NEB when ``scgo[mace]`` is installed.
-        ``"UMA"`` (and other non-MACE calculators) automatically use ASE NEB
-        (``use_torchsim=False``) regardless of defaults below.
+        ``"MACE"`` / ``"UMA"``: with ``use_torchsim=True`` (the default below),
+        NEB uses TorchSim when the matching extra is installed
+        (``scgo[mace]`` or ``scgo[uma]``); :func:`get_ts_run_kwargs` resolves
+        flags and raises if TorchSim was requested but the stack is missing.
+        Calculators that do not support TorchSim NEB (e.g. ``"EMT"``) must set
+        ``use_torchsim=False`` before calling :func:`get_ts_run_kwargs`.
     regime:
         ``"gas"`` (nanoparticle / non-periodic): ``neb_n_images=5`` for a thicker
         initial band (fewer false endpoint-TS bands than 3 images on metals),
         ``energy_gap_threshold=2.0`` eV so pairs are not dropped when relaxed
         minima span more than 1 eV, and ``neb_climb=False`` (see preset comments).
         ``"surface"`` (slab + adsorbate, periodic in-plane): MIC interpolation,
-        ``neb_n_images=5``, ``neb_climb=False``, and ``fmax=0.1 eV/Å``.
-        Endpoint alignment stays off by default for fixed-slab/PBC (tuned for
-        supported Pt5-on-NiO MACE NEB sweeps). Override any key via the returned
-        dict before calling :func:`get_ts_run_kwargs`.
+        ``neb_interpolation_method=idpp``, ``neb_n_images=5``, ``neb_climb=False``,
+        ``fmax=0.1 eV/Å``, and ``neb_align_endpoints=False`` (Pt5-on-graphite NEB sweeps;
+        see ``benchmark/benchmark_neb_knobs.py``).
+        Override any key via the returned dict before calling
+        :func:`get_ts_run_kwargs`, which applies
+        :func:`~scgo.utils.torchsim_policy.resolve_ts_torchsim_flags` to set
+        effective ``use_torchsim`` / ``use_parallel_neb`` on the runner kwargs.
     surface_config:
         The same :class:`scgo.surface.config.SurfaceSystemConfig` instance wired into
         ``optimizer_params["ga"]["surface_config"]``. Stored on the returned dict
         and forwarded by :func:`get_ts_run_kwargs` so
-        :func:`run_transition_state_search` reapplies
+        :func:`~scgo.runner_api.run_transition_state_search` (``ts_kwargs=``) reapplies
         ``attach_slab_constraints`` on NEB endpoints (frozen vs partially relaxed
         slab stays consistent with global optimization). Omit for gas-phase or when
         minima already carry the intended constraints.
@@ -401,16 +411,21 @@ def get_ts_search_params(
             "neb_interpolation_method": "idpp",
             "neb_tangent_method": DEFAULT_NEB_TANGENT_METHOD,
             # TS minima deduplication defaults (keeps behavior consistent with
-            # global-optimization `run_minima.py` and helpers.filter_unique_minima)
+            # global optimization in :mod:`scgo.run_minima` / :mod:`scgo.runner_api`
+            # and helpers.filter_unique_minima)
             "dedupe_minima": True,
             "minima_energy_tolerance": DEFAULT_ENERGY_TOLERANCE,
         }
     )
 
     if regime == "surface":
-        # Supported nanoparticle-on-slab (e.g. Pt5 on NiO): recent ASE/MACE benchmark
-        # sweeps favor linear interpolation with MIC and non-climbing NEB at
-        # ``n_images=5`` and ``fmax=0.1`` for better success/step tradeoff.
+        # Pt5-on-graphite (MACE + TorchSim NEB when ``scgo[mace]`` is installed),
+        # ``benchmark_neb_knobs.py``:
+        # (1) ``neb_n_images`` in {3, 5, 7} × ``neb_climb`` with linear + MIC: ``n=5``,
+        #     ``climb=False`` best on composite; climbing hurt.
+        # (2) linear vs idpp × ``neb_align_endpoints`` (fixed ``n=5``, ``climb=False``):
+        #     idpp + align False beat linear + align False on success and composite;
+        #     align True hurt both interpolators.
         params.update(
             {
                 "neb_interpolation_mic": True,
@@ -421,7 +436,7 @@ def get_ts_search_params(
                 "neb_steps": 500,
                 "torchsim_max_steps": 500,
                 "neb_climb": False,
-                "neb_interpolation_method": "linear",
+                "neb_interpolation_method": "idpp",
                 "neb_align_endpoints": False,
             }
         )
@@ -429,25 +444,20 @@ def get_ts_search_params(
     if surface_config is not None:
         params["surface_config"] = surface_config
 
-    us, up = resolve_ts_torchsim_flags(
-        str(params["calculator"]),
-        params.get("use_torchsim"),
-        params.get("use_parallel_neb"),
-    )
-    params["use_torchsim"] = us
-    params["use_parallel_neb"] = up
-
     return params
 
 
 def get_ts_run_kwargs(ts_params: dict[str, Any] | None = None) -> dict[str, Any]:
-    """Return a kwargs dict ready to pass to `run_transition_state_search`.
-
-    This prevents callers from having to unpack many individual TS/NEB keys.
+    """Return a dict suitable for :func:`~scgo.runner_api.run_transition_state_search` ``ts_kwargs``.
 
     Example:
+
+        from scgo.runner_api import run_transition_state_search
+
         ts_params = get_ts_search_params()
-        results = run_transition_state_search(composition, **get_ts_run_kwargs(ts_params))
+        results = run_transition_state_search(
+            composition, params=..., ts_kwargs=get_ts_run_kwargs(ts_params)
+        )
     """
     if ts_params is None:
         ts_params = get_ts_search_params()
@@ -510,3 +520,92 @@ def get_ts_run_kwargs(ts_params: dict[str, Any] | None = None) -> dict[str, Any]
         kwargs[key] = ts_params.get(key, def_val)
 
     return kwargs
+
+
+def build_one_element_go_ts_bundle(
+    *,
+    backend: str,
+    seed: int,
+    niter: int,
+    population_size: int,
+    max_pairs: int,
+    regime: TsSearchRegime = "gas",
+    model_name: str | None = None,
+    uma_task: str = "oc25",
+    surface_config: SurfaceSystemConfig | None = None,
+    ga_n_jobs_population_init: int | None = None,
+    ga_batch_size: int | None = None,
+) -> dict[str, Any]:
+    """Build GA params + TS kwargs for one-element GO->TS example workflows."""
+    backend_norm = str(backend).strip().lower()
+    if backend_norm not in {"mace", "uma"}:
+        raise ValueError("backend must be 'mace' or 'uma'")
+    if seed < 0:
+        raise ValueError("seed must be >= 0")
+    if niter < 1:
+        raise ValueError("niter must be >= 1")
+    if population_size < 1:
+        raise ValueError("population_size must be >= 1")
+    if max_pairs < 1:
+        raise ValueError("max_pairs must be >= 1")
+
+    if backend_norm == "uma":
+        selected_model_name = model_name or "uma-s-1p2"
+        ga_params = get_uma_ga_benchmark_params(
+            seed,
+            model_name=selected_model_name,
+            uma_task=uma_task,
+        )
+        ts_params = get_ts_search_params_uma(
+            regime=regime,
+            surface_config=surface_config,
+            model_name=selected_model_name,
+            uma_task=uma_task,
+        )
+    else:
+        ga_params = get_torchsim_ga_params(seed=seed)
+        ga_params["calculator"] = "MACE"
+        if model_name is not None:
+            ga_params["calculator_kwargs"]["model_name"] = model_name
+
+        ts_params = get_ts_search_params(
+            regime=regime,
+            surface_config=surface_config,
+        )
+        if model_name is not None:
+            ts_params["calculator_kwargs"]["model_name"] = model_name
+
+    ga = ga_params["optimizer_params"]["ga"]
+    ga["niter"] = niter
+    ga["population_size"] = population_size
+    if surface_config is not None:
+        ga["surface_config"] = surface_config
+    if ga_n_jobs_population_init is not None:
+        ga["n_jobs_population_init"] = ga_n_jobs_population_init
+    if ga_batch_size is not None:
+        ga["batch_size"] = ga_batch_size
+
+    ts_kwargs = get_ts_run_kwargs(ts_params)
+    ts_kwargs["max_pairs"] = max_pairs
+
+    return {
+        "ga_params": ga_params,
+        "ts_kwargs": ts_kwargs,
+        "backend": backend_norm,
+    }
+
+
+def pt5_gas_go_ts_defaults() -> dict[str, int]:
+    """Numeric GO+TS defaults for the Pt5 gas-phase production runner example."""
+    return {"niter": 10, "population_size": 50, "max_pairs": 15}
+
+
+def pt5_graphite_go_ts_defaults() -> dict[str, Any]:
+    """GO+TS defaults for the Pt5 graphite-surface production runner example."""
+    return {
+        "niter": 6,
+        "population_size": 24,
+        "max_pairs": 10,
+        "ga_n_jobs_population_init": -2,
+        "ga_batch_size": 4,
+    }

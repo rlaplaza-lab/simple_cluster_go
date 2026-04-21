@@ -2,7 +2,7 @@
 
 import pytest
 
-from scgo import run_scgo_campaign_one_element
+from scgo import run_go_element_scan
 from scgo.calculators.orca_helpers import prepare_orca_calculations
 from scgo.database.registry import clear_registry_cache
 from scgo.param_presets import get_testing_params
@@ -11,7 +11,7 @@ from scgo.utils.helpers import get_cluster_formula
 
 
 @pytest.mark.slow
-def test_emulate_run_Pt4_6_orca_lowe_and_ts_search(tmp_path):
+def test_emulate_run_pt4_6_orca_lowe_and_ts_search(tmp_path):
     """Emulate GA → ORCA → TS workflow and DB reuse (single GA campaign).
 
     Merges the former split tests that each ran an identical GA campaign.
@@ -20,7 +20,7 @@ def test_emulate_run_Pt4_6_orca_lowe_and_ts_search(tmp_path):
     compositions = [["Pt"] * n for n in range(4, 7)]
 
     ga_params = get_testing_params()
-    minima_by_formula = run_scgo_campaign_one_element(
+    minima_by_formula = run_go_element_scan(
         "Pt", 4, 6, params=ga_params, seed=42, verbosity=0, output_dir=tmp_path
     )
     assert minima_by_formula, "Expected minima from the GA campaign"
@@ -41,11 +41,11 @@ def test_emulate_run_Pt4_6_orca_lowe_and_ts_search(tmp_path):
 
     for comp in compositions:
         formula = get_cluster_formula(comp)
-        base_dir = tmp_path / f"{formula}_searches"
+        output_dir = tmp_path / f"{formula}_searches"
 
         results = run_transition_state_search(
             comp,
-            base_dir=base_dir,
+            output_dir=output_dir,
             params={"calculator": "EMT"},
             seed=42,
             verbosity=0,
@@ -58,7 +58,7 @@ def test_emulate_run_Pt4_6_orca_lowe_and_ts_search(tmp_path):
         assert isinstance(results, list)
         assert 0 < len(results) <= 10
 
-        final_dir = base_dir / f"ts_results_{formula}" / "final_unique_ts"
+        final_dir = output_dir / f"ts_results_{formula}" / "final_unique_ts"
         assert final_dir.exists()
         summary_file = final_dir / f"final_unique_ts_summary_{formula}.json"
         assert summary_file.exists()

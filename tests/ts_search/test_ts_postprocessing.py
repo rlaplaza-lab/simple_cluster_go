@@ -485,7 +485,7 @@ def test_run_transition_state_search_skips_tagging_when_no_db(
 
     run_transition_state_search(
         ["Pt", "Pt"],
-        base_dir=str(tmp_path),
+        output_dir=str(tmp_path),
         params={"calculator": "EMT", "calculator_kwargs": {}},
         tag_ts_in_db=True,
         verbosity=2,
@@ -583,7 +583,7 @@ def test_run_transition_state_search_records_minima_provenance(monkeypatch, tmp_
     # Run TS search and enable DB tagging
     run_transition_state_search(
         ["Pt", "Pt"],
-        base_dir=str(tmp_path),
+        output_dir=str(tmp_path),
         params={"calculator": "EMT", "calculator_kwargs": {}},
         tag_ts_in_db=True,
         verbosity=0,

@@ -7,7 +7,7 @@ def test_import_scgo_without_eager_torchsim():
     import scgo
 
     assert scgo.__version__
-    assert hasattr(scgo, "run_scgo_trials")
+    assert hasattr(scgo, "run_go")
 
 
 def test_lazy_ga_go_torchsim_import_error_message():

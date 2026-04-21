@@ -4,7 +4,11 @@ import pytest
 from ase.build import fcc111
 
 from scgo.constants import DEFAULT_ENERGY_TOLERANCE, DEFAULT_NEB_TANGENT_METHOD
-from scgo.param_presets import get_ts_run_kwargs, get_ts_search_params
+from scgo.param_presets import (
+    build_one_element_go_ts_bundle,
+    get_ts_run_kwargs,
+    get_ts_search_params,
+)
 from scgo.surface.config import SurfaceSystemConfig
 
 
@@ -61,7 +65,7 @@ def test_ts_search_surface_regime_mic_and_fmax():
     assert ts["neb_steps"] == 500
     assert ts["torchsim_max_steps"] == 500
     assert ts["neb_climb"] is False
-    assert ts["neb_interpolation_method"] == "linear"
+    assert ts["neb_interpolation_method"] == "idpp"
     assert ts["neb_align_endpoints"] is False
     kwargs = get_ts_run_kwargs(ts)
     assert kwargs["neb_interpolation_mic"] is True
@@ -69,7 +73,7 @@ def test_ts_search_surface_regime_mic_and_fmax():
     assert kwargs["neb_climb"] is False
     assert kwargs["neb_fmax"] == pytest.approx(0.1)
     assert kwargs["neb_steps"] == 500
-    assert kwargs["neb_interpolation_method"] == "linear"
+    assert kwargs["neb_interpolation_method"] == "idpp"
     assert kwargs["torchsim_params"]["force_tol"] == pytest.approx(0.1)
     assert kwargs["torchsim_params"]["max_steps"] == 500
     assert kwargs["neb_align_endpoints"] is False
@@ -113,3 +117,50 @@ def test_loaders_default_to_final_unique_minima():
     # require_final_unique_ts
     assert extract_transition_states_from_database_file.__defaults__[1] is True
     assert load_transition_states_by_composition.__defaults__[1] is True
+
+
+def test_build_one_element_go_ts_bundle_gas():
+    pytest.importorskip("mace")
+    bundle = build_one_element_go_ts_bundle(
+        backend="mace",
+        seed=7,
+        niter=8,
+        population_size=18,
+        max_pairs=12,
+        regime="gas",
+    )
+    assert bundle["backend"] == "mace"
+    ga = bundle["ga_params"]["optimizer_params"]["ga"]
+    assert ga["niter"] == 8
+    assert ga["population_size"] == 18
+    assert bundle["ts_kwargs"]["max_pairs"] == 12
+    assert bundle["ts_kwargs"]["surface_config"] is None
+
+
+def test_build_one_element_go_ts_bundle_surface_has_surface_config():
+    pytest.importorskip("mace")
+    slab = fcc111("Pt", size=(2, 2, 1), vacuum=6.0, orthogonal=True)
+    slab.pbc = [True, True, True]
+    cfg = SurfaceSystemConfig(slab=slab, fix_all_slab_atoms=True)
+    bundle = build_one_element_go_ts_bundle(
+        backend="mace",
+        seed=7,
+        niter=8,
+        population_size=18,
+        max_pairs=12,
+        regime="surface",
+        surface_config=cfg,
+    )
+    assert bundle["ga_params"]["optimizer_params"]["ga"]["surface_config"] is cfg
+    assert bundle["ts_kwargs"]["surface_config"] is cfg
+
+
+def test_build_one_element_go_ts_bundle_validates_backend():
+    with pytest.raises(ValueError, match="backend"):
+        build_one_element_go_ts_bundle(
+            backend="emt",
+            seed=7,
+            niter=8,
+            population_size=18,
+            max_pairs=12,
+        )

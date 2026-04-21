@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import math
 import os
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import suppress
 from time import perf_counter
 from typing import Any
@@ -57,6 +58,20 @@ from scgo.utils.logging import get_logger, should_show_progress
 from scgo.utils.mutation_weights import get_adaptive_mutation_config
 from scgo.utils.rng_helpers import ensure_rng_or_create
 from scgo.utils.validation import validate_composition
+
+
+def _resolve_parallel_worker_count(n_jobs: int, n_tasks: int) -> int:
+    """Resolve worker count from initialization-style semantics."""
+    if n_tasks <= 1:
+        return 1
+    cpu_count = os.cpu_count() or 1
+    if n_jobs == -1:
+        requested = cpu_count
+    elif n_jobs == -2:
+        requested = max(1, cpu_count - 1)
+    else:
+        requested = n_jobs
+    return max(1, min(requested, n_tasks))
 
 
 def _torchsim_prepare_relaxed_copy(
@@ -212,6 +227,7 @@ def ga_go_torchsim(
     population_size: int = 10,
     offspring_fraction: float = 0.5,
     n_jobs_population_init: int = -2,
+    n_jobs_offspring: int = 1,
     vacuum: float = 10.0,
     previous_search_glob: str = "**/*.db",
     use_adaptive_mutations: bool = True,
@@ -281,6 +297,10 @@ def ga_go_torchsim(
         offspring_fraction=offspring_fraction,
         vacuum=vacuum,
     )
+    if n_jobs_offspring not in (-1, -2) and n_jobs_offspring < 1:
+        raise ValueError(
+            f"n_jobs_offspring must be -1, -2, or >= 1, got {n_jobs_offspring}"
+        )
 
     # Validate and normalize fitness strategy (coerce to Enum)
     validate_fitness_strategy(fitness_strategy)
@@ -634,38 +654,120 @@ def ga_go_torchsim(
             t_crossover_gen = 0.0
             t_mutation_gen = 0.0
             t_db_unrelaxed_gen = 0.0
+            t_offspring_parallel_wall_gen = 0.0
             while created < n_offspring and attempts < max_attempts:
-                attempts += 1
-                t0 = perf_counter()
-                candidates = population.get_two_candidates()
-                t_parent_select_gen += perf_counter() - t0
-                if candidates is None:
-                    continue
-                a1, a2 = candidates
-                t0 = perf_counter()
-                a3, desc = pairing.get_new_individual([a1, a2])
-                t_crossover_gen += perf_counter() - t0
-                if a3 is None:
-                    continue
-
-                if rng.random() < current_mutation_probability:
+                attempts_remaining = max_attempts - attempts
+                if attempts_remaining <= 0:
+                    break
+                jobs_target = min(n_offspring - created, attempts_remaining)
+                jobs: list[dict[str, Any]] = []
+                for _ in range(jobs_target):
+                    attempts += 1
                     t0 = perf_counter()
-                    mutated = mutations.get_operator().mutate(a3)
-                    t_mutation_gen += perf_counter() - t0
-                    if mutated is not None:
-                        a3 = mutated
+                    candidates = population.get_two_candidates()
+                    t_parent_select_gen += perf_counter() - t0
+                    if candidates is None:
+                        continue
+                    a1, a2 = candidates
+                    task_seed = int(rng.integers(0, 2**31 - 1))
+                    jobs.append(
+                        {
+                            "index": len(jobs),
+                            "a1": a1,
+                            "a2": a2,
+                            "task_seed": task_seed,
+                        }
+                    )
+                if not jobs:
+                    continue
 
-                t0 = perf_counter()
-                database_retry(
-                    lambda _a3=a3, _desc=desc: da.add_unrelaxed_candidate(
-                        _a3, description=_desc
-                    ),
-                    max_retries=5,
-                    operation_name="add_unrelaxed_offspring",
-                )
-                t_db_unrelaxed_gen += perf_counter() - t0
+                n_workers = _resolve_parallel_worker_count(n_jobs_offspring, len(jobs))
 
-                created += 1
+                def _build_offspring(job: dict[str, Any]) -> dict[str, Any]:
+                    task_rng = np.random.default_rng(job["task_seed"])
+                    local_pairing = create_ga_pairing(
+                        atoms_template,
+                        n_to_optimize,
+                        task_rng,
+                        slab_atoms=slab_for_pairing,
+                    )
+                    local_ops, local_name_map = create_mutation_operators(
+                        composition=composition,
+                        n_to_optimize=n_to_optimize,
+                        blmin=blmin,
+                        rng=task_rng,
+                        use_adaptive=use_adaptive_mutations,
+                        n_slab=n_slab,
+                        surface_normal_axis=(
+                            surface_config.surface_normal_axis
+                            if surface_config is not None
+                            else 2
+                        ),
+                    )
+                    local_mutations = update_mutation_weights(
+                        operators_list=local_ops,
+                        name_map=local_name_map,
+                        adaptive_config=adaptive_config,
+                    )
+                    crossover_t0 = perf_counter()
+                    child, desc = local_pairing.get_new_individual([job["a1"], job["a2"]])
+                    crossover_s = perf_counter() - crossover_t0
+                    mutation_s = 0.0
+                    if child is None:
+                        return {
+                            "index": job["index"],
+                            "child": None,
+                            "desc": None,
+                            "crossover_s": crossover_s,
+                            "mutation_s": mutation_s,
+                        }
+                    if task_rng.random() < current_mutation_probability:
+                        mutation_t0 = perf_counter()
+                        mutated = local_mutations.get_operator().mutate(child)
+                        mutation_s = perf_counter() - mutation_t0
+                        if mutated is not None:
+                            child = mutated
+                    return {
+                        "index": job["index"],
+                        "child": child,
+                        "desc": desc,
+                        "crossover_s": crossover_s,
+                        "mutation_s": mutation_s,
+                    }
+
+                t_parallel = perf_counter()
+                job_results: dict[int, dict[str, Any]] = {}
+                with ThreadPoolExecutor(max_workers=n_workers) as executor:
+                    futures = [executor.submit(_build_offspring, job) for job in jobs]
+                    for future in as_completed(futures):
+                        try:
+                            result = future.result()
+                        except Exception:
+                            continue
+                        job_results[result["index"]] = result
+                t_offspring_parallel_wall_gen += perf_counter() - t_parallel
+
+                for idx in range(len(jobs)):
+                    if created >= n_offspring:
+                        break
+                    result = job_results.get(idx)
+                    if result is None:
+                        continue
+                    t_crossover_gen += float(result["crossover_s"])
+                    t_mutation_gen += float(result["mutation_s"])
+                    child = result["child"]
+                    if child is None:
+                        continue
+                    t0 = perf_counter()
+                    database_retry(
+                        lambda _a3=child, _desc=result["desc"]: da.add_unrelaxed_candidate(
+                            _a3, description=_desc
+                        ),
+                        max_retries=5,
+                        operation_name="add_unrelaxed_offspring",
+                    )
+                    t_db_unrelaxed_gen += perf_counter() - t0
+                    created += 1
             profile_timings["offspring_mutation_queue_s"] = profile_timings.get(
                 "offspring_mutation_queue_s", 0.0
             ) + (perf_counter() - t_loop)
@@ -682,6 +784,10 @@ def ga_go_torchsim(
             profile_timings["offspring_unrelaxed_insert_s"] = (
                 profile_timings.get("offspring_unrelaxed_insert_s", 0.0)
                 + t_db_unrelaxed_gen
+            )
+            profile_timings["offspring_parallel_wall_s"] = (
+                profile_timings.get("offspring_parallel_wall_s", 0.0)
+                + t_offspring_parallel_wall_gen
             )
             profile_counters["offspring_created"] += created
 
@@ -772,6 +878,7 @@ def ga_go_torchsim(
                         "crossover_s": t_crossover_gen,
                         "mutation_s": t_mutation_gen,
                         "db_unrelaxed_insert_s": t_db_unrelaxed_gen,
+                        "offspring_parallel_wall_s": t_offspring_parallel_wall_gen,
                         "torchsim_db_read_s": gen_db_read_s,
                         "torchsim_relax_s": gen_relax_s,
                         "torchsim_db_write_s": gen_db_write_s,

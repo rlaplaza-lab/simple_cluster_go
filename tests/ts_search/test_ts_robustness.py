@@ -120,7 +120,7 @@ def test_run_transition_state_search_handles_cuda_oom(monkeypatch):
 
         results = run_transition_state_search(
             composition=["Cu", "Cu"],
-            base_dir=tmpdir,
+            output_dir=tmpdir,
             params=params,
             verbosity=0,
             max_pairs=1,
@@ -199,7 +199,7 @@ def test_pairwise_cleanup_even_without_errors(monkeypatch):
 
         results = run_transition_state_search(
             composition=["Cu", "Cu"],
-            base_dir=tmpdir,
+            output_dir=tmpdir,
             params=params,
             verbosity=0,
             max_pairs=2,
@@ -218,7 +218,7 @@ def test_transition_state_results_do_not_retain_calculators(tmp_path):
     params = {"calculator": "EMT", "calculator_kwargs": {}}
     results = run_transition_state_search(
         composition=["H", "H"],
-        base_dir=tmp_path,
+        output_dir=tmp_path,
         params=params,
         verbosity=0,
         max_pairs=1,
@@ -271,7 +271,7 @@ def test_gpu_memory_does_not_grow(tmp_path, monkeypatch):
     before = torch.cuda.memory_allocated()
     run_transition_state_search(
         composition=["Cu", "Cu"],
-        base_dir=str(tmp_path),
+        output_dir=str(tmp_path),
         params=params,
         verbosity=0,
         max_pairs=1,
@@ -285,7 +285,7 @@ def test_gpu_memory_does_not_grow(tmp_path, monkeypatch):
     mid = torch.cuda.memory_allocated()
     run_transition_state_search(
         composition=["Cu", "Cu"],
-        base_dir=str(tmp_path),
+        output_dir=str(tmp_path),
         params=params,
         verbosity=0,
         max_pairs=1,

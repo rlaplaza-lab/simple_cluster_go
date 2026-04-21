@@ -1,4 +1,8 @@
-"""User-facing functions to run global optimization (minima search) campaigns."""
+"""Global optimization (minima search) campaign implementations.
+
+For stable workflow entry points (single GO, campaign GO, TS, GO+TS), prefer
+:mod:`scgo.runner_api`.
+"""
 
 from __future__ import annotations
 
@@ -7,6 +11,7 @@ import re
 import sqlite3
 from collections.abc import Iterable
 from pathlib import Path
+from time import perf_counter
 from typing import Any
 
 from ase import Atoms
@@ -219,7 +224,8 @@ def parse_composition_arg(comp_str: str) -> list[str]:
     return composition
 
 
-# CLI removed: programmatic API remains. Use `run_scgo_trials(...)` and TS APIs directly.
+# CLI removed: programmatic API remains. Prefer :mod:`scgo.runner_api` for workflows;
+# this module holds implementation entry points used by that layer.
 
 
 def run_scgo_campaign_one_element(
@@ -426,10 +432,141 @@ def run_scgo_campaign_arbitrary_compositions(
     return all_results
 
 
+def run_scgo_go_ts_pipeline(
+    composition: list[str],
+    *,
+    ga_params: dict[str, Any],
+    ts_kwargs: dict[str, Any],
+    seed: int | None = None,
+    verbosity: int = 1,
+    output_dir: str | Path | None = None,
+    ts_composition: list[str] | None = None,
+    infer_ts_composition_from_minima: bool = False,
+) -> dict[str, Any]:
+    """Run global optimization then transition-state search; return a compact run summary.
+
+    Minima are written under ``output_path / f"{formula}_searches"`` so
+    :func:`~scgo.ts_search.transition_state_run.run_transition_state_search` can
+    load them. For high-level entry points see :mod:`scgo.runner_api`.
+    """
+    configure_logging(verbosity)
+    logger = get_logger(__name__)
+
+    validate_composition(composition, allow_empty=False, allow_tuple=False)
+
+    formula = get_cluster_formula(composition)
+    output_path = (
+        Path(output_dir).expanduser().resolve()
+        if output_dir is not None
+        else Path(f"{formula}_campaign")
+    )
+    output_path.mkdir(parents=True, exist_ok=True)
+    ts_base_dir = output_path / f"{formula}_searches"
+
+    start = perf_counter()
+    merged_ga = initialize_params(None if ga_params is None else dict(ga_params))
+    calculator_kwargs = merged_ga.get("calculator_kwargs", {})
+    validate_calculator(merged_ga.get("calculator", "MACE"))
+    calculator_for_global_optimization = get_calculator_class(merged_ga["calculator"])(
+        **calculator_kwargs,
+    )
+    try:
+        minima_list = run_scgo_trials(
+            composition,
+            params=merged_ga,
+            seed=seed,
+            verbosity=verbosity,
+            output_dir=str(ts_base_dir),
+            calculator_for_global_optimization=calculator_for_global_optimization,
+        )
+    finally:
+        del calculator_for_global_optimization
+        cleanup_torch_cuda(logger=logger)
+
+    minima_by_formula = {formula: minima_list}
+
+    if ts_composition is not None:
+        composition_for_ts = ts_composition
+    elif infer_ts_composition_from_minima:
+        from scgo.runner_surface import read_full_composition_from_first_xyz
+
+        final_minima_dir = ts_base_dir / "final_unique_minima"
+        composition_for_ts = read_full_composition_from_first_xyz(final_minima_dir)
+    else:
+        composition_for_ts = composition
+
+    ts_kwargs_local = dict(ts_kwargs)
+    ts_kwargs_local.pop("base_dir", None)
+    ts_kwargs_local.pop("seed", None)
+    ts_kwargs_local.pop("verbosity", None)
+
+    from scgo.ts_search import run_transition_state_search
+
+    ts_results = run_transition_state_search(
+        composition_for_ts,
+        output_dir=ts_base_dir,
+        seed=seed,
+        verbosity=verbosity,
+        **ts_kwargs_local,
+    )
+    ts_success = sum(1 for result in ts_results if result.get("status") == "success")
+
+    elapsed_s = perf_counter() - start
+    logger.info(
+        "Completed GO->TS pipeline for %s: successful NEBs=%d/%d, wall_time=%.2f s",
+        formula,
+        ts_success,
+        len(ts_results),
+        elapsed_s,
+    )
+    return {
+        "formula": formula,
+        "output_dir": output_path,
+        "ts_base_dir": ts_base_dir,
+        "minima_by_formula": minima_by_formula,
+        "ts_results": ts_results,
+        "ts_success_count": ts_success,
+        "ts_total_count": len(ts_results),
+        "wall_time_s": elapsed_s,
+    }
+
+
+def run_scgo_one_element_go_ts_pipeline(
+    element: str,
+    n_atoms: int,
+    *,
+    ga_params: dict[str, Any],
+    ts_kwargs: dict[str, Any],
+    seed: int | None = None,
+    verbosity: int = 1,
+    output_dir: str | Path | None = None,
+    ts_composition: list[str] | None = None,
+    infer_ts_composition_from_minima: bool = False,
+) -> dict[str, Any]:
+    """Run one-element GO then TS and return a compact run summary."""
+    if not element or not isinstance(element, str):
+        raise ValueError("element must be a non-empty string")
+    if n_atoms < 1:
+        raise ValueError("n_atoms must be >= 1")
+    composition = [element] * n_atoms
+    return run_scgo_go_ts_pipeline(
+        composition,
+        ga_params=ga_params,
+        ts_kwargs=ts_kwargs,
+        seed=seed,
+        verbosity=verbosity,
+        output_dir=output_dir,
+        ts_composition=ts_composition,
+        infer_ts_composition_from_minima=infer_ts_composition_from_minima,
+    )
+
+
 __all__ = [
     "run_scgo_trials",
     "run_scgo_campaign_one_element",
     "run_scgo_campaign_two_elements",
     "run_scgo_campaign_arbitrary_compositions",
+    "run_scgo_go_ts_pipeline",
+    "run_scgo_one_element_go_ts_pipeline",
     "parse_composition_arg",
 ]

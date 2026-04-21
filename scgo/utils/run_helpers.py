@@ -1,6 +1,7 @@
 """Helper functions for running SCGO campaigns.
 
-This module provides utility functions used by the high-level API in scgo.run_minima
+This module provides utility functions used by the high-level API in
+scgo.run_minima / :mod:`scgo.runner_api`
 to eliminate code duplication and improve maintainability.
 """
 

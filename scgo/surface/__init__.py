@@ -15,6 +15,13 @@ from scgo.surface.deposition import (
     slab_surface_extreme,
 )
 from scgo.surface.objectives import adsorption_energy
+from scgo.surface.presets import (
+    DEFAULT_GRAPHITE_SLAB_LAYERS,
+    DEFAULT_GRAPHITE_SLAB_REPEAT_XY,
+    DEFAULT_GRAPHITE_SLAB_VACUUM,
+    build_graphite_slab,
+    make_graphite_surface_config,
+)
 from scgo.surface.validation import (
     validate_stored_slab_adsorbate_metadata,
     validate_supported_cluster_deposit,
@@ -34,4 +41,9 @@ __all__ = [
     "validate_stored_slab_adsorbate_metadata",
     "validate_supported_cluster_deposit",
     "validate_surface_config_slab_prefix",
+    "DEFAULT_GRAPHITE_SLAB_LAYERS",
+    "DEFAULT_GRAPHITE_SLAB_REPEAT_XY",
+    "DEFAULT_GRAPHITE_SLAB_VACUUM",
+    "build_graphite_slab",
+    "make_graphite_surface_config",
 ]

@@ -33,7 +33,7 @@ def test_get_default_uma_params():
     assert p["calculator_kwargs"]["task_name"] == "oc25"
 
 
-def test_get_ts_search_params_uma_disables_torchsim():
+def test_get_ts_search_params_uma_default_torchsim_flags():
     pytest.importorskip("fairchem")
     from scgo.param_presets import get_ts_search_params_uma
 

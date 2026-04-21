@@ -40,6 +40,8 @@ pip install -e ".[mace]"   # or: pip install -e ".[uma]"
 
 For pip installs, the same TorchSim stack applies: ensure `nvalchemi-toolkit-ops` is available; uninstall `vesin` and `vesin-torch` if you see TorchSim-related errors.
 
+Dependency note: SCGO now allows `scipy>=1.14,<3` so the UMA/fairchem extra can resolve cleanly with `torch-sim-atomistic[fairchem]` (which constrains SciPy to `<1.17` in current releases).
+
 For development with tests and linting (after a **runtime-only** `pip install -e .`):
 
 ```bash
@@ -58,13 +60,13 @@ pre-commit install
 ## Quick start (3 lines) 💡
 
 ```python
-from scgo import run_scgo_trials
+from scgo import run_go
 from scgo.param_presets import get_testing_params
-results = run_scgo_trials(["Pt"]*4, params=get_testing_params(), seed=42)
+results = run_go(["Pt"] * 4, params=get_testing_params(), seed=42)
 ```
 
 - `results` is a list of `(energy, Atoms)` for unique minima (sorted by energy by default).
-- The public helpers include `run_scgo_campaign_one_element(...)` and `run_scgo_campaign_two_elements(...)` for campaigns.
+- Sequential multi-composition GO: `run_go_campaign([...])`. Size sweeps: `run_go_element_scan` / `run_go_binary_scan`. All of these live in [`scgo.runner_api`](scgo/runner_api.py) and are re-exported from `scgo`.
 
 ---
 
@@ -91,7 +93,7 @@ Notes:
 
 ### Transition state search (`ts_results_{formula}/`)
 
-`run_transition_state_search(...)` reads minima from `{formula}_searches/` (or the `base_dir` you pass) and writes **under the same tree** into a dedicated folder:
+`run_ts_search` (from `scgo`, wrapping [`scgo.runner_api`](scgo/runner_api.py)) reads minima from `{formula}_searches/` (or the `output_dir` you pass) and writes **under the same tree** into a dedicated folder:
 
 - `{formula}_searches/ts_results_{formula}/`
   - **Per pair** `pair_id` (e.g. `0_1`): `ts_{pair_id}.xyz`, `reactant_{pair_id}.xyz`, `product_{pair_id}.xyz` (when geometries exist), and `neb_{pair_id}_metadata.json`
@@ -109,7 +111,7 @@ Notes:
 
 - `params` come from presets: `get_default_params()`, `get_testing_params()`, `get_high_energy_params()`, `get_diversity_params()`.
 
-Tagging final minima in databases: ✅ After writing final XYZ files, SCGO can optionally tag the corresponding database records with metadata ("final_unique_minimum": true, "final_rank", and "final_written") so downstream tools can find final minima without re-scanning databases. This behaviour is enabled by default and can be disabled by setting `params['tag_final_minima'] = False` when calling `run_scgo_trials(...)`.
+Tagging final minima in databases: ✅ After writing final XYZ files, SCGO can optionally tag the corresponding database records with metadata ("final_unique_minimum": true, "final_rank", and "final_written") so downstream tools can find final minima without re-scanning databases. This behaviour is enabled by default and can be disabled by setting `params['tag_final_minima'] = False` when calling `run_go(...)`.
 - `fitness_strategy`: `low_energy` (default), `high_energy`, `diversity`.
 - `validate_with_hessian` (bool): run force + Hessian checks (uses ASE vibrational analysis).
 - **GA backend**: MLIPs use TorchSim batched GA; classical calculators use ASE GA.
@@ -144,7 +146,7 @@ params["optimizer_params"]["ga"]["surface_config"] = surface_config
 ```
 
 - **Direct API** (any adsorbate size): `from scgo import ga_go, SurfaceSystemConfig` and pass `surface_config=...`.
-- **`run_scgo_trials`**: set `params["optimizer_params"]["ga"]["surface_config"]` to a `SurfaceSystemConfig` instance. The high-level runner only selects GA when `len(composition) >= 4`, so use **at least four adsorbate atoms** if you rely on automatic algorithm choice; for dimers/trimers, call `ga_go` directly.
+- **`run_go`**: set `params["optimizer_params"]["ga"]["surface_config"]` to a `SurfaceSystemConfig` instance. The high-level runner only selects GA when `len(composition) >= 4`, so use **at least four adsorbate atoms** if you rely on automatic algorithm choice; for dimers/trimers, call `ga_go` directly.
 - **Example runner scripts** in `runners/` show the full workflow (minima search + TS search) on graphene slabs. Replace the inline `_make_slab()` helper with any other slab to run on a different surface.
 
 Surface workflows use `from scgo.runner_surface import make_surface_config` with your ASE slab.
@@ -174,162 +176,91 @@ pytest tests/ -m "not slow"
 
 ## High-Level API 📚
 
-### Global Optimization
+Canonical workflow entry points are defined in [`scgo/runner_api.py`](scgo/runner_api.py) and imported from the `scgo` package. Composition arguments may be a **formula string** (`"Pt3Au"`), a **symbol list**, or **`ase.Atoms`** (only symbols are used for GO).
 
-#### `run_scgo_trials(composition, params=None, seed=None, ...)`
+### Global optimization
 
-Run global optimization for a single composition.
+#### `run_go(composition, params=None, seed=None, ...)`
+
+Single composition; returns a list of `(energy, Atoms)` unique minima.
 
 ```python
-from scgo import run_scgo_trials
+from scgo import run_go
 from scgo.param_presets import get_default_params
 
-results = run_scgo_trials(
-    composition=["Pt", "Pt", "Pt", "Pt"],
+results = run_go(
+    ["Pt", "Pt", "Pt", "Pt"],
     params=get_default_params(),
     seed=42,
     verbosity=1,
     clean=False,
-    output_dir=None
+    output_dir=None,
 )
-# Returns: list of (energy, Atoms) tuples for unique minima
 ```
 
-**Parameters:**
-- `composition`: List of atomic symbols, e.g., `["Pt", "Pt", "Au"]`
-- `params`: Parameter dict from `get_default_params()` or `get_testing_params()` (default: `get_default_params()`)
-- `seed`: Random seed for reproducibility (default: None = random)
-- `verbosity`: 0=quiet, 1=normal, 2=debug, 3=trace (default: 1)
-- `clean`: If True, ignore previous runs (default: False)
-- `output_dir`: Base output directory (default: `{formula}_searches`)
+**Algorithm selection** (unchanged): 1–2 atoms → simple; 3 → basin hopping; 4+ → genetic algorithm.
 
-**Algorithm Selection:**
-- 1-2 atoms: Simple optimization
-- 3 atoms: Basin Hopping
-- 4+ atoms: Genetic Algorithm
+#### `run_go_campaign(compositions, ...)`
 
-#### `run_scgo_campaign_one_element(element, min_atoms, max_atoms, ...)`
+Run GO for each composition **sequentially**; returns `dict[formula, list[(energy, Atoms)]]`.
 
-Systematic search across cluster sizes for a single element.
+#### `run_go_element_scan(element, min_atoms, max_atoms, ...)`
 
-```python
-from scgo import run_scgo_campaign_one_element
+One element, cluster sizes from `min_atoms` through `max_atoms`.
 
-results = run_scgo_campaign_one_element(
-    element="Pt",
-    min_atoms=3,
-    max_atoms=10,
-    params=get_default_params(),
-    seed=42
-)
-# Returns: dict[formula, list[(energy, Atoms)]]
-```
+#### `run_go_binary_scan(element1, element2, min_atoms, max_atoms, ...)`
 
-#### `run_scgo_campaign_two_elements(element1, element2, min_atoms, max_atoms, ...)`
+All compositions `A_i B_{n-i}` for each `n` in the size range.
 
-Systematic search for bimetallic clusters across all compositions.
+### Transition state search
+
+Package-level `run_ts_search` / `run_ts_campaign` take **NEB and pairing options in `ts_kwargs`**, merged into the implementation in [`scgo/ts_search/transition_state_run.py`](scgo/ts_search/transition_state_run.py) (which still exposes a flat keyword API for advanced use).
+
+`get_ts_run_kwargs(...)` is the recommended way to build `ts_kwargs`: it resolves effective `use_torchsim` / `use_parallel_neb` flags from the selected calculator and installed extras, and raises early if TorchSim was requested but unavailable.
 
 ```python
-from scgo import run_scgo_campaign_two_elements
+from scgo import run_go, run_ts_search
 
-results = run_scgo_campaign_two_elements(
-    element1="Au",
-    element2="Pt",
-    min_atoms=3,
-    max_atoms=6,
-    params=get_default_params(),
-    seed=42
-)
-# Returns: dict[formula, list[(energy, Atoms)]]
-```
+run_go(["Pt", "Pt", "Pt"], params={"calculator": "MACE"}, seed=42)
 
-### Transition State Search
-
-#### `run_transition_state_search(composition, base_dir=None, ...)`
-
-Find transition states connecting minima from previous global optimization.
-
-```python
-from scgo import run_transition_state_search
-
-# First run global optimization to get minima
-results_go = run_scgo_trials(["Pt", "Pt", "Pt"], seed=42)
-
-# Then find transition states (minima live under Pt3_searches/ by default)
-ts_results = run_transition_state_search(
-    composition=["Pt", "Pt", "Pt"],
-    base_dir="Pt3_searches",  # Same root as GO output: run_*/trial_*/*.db
+ts_results = run_ts_search(
+    ["Pt", "Pt", "Pt"],
+    output_dir="Pt3_searches",
     params={"calculator": "MACE"},
     seed=42,
-    max_pairs=10,
-    neb_fmax=0.05,
-    neb_steps=500,
-    use_torchsim=True  # Optional: TorchSim batched NEB (CPU or GPU)
-)
-# Returns: list of dicts with TS info (barrier, TS structure, etc.)
-# On disk: see "Transition state search (ts_results_{formula}/)" above.
-```
-
-**Key Parameters:**
-- `composition`: Same composition as the minima you want to connect
-- `base_dir`: Directory containing `run_*/` folders with previous optimization results (default: `{formula}_searches`). TS artifacts are written to `base_dir/ts_results_{formula}/`.
-- `max_pairs`: Maximum number of structure pairs to evaluate
-- `energy_gap_threshold`: Only pair structures with energy gap below threshold (eV)
-- `neb_n_images`: Number of NEB images (default: 3)
-- `neb_spring_constant`: Spring constant for NEB band (default: 0.1)
-- `neb_perturb_sigma`: Interior-image perturbation (Å) applied after interpolation (default: 0.0)
-- `neb_fmax`: Force convergence criterion (default: 0.05 eV/Å)
-- `neb_steps`: Max optimization steps (default: 500)
-- `use_torchsim` (bool): Use TorchSim for batched NEB (works on CPU or GPU). Default: False.
-- `torchsim_params` (dict): Parameters for TorchSim relaxer (if use_torchsim=True).
-
-**Returns:** List of dictionaries (one per pair). In-memory dicts mirror the JSON-friendly fields saved under `ts_results_{formula}/` (plus live `Atoms` objects where applicable):
-
-- `"pair_id"`, `"status"` (`"success"` / `"failed"`), `"neb_converged"`, `"n_images"`, `"spring_constant"`
-- `"reactant_energy"`, `"product_energy"`, `"ts_energy"`, `"barrier_height"`, `"error"`
-- `"transition_state"`: TS `Atoms` on success (not serialized in summary JSON)
-- `"reactant_structure"`, `"product_structure"`: endpoint `Atoms` when kept on the result
-- `"minima_indices"`, `"minima_provenance"`: traceability back to GO databases when attached
-- `"ts_image_index"`, `"final_fmax"`, `"steps_taken"`, `"force_calls"`: NEB diagnostics when present
-- `"use_torchsim"`, `"neb_backend"`, interpolation/climb/MIC flags: echo NEB configuration
-
-#### `run_transition_state_campaign(compositions, output_dir=None, ...)`
-
-Run transition state search across multiple compositions in sequence.
-
-```python
-from scgo import run_transition_state_campaign
-
-# Run TS search for multiple compositions
-compositions = [["Pt", "Pt"], ["Pt", "Pt", "Pt"], ["Au", "Pt"]]
-
-results = run_transition_state_campaign(
-    compositions=compositions,
-    output_dir="ts_searches",  # Optional: base dir for all compositions
-    params={"calculator": "MACE"},
-    seed=42,
-    neb_params={
+    ts_kwargs={
         "max_pairs": 10,
-        "neb_n_images": 3,
         "neb_fmax": 0.05,
         "neb_steps": 500,
-    }
+        "use_torchsim": True,
+    },
 )
-# Returns: dict[formula, list[dict]] mapping each formula to its TS results
 ```
 
-**Key Parameters:**
-- `compositions`: List of compositions (each a list of atomic symbols)
-- `output_dir`: Base directory for all searches (default: individual `{formula}_ts_searches` dirs)
-- `params`: Global optimization parameters with "calculator" field
-- `neb_params`: Dictionary with NEB-specific parameters (same as `run_transition_state_search`)
+Use `scgo.param_presets.get_ts_run_kwargs(...)` to build `ts_kwargs` from a preset dict.
+
+#### `run_ts_campaign(compositions, output_dir=None, ..., ts_kwargs=None)`
+
+Same pattern: pass `ts_kwargs={...}` for per-run options forwarded to each composition’s search.
+
+### GO then TS
+
+- `run_go_ts(composition, *, ga_params, ts_kwargs, ...)`
+- `run_go_ts_campaign(compositions, *, ga_params, ts_kwargs, ...)`
+
+Preset one-element jobs: `run_go_ts_one_element` (see `runners/`).
+
+### Advanced / internals
+
+- Implementation helpers: `from scgo.run_minima import run_scgo_trials`, `run_scgo_campaign_arbitrary_compositions`, etc.
+- Flat `run_transition_state_search` without `ts_kwargs`: `from scgo.ts_search.transition_state_run import run_transition_state_search`.
 
 ---
 
 ## Notes
 
 - TorchSim is an optional tool that provides GPU-accelerated batched optimization when available; SCGO works with EMT (CPU) out of the box for quick tests.
-- For reproducible results, pass `seed=` to `run_scgo_trials` or campaign helpers.
+- For reproducible results, pass `seed=` to the workflow functions above.
 - See `runners/` directory for complete working examples and the `tests/` directory for usage patterns.
 
 ---

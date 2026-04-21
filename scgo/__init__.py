@@ -58,20 +58,18 @@ from scgo.param_presets import (
     get_ts_run_kwargs,
     get_ts_search_params_uma,
 )
-
-# Main run functions
-from scgo.run_minima import (
+from scgo.runner_api import (
+    CompositionInput,
     parse_composition_arg,
-    run_scgo_campaign_arbitrary_compositions,
-    run_scgo_campaign_one_element,
-    run_scgo_campaign_two_elements,
-    run_scgo_trials,
-)
-
-# Transition state search
-from scgo.run_ts import (
-    run_transition_state_campaign,
-    run_transition_state_search,
+    run_go,
+    run_go_binary_scan,
+    run_go_campaign,
+    run_go_element_scan,
+    run_go_ts,
+    run_go_ts_campaign,
+    run_go_ts_one_element,
+    run_ts_campaign,
+    run_ts_search,
 )
 
 # Surface / adsorption
@@ -156,15 +154,18 @@ __all__ = [
     "get_ts_run_kwargs",
     "get_default_uma_params",
     "get_ts_search_params_uma",
-    # Main run API
-    "run_scgo_campaign_arbitrary_compositions",
-    "run_scgo_campaign_one_element",
-    "run_scgo_campaign_two_elements",
-    "run_scgo_trials",
+    # Main run API (see scgo.runner_api)
+    "CompositionInput",
+    "run_go",
+    "run_go_binary_scan",
+    "run_go_campaign",
+    "run_go_element_scan",
+    "run_go_ts",
+    "run_go_ts_campaign",
+    "run_go_ts_one_element",
     "parse_composition_arg",
-    # Transition states
-    "run_transition_state_campaign",
-    "run_transition_state_search",
+    "run_ts_campaign",
+    "run_ts_search",
     # Utilities
     "get_cluster_formula",
     "is_true_minimum",

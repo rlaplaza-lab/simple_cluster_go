@@ -184,65 +184,6 @@ def load_minima_by_composition(
     return minima_by_formula
 
 
-def load_transition_states_by_composition(
-    base_dir: str,
-    composition: list[str] | None = None,
-    require_final_unique_ts: bool = True,
-) -> dict[str, list[tuple[float, Atoms]]]:
-    """Load transition-state rows grouped by formula from discovered databases."""
-    logger = get_logger(__name__)
-
-    if not os.path.exists(base_dir):
-        logger.warning("Output directory does not exist: %s", base_dir)
-        return {}
-
-    ts_by_formula: dict[str, list[tuple[float, Atoms]]] = {}
-    target_formula = get_cluster_formula(composition) if composition else None
-    db_files_with_run_trial = list_discovered_db_paths_with_run_trial(
-        base_dir, composition=composition, use_cache=True
-    )
-
-    for db_file, run_id, trial_id in db_files_with_run_trial:
-        try:
-            ts_list = extract_transition_states_from_database_file(
-                db_file,
-                run_id=run_id,
-                trial_id=trial_id,
-                require_final_unique_ts=require_final_unique_ts,
-            )
-            if not ts_list:
-                continue
-
-            formula = get_cluster_formula(ts_list[0][1].get_chemical_symbols())
-            if target_formula and formula != target_formula:
-                continue
-
-            ts_by_formula.setdefault(formula, [])
-            for energy, atoms in ts_list:
-                atoms_copy = atoms.copy()
-                add_metadata(
-                    atoms_copy,
-                    run_id=run_id,
-                    trial_id=trial_id,
-                    source_db=os.path.basename(db_file),
-                    source_db_relpath=_relative_db_path(db_file, base_dir),
-                )
-                ts_by_formula[formula].append((energy, atoms_copy))
-
-        except (ValueError, OSError) as e:
-            logger.warning(
-                "Failed to load transition states from %s: %s: %s",
-                db_file,
-                type(e).__name__,
-                e,
-            )
-
-    for formula in ts_by_formula:
-        ts_by_formula[formula] = sorted(ts_by_formula[formula], key=lambda x: x[0])
-
-    return ts_by_formula
-
-
 def select_structure_pairs(
     minima: list[tuple[float, Atoms]],
     max_pairs: int | None = None,
@@ -364,6 +305,65 @@ def select_structure_pairs(
         return ranked_pairs
 
     return ranked_pairs[:max_pairs]
+
+
+def load_transition_states_by_composition(
+    base_dir: str,
+    composition: list[str] | None = None,
+    require_final_unique_ts: bool = True,
+) -> dict[str, list[tuple[float, Atoms]]]:
+    """Load transition-state rows grouped by formula from discovered databases."""
+    logger = get_logger(__name__)
+
+    if not os.path.exists(base_dir):
+        logger.warning("Output directory does not exist: %s", base_dir)
+        return {}
+
+    ts_by_formula: dict[str, list[tuple[float, Atoms]]] = {}
+    target_formula = get_cluster_formula(composition) if composition else None
+    db_files_with_run_trial = list_discovered_db_paths_with_run_trial(
+        base_dir, composition=composition, use_cache=True
+    )
+
+    for db_file, run_id, trial_id in db_files_with_run_trial:
+        try:
+            ts_list = extract_transition_states_from_database_file(
+                db_file,
+                run_id=run_id,
+                trial_id=trial_id,
+                require_final_unique_ts=require_final_unique_ts,
+            )
+            if not ts_list:
+                continue
+
+            formula = get_cluster_formula(ts_list[0][1].get_chemical_symbols())
+            if target_formula and formula != target_formula:
+                continue
+
+            ts_by_formula.setdefault(formula, [])
+            for energy, atoms in ts_list:
+                atoms_copy = atoms.copy()
+                add_metadata(
+                    atoms_copy,
+                    run_id=run_id,
+                    trial_id=trial_id,
+                    source_db=os.path.basename(db_file),
+                    source_db_relpath=_relative_db_path(db_file, base_dir),
+                )
+                ts_by_formula[formula].append((energy, atoms_copy))
+
+        except (ValueError, OSError) as e:
+            logger.warning(
+                "Failed to load transition states from %s: %s: %s",
+                db_file,
+                type(e).__name__,
+                e,
+            )
+
+    for formula in ts_by_formula:
+        ts_by_formula[formula] = sorted(ts_by_formula[formula], key=lambda x: x[0])
+
+    return ts_by_formula
 
 
 def save_transition_state_results(

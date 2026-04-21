@@ -134,7 +134,7 @@ def test_full_workflow_cu4_mace_database_persistence():
 
         ts_results = run_transition_state_search(
             composition=["Cu", "Cu", "Cu", "Cu"],
-            base_dir=tmpdir,
+            output_dir=tmpdir,
             params=ts_params,
             verbosity=0,
             max_pairs=3,
@@ -514,7 +514,7 @@ def test_ts_search_reproducibility_with_mace():
 
             ts_results = run_transition_state_search(
                 composition=["Cu", "Cu", "Cu", "Cu"],
-                base_dir=run_dir,
+                output_dir=run_dir,
                 params=ts_params,
                 verbosity=0,
                 max_pairs=1,  # Single pair for reproducibility test

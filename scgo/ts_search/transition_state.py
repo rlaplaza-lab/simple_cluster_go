@@ -207,6 +207,8 @@ def _match_atoms_by_fingerprint(a1: Atoms, a2: Atoms) -> list[int]:
         raise ValueError("Atoms objects have different lengths")
 
     mapping = [-1] * len(a1)
+    fp1_all = _local_distance_fingerprints(a1)
+    fp2_all = _local_distance_fingerprints(a2)
     # Match separately for each atomic number (handles mixed-species clusters)
     for z in set(a1.numbers):
         idx1 = [i for i, x in enumerate(a1.numbers) if x == z]
@@ -214,8 +216,8 @@ def _match_atoms_by_fingerprint(a1: Atoms, a2: Atoms) -> list[int]:
         if len(idx1) != len(idx2):
             raise ValueError("Composition mismatch during endpoint matching")
 
-        fp1 = _local_distance_fingerprints(a1)[idx1]
-        fp2 = _local_distance_fingerprints(a2)[idx2]
+        fp1 = fp1_all[idx1]
+        fp2 = fp2_all[idx2]
         # Cost = L2 distance between fingerprints
         cost = np.linalg.norm(fp1[:, None, :] - fp2[None, :, :], axis=2)
         r, c = linear_sum_assignment(cost)
@@ -405,6 +407,20 @@ def minima_provenance_dict(minima: list, idx: int) -> dict[str, Any]:
     }
 
 
+def attach_minima_traceability(
+    result: dict[str, Any],
+    minima: list[tuple[float, Any]],
+    i: int,
+    j: int,
+) -> None:
+    """Record minima list indices and endpoint provenance on one TS result."""
+    result["minima_indices"] = [int(i), int(j)]
+    result["minima_provenance"] = [
+        minima_provenance_dict(minima, i),
+        minima_provenance_dict(minima, j),
+    ]
+
+
 def _finalize_neb_result(
     result: dict[str, Any],
     images: list[Atoms],
@@ -574,6 +590,11 @@ def find_transition_state(
     )
 
     try:
+        if np.allclose(atoms1.get_positions(), atoms2.get_positions(), atol=1e-8):
+            raise ValueError(
+                f"Endpoints are identical for pair {pair_id}; no interior TS"
+            )
+
         if verbosity >= 2:
             logger.info(
                 f"Generating initial path with {interpolation_method} interpolation"

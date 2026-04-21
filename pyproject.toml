@@ -29,7 +29,7 @@ dependencies = [
     "ase>=3.22.0",
     "ase-ga>=0.1.0",
     "numpy>=2.2",
-    "scipy>=1.17.1",
+    "scipy>=1.14,<3",
     "tqdm>=4.60.0",
 ]
 
@@ -103,6 +103,8 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 "scgo/__init__.py" = ["E402"]  # set PYTORCH_CUDA_ALLOC_CONF before torch/torch_sim and scgo imports
+# PEP 695 ``type CompositionInput = ...`` after imports confuses isort's import-block span (I001).
+"scgo/runner_api.py" = ["I001"]
 "tests/**/*" = ["B011"]
 "scgo/ase_ga_patches/*" = ["B011", "E402"]
 "benchmark/*" = ["E501", "T201", "SIM108", "C408", "PERF401"]  # scripts: prints, dict builders, nested grid loops

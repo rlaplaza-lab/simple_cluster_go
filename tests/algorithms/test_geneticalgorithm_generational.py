@@ -66,7 +66,7 @@ def test_ga_signatures_consistent():
     ts_params = set(sig_ts.parameters.keys())
 
     # TorchSim may add these extras but otherwise parameter sets must match
-    extras = {"relaxer", "batch_size"}
+    extras = {"relaxer", "batch_size", "n_jobs_offspring"}
     assert ase_params == (ts_params - extras)
 
     # Check a couple of important default alignments
@@ -227,6 +227,80 @@ def test_ga_go_torchsim_offspring_fraction_creates_expected_offspring(
 
     unique_confids = {a.info.get("confid") for a in gen0}
     assert len(unique_confids) - population_size == expected_offspring
+
+
+def test_ga_go_torchsim_parallel_offspring_deterministic(tmp_path):
+    calc = EMT()
+    kwargs = {
+        "composition": ["Pt"] * 3,
+        "calculator": calc,
+        "relaxer": MockRelaxer(max_steps=1),
+        "niter": 1,
+        "population_size": 4,
+        "offspring_fraction": 0.75,
+        "niter_local_relaxation": 1,
+        "batch_size": None,
+        "verbosity": 0,
+    }
+    minima_single = ga_go_torchsim(
+        output_dir=str(tmp_path / "torchsim_single_worker"),
+        rng=np.random.default_rng(1234),
+        n_jobs_offspring=1,
+        **kwargs,
+    )
+    minima_parallel = ga_go_torchsim(
+        output_dir=str(tmp_path / "torchsim_parallel_worker"),
+        rng=np.random.default_rng(1234),
+        n_jobs_offspring=2,
+        **kwargs,
+    )
+    assert len(minima_single) == len(minima_parallel)
+    energies_single = [float(e) for e, _ in minima_single]
+    energies_parallel = [float(e) for e, _ in minima_parallel]
+    np.testing.assert_allclose(energies_single, energies_parallel, atol=1e-12, rtol=0.0)
+
+
+def test_ga_go_torchsim_parallel_offspring_handles_worker_failures(
+    tmp_path, rng, monkeypatch
+):
+    calc = EMT()
+    relaxer = MockRelaxer(max_steps=1)
+
+    import scgo.algorithms.geneticalgorithm_go_torchsim as ga_ts_mod
+
+    base_factory = ga_ts_mod.create_ga_pairing
+    call_counter = {"n": 0}
+
+    def flaky_pairing_factory(*args, **kwargs):
+        pairing = base_factory(*args, **kwargs)
+        base_get = pairing.get_new_individual
+
+        def wrapped_get(parents):
+            call_counter["n"] += 1
+            if call_counter["n"] % 4 == 0:
+                raise RuntimeError("synthetic crossover failure")
+            return base_get(parents)
+
+        pairing.get_new_individual = wrapped_get  # type: ignore[assignment]
+        return pairing
+
+    monkeypatch.setattr(ga_ts_mod, "create_ga_pairing", flaky_pairing_factory)
+
+    minima = ga_go_torchsim(
+        composition=["Pt"] * 3,
+        output_dir=str(tmp_path / "ga_go_torchsim_worker_failures"),
+        calculator=calc,
+        relaxer=relaxer,
+        niter=1,
+        population_size=4,
+        offspring_fraction=0.5,
+        niter_local_relaxation=1,
+        batch_size=None,
+        n_jobs_offspring=2,
+        rng=rng,
+        verbosity=0,
+    )
+    assert isinstance(minima, list)
 
 
 def test_ga_persisted_unconstrained_rows_are_centered(tmp_path, rng):

@@ -1,13 +1,16 @@
-"""High-level API for transition state finding via NEB.
+"""Transition state finding via NEB (implementation module).
 
-Use :func:`run_transition_state_search` from this package, for example::
+Most users should call :func:`~scgo.runner_api.run_transition_state_search` from
+``scgo`` (composition string / :class:`~ase.Atoms` / symbol list, plus
+``ts_kwargs`` for NEB options). This module exposes the same operations with a
+flat keyword interface (symbol list composition), for example::
 
     from scgo.ts_search import run_transition_state_search
     from scgo.param_presets import get_default_params
 
     results = run_transition_state_search(
         ["Pt", "Pt", "Pt"],
-        base_dir="Pt3_searches",
+        output_dir="Pt3_searches",
         params=get_default_params(),
         seed=42,
     )
@@ -47,9 +50,9 @@ from scgo.utils.validation import validate_composition
 from .parallel_neb import run_parallel_neb_search
 from .transition_state import (
     _detach_calc,
+    attach_minima_traceability,
     find_transition_state,
     make_ts_result,
-    minima_provenance_dict,
     save_neb_result,
 )
 from .transition_state_io import (
@@ -69,20 +72,6 @@ __all__ = [
     "run_transition_state_campaign",
     "integrate_ts_to_database",
 ]
-
-
-def _attach_minima_traceability(
-    result: dict[str, Any],
-    minima: list[tuple[float, Any]],
-    i: int,
-    j: int,
-) -> None:
-    """Record list indices and per-endpoint GO provenance on a TS result dict."""
-    result["minima_indices"] = [int(i), int(j)]
-    result["minima_provenance"] = [
-        minima_provenance_dict(minima, i),
-        minima_provenance_dict(minima, j),
-    ]
 
 
 def _run_serial_neb_search(
@@ -166,15 +155,12 @@ def _run_serial_neb_search(
                 torchsim_params=torchsim_params,
                 verbosity=verbosity,
             )
-        except (
-            RuntimeError,
-            ValueError,
-            KeyError,
-            AttributeError,
-            TypeError,
-        ) as e:
-            logger.exception(
-                "Unexpected error while finding TS for pair %s: %s", pair_id, e
+        except (RuntimeError, ValueError) as e:
+            logger.error(
+                "Unexpected error while finding TS for pair %s: %s: %s",
+                pair_id,
+                type(e).__name__,
+                e,
             )
             if is_cuda_oom_error(e):
                 cleanup_torch_cuda(logger=logger)
@@ -203,7 +189,7 @@ def _run_serial_neb_search(
         if result.get("transition_state") is not None:
             _detach_calc(result["transition_state"])
 
-        _attach_minima_traceability(result, minima, i, j)
+        attach_minima_traceability(result, minima, i, j)
         ts_results.append(result)
         save_neb_result(result, str(result_dir), pair_id)
 
@@ -217,7 +203,7 @@ def _run_serial_neb_search(
 
 def run_transition_state_search(
     composition: list[str],
-    base_dir: str | Path | None = None,
+    output_dir: str | Path | None = None,
     params: dict | None = None,
     seed: int | None = None,
     verbosity: int = 1,
@@ -255,7 +241,7 @@ def run_transition_state_search(
     Args:
         composition: List of atomic symbols specifying the cluster composition,
             e.g., ["Pt", "Pt", "Pt"] for Pt₃.
-        base_dir: Base directory containing run_*/ subdirectories with
+        output_dir: Base directory containing run_*/ subdirectories with
             previous optimization results. If None, uses ``{formula}_searches``.
         params: Dictionary of run parameters including:
             - "calculator": Calculator name (e.g., "MACE", "EMT"). Required.
@@ -300,8 +286,8 @@ def run_transition_state_search(
 
     formula = get_cluster_formula(composition)
     ts_output_dir = (
-        str(Path(base_dir))
-        if base_dir is not None
+        str(Path(output_dir))
+        if output_dir is not None
         else str(Path(f"{formula}_searches"))
     )
 
@@ -557,11 +543,12 @@ def integrate_ts_to_database(
             OSError,
             ValueError,
         ) as e:
-            logger.exception(
-                "Failed to add TS %s to DB %s: %s",
+            logger.error(
+                "Failed to add TS %s to DB %s: %s: %s",
                 result.get("pair_id"),
                 minima_database_file,
                 type(e).__name__,
+                e,
             )
             continue
 
@@ -574,20 +561,20 @@ def run_transition_state_campaign(
     params: dict | None = None,
     seed: int | None = None,
     verbosity: int = 1,
-    neb_params: dict | None = None,
+    ts_kwargs: dict | None = None,
 ) -> dict[str, list[dict[str, Any]]]:
     """Run :func:`run_transition_state_search` for multiple compositions in sequence.
 
     Minima are read from ``{output_dir}/{formula}_searches`` (or just
-    ``{formula}_searches`` when ``output_dir`` is None). Per-composition NEB
-    kwargs are forwarded via ``neb_params``. Failures for one composition never
+    ``{formula}_searches`` when ``output_dir`` is None). Extra search/NEB
+    arguments are forwarded via ``ts_kwargs``. Failures for one composition never
     abort the whole campaign — they are logged and that formula gets an empty
     result list.
     """
     configure_logging(verbosity)
     logger = get_logger(__name__)
 
-    neb_params = neb_params or {}
+    ts_kwargs = ts_kwargs or {}
     campaign_results: dict[str, list[dict[str, Any]]] = {}
 
     for composition in compositions:
@@ -603,11 +590,11 @@ def run_transition_state_campaign(
         try:
             results = run_transition_state_search(
                 composition,
-                base_dir=comp_output_dir,
+                output_dir=comp_output_dir,
                 params=params,
                 seed=seed,
                 verbosity=verbosity,
-                **neb_params,
+                **ts_kwargs,
             )
         except (ValueError, RuntimeError, ImportError) as e:
             logger.error("Failed to run TS search for %s: %s", formula, e)

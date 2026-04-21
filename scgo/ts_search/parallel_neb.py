@@ -17,10 +17,10 @@ from .transition_state import (
     TorchSimNEB,
     _detach_calc,
     _finalize_neb_result,
+    attach_minima_traceability,
     attach_singlepoint_from_relax_output,
     interpolate_path,
     make_ts_result,
-    minima_provenance_dict,
     save_neb_result,
 )
 
@@ -71,7 +71,7 @@ class ParallelNEBBatch:
                 "steps_taken": 0,
                 "final_fmax": None,
                 "error": None,
-                "force_calls": 0,
+                "force_calls": None,
             }
             for _ in self.neb_instances
         ]
@@ -137,7 +137,6 @@ class ParallelNEBBatch:
                     max_force = float(np.max(np.abs(neb_forces)))
 
                     results[neb_idx]["final_fmax"] = max_force
-                    results[neb_idx]["force_calls"] += 1
                     results[neb_idx]["steps_taken"] = self.step_count + 1
 
                     if max_force < fmax:
@@ -204,20 +203,6 @@ def _neb_endpoint_copies(
         attach_slab_constraints_from_surface_config(react, surface_config)
         attach_slab_constraints_from_surface_config(prod, surface_config)
     return react, prod
-
-
-def _attach_minima_traceability(
-    result: dict[str, Any],
-    minima: list[tuple[float, Any]],
-    i: int,
-    j: int,
-) -> None:
-    """Record list indices and per-endpoint GO provenance on a TS result dict."""
-    result["minima_indices"] = [int(i), int(j)]
-    result["minima_provenance"] = [
-        minima_provenance_dict(minima, i),
-        minima_provenance_dict(minima, j),
-    ]
 
 
 def run_parallel_neb_search(
@@ -308,8 +293,7 @@ def run_parallel_neb_search(
         )
 
     neb_steps_i = int(neb_steps)
-    max_total = neb_steps_i * max(1, len(neb_instances))
-    batch = ParallelNEBBatch(neb_instances, relaxer, max_total_steps=max_total)
+    batch = ParallelNEBBatch(neb_instances, relaxer, max_total_steps=neb_steps_i)
     batch_results = batch.run_optimization(fmax=neb_fmax, max_steps=neb_steps_i)
 
     for idx, neb in enumerate(neb_instances):
@@ -318,7 +302,7 @@ def run_parallel_neb_search(
         result["neb_converged"] = bool(summary.get("converged", False))
         result["error"] = summary.get("error")
         result["final_fmax"] = summary.get("final_fmax")
-        result["force_calls"] = summary.get("force_calls")
+        result["force_calls"] = neb.get_force_calls()
         result["steps_taken"] = summary.get("steps_taken")
 
         try:
@@ -335,7 +319,7 @@ def run_parallel_neb_search(
             )
 
         i, j = pairs[idx]
-        _attach_minima_traceability(result, minima, i, j)
+        attach_minima_traceability(result, minima, i, j)
         save_neb_result(result, str(result_dir), result["pair_id"])
 
     return pair_results
