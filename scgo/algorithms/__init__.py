@@ -37,7 +37,8 @@ def __getattr__(name: str) -> Any:
             from .geneticalgorithm_go_torchsim import ga_go_torchsim
         except ImportError as e:
             raise ImportError(
-                "TorchSim GA requires the MACE stack. Install with: pip install 'scgo[mace]'"
+                "TorchSim GA requires a TorchSim ML stack. Install with either "
+                "pip install 'scgo[mace]' or pip install 'scgo[uma]'."
             ) from e
         return ga_go_torchsim
 

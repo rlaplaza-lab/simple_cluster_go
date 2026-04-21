@@ -312,8 +312,7 @@ def tag_unique_ts_in_databases(
 
     if missing_db_pairs:
         logger.warning(
-            "No minima DB found to tag TS for %d edge(s) under %s. "
-            "Sample pair_ids=%s",
+            "No minima DB found to tag TS for %d edge(s) under %s. Sample pair_ids=%s",
             len(missing_db_pairs),
             base_dir,
             missing_db_pairs[:5],
@@ -676,7 +675,7 @@ def find_minimum_barrier_path(
     # Dijkstra's algorithm
     distances = {node: float("inf") for node in adjacency}
     distances[start] = 0.0
-    parents = {node: None for node in adjacency}
+    parents = dict.fromkeys(adjacency, None)
 
     priority_queue = [(0.0, start)]
 

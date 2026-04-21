@@ -161,3 +161,69 @@ def test_create_deposited_cluster_batch_threaded_is_seed_deterministic(
     marks1 = [atoms.info["task_marker"] for atoms in batch1]
     marks2 = [atoms.info["task_marker"] for atoms in batch2]
     assert marks1 == marks2
+
+
+def test_create_deposited_cluster_preserves_adsorbate_symbol_order_with_two_oh(
+    pt_slab: Atoms,
+) -> None:
+    composition = ["Pt", "Pt", "Pt", "Pt", "Pt", "O", "H", "O", "H"]
+    n_slab = len(pt_slab)
+    dummy = np.vstack([pt_slab.get_positions(), np.zeros((len(composition), 3))])
+    tmpl = Atoms(
+        symbols=list(pt_slab.get_chemical_symbols()) + composition,
+        positions=dummy,
+        cell=pt_slab.cell,
+        pbc=pt_slab.pbc,
+    )
+    idx_top = range(n_slab, n_slab + len(composition))
+    blmin = closest_distances_generator(
+        get_all_atom_types(tmpl, idx_top),
+        ratio_of_covalent_radii=0.7,
+    )
+    cfg = SurfaceSystemConfig(
+        slab=pt_slab,
+        adsorption_height_min=1.0,
+        adsorption_height_max=2.5,
+        max_placement_attempts=500,
+    )
+    rng = default_rng(2026)
+    ads_sys = create_deposited_cluster(composition, pt_slab, blmin, rng, cfg)
+    assert ads_sys is not None
+    assert ads_sys.get_chemical_symbols()[n_slab:] == composition
+
+
+def test_create_deposited_cluster_batch_preserves_adsorbate_symbol_order_with_two_oh(
+    pt_slab: Atoms,
+) -> None:
+    composition = ["Pt", "Pt", "Pt", "Pt", "Pt", "O", "H", "O", "H"]
+    n_slab = len(pt_slab)
+    dummy = np.vstack([pt_slab.get_positions(), np.zeros((len(composition), 3))])
+    tmpl = Atoms(
+        symbols=list(pt_slab.get_chemical_symbols()) + composition,
+        positions=dummy,
+        cell=pt_slab.cell,
+        pbc=pt_slab.pbc,
+    )
+    idx_top = range(n_slab, n_slab + len(composition))
+    blmin = closest_distances_generator(
+        get_all_atom_types(tmpl, idx_top),
+        ratio_of_covalent_radii=0.7,
+    )
+    cfg = SurfaceSystemConfig(
+        slab=pt_slab,
+        adsorption_height_min=1.0,
+        adsorption_height_max=2.5,
+        max_placement_attempts=500,
+    )
+    batch = create_deposited_cluster_batch(
+        composition,
+        pt_slab,
+        blmin,
+        n_structures=5,
+        rng=default_rng(2026),
+        config=cfg,
+        n_jobs=2,
+    )
+    assert len(batch) == 5
+    for atoms in batch:
+        assert atoms.get_chemical_symbols()[n_slab:] == composition

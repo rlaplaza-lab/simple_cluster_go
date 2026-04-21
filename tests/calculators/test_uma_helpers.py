@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import importlib.util
-import warnings
 
 import pytest
 
@@ -43,7 +42,7 @@ def test_get_ts_search_params_uma_default_torchsim_flags():
     assert ts["use_parallel_neb"] is False
 
 
-def test_both_mlip_stacks_warns_when_both_importable():
+def test_both_mlip_stacks_raises_when_both_importable():
     if (
         importlib.util.find_spec("mace") is None
         or importlib.util.find_spec("fairchem") is None
@@ -52,7 +51,5 @@ def test_both_mlip_stacks_warns_when_both_importable():
 
     from scgo.utils.mlip_extras import ensure_mace_uma_not_both_installed
 
-    with warnings.catch_warnings(record=True) as wrec:
-        warnings.simplefilter("always")
+    with pytest.raises(RuntimeError, match="MACE stack"):
         ensure_mace_uma_not_both_installed()
-    assert any("MACE stack" in str(w.message) for w in wrec)

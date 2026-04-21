@@ -21,9 +21,7 @@ def compute_ts_statistics(
 ) -> TransitionStateStatistics:
     """Compute consistent success/convergence/barrier statistics."""
     successful_results = [
-        result
-        for result in ts_results
-        if result.get("status", "success") == "success"
+        result for result in ts_results if result.get("status", "success") == "success"
     ]
     barriers = [
         float(result["barrier_height"])
@@ -31,7 +29,9 @@ def compute_ts_statistics(
         if result.get("barrier_height") is not None
     ]
     successful_count = len(successful_results)
-    converged_count = sum(1 for result in successful_results if result.get("neb_converged"))
+    converged_count = sum(
+        1 for result in successful_results if result.get("neb_converged")
+    )
     return {
         "total_ts_found": successful_count,
         "converged_ts": converged_count,

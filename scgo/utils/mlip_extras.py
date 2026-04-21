@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import importlib.util
-import warnings
 
 from scgo.utils.logging import get_logger
 
@@ -18,7 +17,7 @@ def installed_mace_and_uma() -> tuple[bool, bool]:
 
 
 def ensure_mace_uma_not_both_installed() -> None:
-    """Warn if both stacks are importable (unsupported mixed environment)."""
+    """Fail if both stacks are importable (unsupported mixed environment)."""
     mace, uma = installed_mace_and_uma()
     if mace and uma:
         msg = (
@@ -26,5 +25,5 @@ def ensure_mace_uma_not_both_installed() -> None:
             "Prefer a single extra: pip install 'scgo[mace]' or pip install 'scgo[uma]' "
             "in separate environments to avoid dependency conflicts."
         )
-        warnings.warn(msg, UserWarning, stacklevel=2)
         logger.warning(msg)
+        raise RuntimeError(msg)

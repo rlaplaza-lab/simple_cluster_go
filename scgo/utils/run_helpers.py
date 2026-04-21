@@ -90,7 +90,11 @@ def get_calculator_class(calculator_name: str) -> type:
         )
 
     calculator_class = calculators[calculator_name]
-
+    if calculator_class is None:
+        raise ValueError(
+            f"Calculator {calculator_name} is not available. "
+            "Install the matching optional dependencies."
+        )
     return calculator_class
 
 

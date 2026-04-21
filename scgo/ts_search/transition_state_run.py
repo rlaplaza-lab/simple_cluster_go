@@ -574,19 +574,14 @@ def run_transition_state_campaign(
         if verbosity >= 1:
             logger.info("Running TS search campaign for %s", formula)
 
-        try:
-            results = run_transition_state_search(
-                composition,
-                output_dir=comp_output_dir,
-                params=params,
-                seed=seed,
-                verbosity=verbosity,
-                **ts_kwargs,
-            )
-        except (ValueError, RuntimeError, ImportError) as e:
-            logger.error("Failed to run TS search for %s: %s", formula, e)
-            campaign_results[formula] = []
-            continue
+        results = run_transition_state_search(
+            composition,
+            output_dir=comp_output_dir,
+            params=params,
+            seed=seed,
+            verbosity=verbosity,
+            **ts_kwargs,
+        )
 
         for r in results:
             if r.get("transition_state") is not None:

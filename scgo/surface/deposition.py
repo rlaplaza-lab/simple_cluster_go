@@ -53,6 +53,30 @@ def combine_slab_adsorbate(slab: Atoms, adsorbate: Atoms) -> Atoms:
     return slab.copy() + ads
 
 
+def _reorder_cluster_to_composition(
+    cluster: Atoms, composition: Sequence[str]
+) -> Atoms:
+    """Reorder generated cluster atoms to match requested symbol sequence."""
+    desired = list(composition)
+    current = cluster.get_chemical_symbols()
+    if current == desired:
+        return cluster
+
+    by_symbol: dict[str, list[int]] = {}
+    for idx, sym in enumerate(current):
+        by_symbol.setdefault(sym, []).append(idx)
+
+    selection: list[int] = []
+    for sym in desired:
+        matching = by_symbol.get(sym)
+        if not matching:
+            raise ValueError(
+                "Generated cluster symbols do not match requested composition."
+            )
+        selection.append(matching.pop(0))
+    return cluster[selection].copy()
+
+
 def _random_rotation_matrix(rng: Generator) -> np.ndarray:
     """Return a uniformly random 3D rotation matrix."""
     rotation_axis = rng.standard_normal(3)
@@ -107,6 +131,7 @@ def create_deposited_cluster(
             previous_search_glob=previous_search_glob,
             mode=config.init_mode,
         )
+        cluster_seed = _reorder_cluster_to_composition(cluster_seed, composition)
         atomic_numbers = cluster_seed.get_atomic_numbers()
         cluster_positions = cluster_seed.get_positions().copy()
 

@@ -6,7 +6,6 @@ everything into memory at once.
 
 from __future__ import annotations
 
-import contextlib
 import json
 import sqlite3
 from collections.abc import Generator
@@ -196,8 +195,10 @@ def _iter_relaxed_minima_from_da(
 
                 out = candidate.copy()
                 # Stable link back to the SQLite `systems.id` row (for TS ↔ minima traceability).
-                with contextlib.suppress(Exception):
+                try:
                     add_metadata(out, systems_row_id=int(row_id))
+                except (TypeError, ValueError) as e:
+                    logger.debug("Failed to attach systems_row_id metadata: %s", e)
                 yield (energy, out)
 
 

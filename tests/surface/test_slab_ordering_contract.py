@@ -84,3 +84,42 @@ def test_validate_stored_slab_adsorbate_metadata_skips_without_json() -> None:
         system_kind="slab_adsorbate",
     )
     validate_stored_slab_adsorbate_metadata(combined)
+
+
+def test_metadata_validation_keeps_adsorbate_order_for_pt5_two_oh() -> None:
+    slab = fcc111("Pt", size=(2, 2, 1), vacuum=6.0, orthogonal=True)
+    ads = Atoms(
+        "Pt5OHOH",
+        positions=[
+            [1.0, 1.0, 8.0],
+            [2.0, 1.0, 8.2],
+            [3.0, 1.0, 8.4],
+            [1.5, 2.0, 8.6],
+            [2.5, 2.0, 8.8],
+            [1.2, 1.2, 9.3],
+            [1.6, 1.2, 9.7],
+            [2.2, 1.2, 9.4],
+            [2.6, 1.2, 9.8],
+        ],
+        cell=slab.cell,
+        pbc=slab.pbc,
+    )
+    combined = combine_slab_adsorbate(slab, ads)
+    add_metadata(
+        combined,
+        n_slab_atoms=len(slab),
+        system_kind="slab_adsorbate",
+        slab_chemical_symbols_json=json.dumps(slab.get_chemical_symbols()),
+    )
+    validate_stored_slab_adsorbate_metadata(combined)
+    assert combined.get_chemical_symbols()[len(slab) :] == [
+        "Pt",
+        "Pt",
+        "Pt",
+        "Pt",
+        "Pt",
+        "O",
+        "H",
+        "O",
+        "H",
+    ]
