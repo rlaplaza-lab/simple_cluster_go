@@ -272,6 +272,7 @@ Preset one-element jobs: `run_go_ts_one_element`.
 
 - TorchSim is an optional tool that provides GPU-accelerated batched optimization when available; SCGO works with EMT (CPU) out of the box for quick tests.
 - For reproducible results, pass `seed=` to the workflow functions above.
+- Optional reference scripts live in `runners/` (workflow examples) and `benchmark/` (benchmark entry points).
 - See `tests/` for concrete usage patterns.
 
 ---
