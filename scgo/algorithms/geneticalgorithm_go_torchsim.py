@@ -62,6 +62,7 @@ from scgo.utils.fitness_strategies import FitnessStrategy, validate_fitness_stra
 from scgo.utils.helpers import extract_minima_from_database
 from scgo.utils.logging import get_logger, should_show_progress
 from scgo.utils.mutation_weights import get_adaptive_mutation_config
+from scgo.utils.parallel_workers import resolve_n_jobs_to_workers
 from scgo.utils.rng_helpers import ensure_rng_or_create
 from scgo.utils.validation import validate_composition
 
@@ -70,13 +71,7 @@ def _resolve_parallel_worker_count(n_jobs: int, n_tasks: int) -> int:
     """Resolve worker count from initialization-style semantics."""
     if n_tasks <= 1:
         return 1
-    cpu_count = os.cpu_count() or 1
-    if n_jobs == -1:
-        requested = cpu_count
-    elif n_jobs == -2:
-        requested = max(1, cpu_count - 1)
-    else:
-        requested = n_jobs
+    requested = resolve_n_jobs_to_workers(n_jobs)
     return max(1, min(requested, n_tasks))
 
 
@@ -252,8 +247,8 @@ def ga_go_torchsim(
     mutation_probability: float = 0.4,
     population_size: int = 10,
     offspring_fraction: float = 0.5,
-    n_jobs_population_init: int = 1,
-    n_jobs_offspring: int = 1,
+    n_jobs_population_init: int = -2,
+    n_jobs_offspring: int = -2,
     vacuum: float = 10.0,
     previous_search_glob: str = "**/*.db",
     use_adaptive_mutations: bool = True,
@@ -809,7 +804,11 @@ def ga_go_torchsim(
 
                 t_parallel = perf_counter()
                 job_results: dict[int, dict[str, Any]] = {}
-                with ThreadPoolExecutor(max_workers=n_workers) as executor:
+                worker_exceptions: list[BaseException] = []
+                with ThreadPoolExecutor(
+                    max_workers=n_workers,
+                    thread_name_prefix="scgo_ga_offspring",
+                ) as executor:
                     futures = [executor.submit(_build_offspring, job) for job in jobs]
                     for future in as_completed(futures):
                         try:
@@ -820,8 +819,18 @@ def ga_go_torchsim(
                             worker_failure_types_gen[err_name] = (
                                 worker_failure_types_gen.get(err_name, 0) + 1
                             )
+                            worker_exceptions.append(exc)
+                            logger.exception(
+                                "Offspring crossover/mutation worker failed (%s)",
+                                err_name,
+                            )
                             continue
                         job_results[result["index"]] = result
+                if len(jobs) > 0 and len(job_results) == 0:
+                    first = worker_exceptions[0] if worker_exceptions else None
+                    raise RuntimeError(
+                        f"All {len(jobs)} parallel offspring workers failed"
+                    ) from first
                 t_offspring_parallel_wall_gen += perf_counter() - t_parallel
                 if worker_failures_gen:
                     profile_counters["offspring_worker_failures"] += worker_failures_gen

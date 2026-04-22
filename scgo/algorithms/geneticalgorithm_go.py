@@ -72,7 +72,7 @@ def ga_go(
     mutation_probability: float = 0.4,
     population_size: int = 10,
     offspring_fraction: float = 0.5,
-    n_jobs_population_init: int = 1,
+    n_jobs_population_init: int = -2,
     vacuum: float = 10.0,
     previous_search_glob: str = "**/*.db",
     use_adaptive_mutations: bool = True,

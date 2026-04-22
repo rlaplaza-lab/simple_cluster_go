@@ -12,6 +12,7 @@ from ase_ga.utilities import atoms_too_close, atoms_too_close_two_sets
 
 from scgo.initialization.geometry_helpers import _generate_rotation_matrix
 from scgo.utils.logging import get_logger
+from scgo.utils.parallel_workers import resolve_n_jobs_to_workers
 
 if TYPE_CHECKING:
     from numpy.random import Generator
@@ -235,9 +236,11 @@ def create_deposited_cluster_batch(
             "try widening height range or increasing max_placement_attempts."
         )
 
-    workers = min(n_structures, n_jobs if n_jobs > 0 else 1)
+    workers = min(n_structures, resolve_n_jobs_to_workers(n_jobs))
     ordered_results: list[Atoms | None] = [None] * n_structures
-    with ThreadPoolExecutor(max_workers=workers) as ex:
+    with ThreadPoolExecutor(
+        max_workers=workers, thread_name_prefix="scgo_deposit"
+    ) as ex:
         futures = {
             ex.submit(_build_structure_with_seed, seed): idx
             for idx, seed in enumerate(task_seeds)

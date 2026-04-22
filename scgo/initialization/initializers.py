@@ -33,6 +33,7 @@ from scgo.utils.helpers import (
     get_composition_counts,
 )
 from scgo.utils.logging import get_logger
+from scgo.utils.parallel_workers import resolve_n_jobs_to_workers
 from scgo.utils.validation import validate_composition
 
 from .geometry_helpers import (
@@ -2173,18 +2174,7 @@ def create_initial_cluster_batch(
         )
         return (idx, atoms, used_strategy, fallback_from)
 
-    # Resolve n_jobs to actual number of workers
-    if n_jobs < 1 and n_jobs not in (-1, -2):
-        raise ValueError(f"n_jobs must be >= 1, -1, or -2, got {n_jobs}")
-
-    cpu_count = os.cpu_count() or 1
-    if n_jobs == -1:
-        max_workers = cpu_count
-    elif n_jobs == -2:
-        max_workers = max(1, cpu_count - 1)
-    else:
-        max_workers = n_jobs
-
+    max_workers = resolve_n_jobs_to_workers(n_jobs)
     # No point creating more workers than tasks
     max_workers = min(max_workers, n_structures)
 
@@ -2209,7 +2199,10 @@ def create_initial_cluster_batch(
         # Parallel execution using ThreadPoolExecutor
         max_retries = 1  # low-hanging improvement: try one retry for transient failures
         try:
-            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            with ThreadPoolExecutor(
+                max_workers=max_workers,
+                thread_name_prefix="scgo_init_batch",
+            ) as executor:
                 # Submit all tasks
                 future_to_index = {
                     executor.submit(_generate_structure, assignment): assignment[0]
