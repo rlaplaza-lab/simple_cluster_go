@@ -17,6 +17,7 @@ from typing import Any
 from ase import Atoms
 
 from scgo.minima_search import run_trials
+from scgo.system_types import SystemType, get_system_policy
 from scgo.utils.helpers import get_cluster_formula
 from scgo.utils.logging import configure_logging, get_logger
 from scgo.utils.rng_helpers import ensure_rng
@@ -33,9 +34,11 @@ from scgo.utils.run_tracking import ensure_run_id
 from scgo.utils.validation import validate_composition
 
 
-def _select_algorithm(n_atoms: int, logger: Any) -> str:
+def _select_algorithm(n_atoms: int, system_type: SystemType, logger: Any) -> str:
     """Choose algorithm 'simple', 'bh' or 'ga' based on atom count."""
-    if n_atoms <= 2:
+    policy = get_system_policy(system_type)
+    simple_allowed = not policy.uses_surface and not policy.has_adsorbate
+    if n_atoms <= 2 and simple_allowed:
         chosen_go = "simple"
         logger.info(
             f"Selected simple optimization for {n_atoms}-atom cluster (trivial structure)"
@@ -50,6 +53,23 @@ def _select_algorithm(n_atoms: int, logger: Any) -> str:
         logger.info(f"Selected Genetic Algorithm for {n_atoms}-atom cluster")
 
     return chosen_go
+
+
+def _resolve_explicit_system_type(params: dict[str, Any]) -> SystemType:
+    candidates = []
+    for algo in ("simple", "bh", "ga"):
+        value = params.get("optimizer_params", {}).get(algo, {}).get("system_type")
+        if isinstance(value, str):
+            candidates.append(value)
+    if not candidates:
+        raise ValueError(
+            "Missing required optimizer_params[algo]['system_type'] in parameters."
+        )
+    if len(set(candidates)) != 1:
+        raise ValueError(
+            "All optimizer_params system_type values must match exactly for one run."
+        )
+    return candidates[0]
 
 
 def run_scgo_trials(
@@ -103,7 +123,8 @@ def run_scgo_trials(
     )
 
     # Algorithm selection: Use simple optimization for 1-2 atoms, BH for 3, GA for larger
-    chosen_go = _select_algorithm(n_atoms, logger)
+    resolved_system_type = _resolve_explicit_system_type(params)
+    chosen_go = _select_algorithm(n_atoms, resolved_system_type, logger)
 
     # Extract algorithm-specific parameters without mutation
     algo_params = params["optimizer_params"].get(chosen_go, {})

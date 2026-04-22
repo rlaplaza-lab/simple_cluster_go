@@ -6,9 +6,6 @@ from ase import Atoms
 from ase.build import graphene
 
 from scgo.surface.config import SurfaceSystemConfig
-from scgo.utils.runtime_warnings import apply_scgo_runtime_warning_filters
-
-apply_scgo_runtime_warning_filters()
 
 DEFAULT_GRAPHITE_SLAB_LAYERS = 5
 DEFAULT_GRAPHITE_SLAB_REPEAT_XY = 4

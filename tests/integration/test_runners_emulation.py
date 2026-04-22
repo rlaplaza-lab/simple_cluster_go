@@ -2,7 +2,7 @@
 
 import pytest
 
-from scgo import run_go_element_scan
+from scgo import run_go_campaign
 from scgo.calculators.orca_helpers import prepare_orca_calculations
 from scgo.database.registry import clear_registry_cache
 from scgo.param_presets import get_testing_params
@@ -20,8 +20,13 @@ def test_emulate_run_pt4_6_orca_lowe_and_ts_search(tmp_path):
     compositions = [["Pt"] * n for n in range(4, 7)]
 
     ga_params = get_testing_params()
-    minima_by_formula = run_go_element_scan(
-        "Pt", 4, 6, params=ga_params, seed=42, verbosity=0, output_dir=tmp_path
+    minima_by_formula = run_go_campaign(
+        [["Pt"] * n for n in range(4, 7)],
+        params=ga_params,
+        seed=42,
+        verbosity=0,
+        output_dir=tmp_path,
+        system_type="gas_cluster",
     )
     assert minima_by_formula, "Expected minima from the GA campaign"
 
@@ -53,6 +58,7 @@ def test_emulate_run_pt4_6_orca_lowe_and_ts_search(tmp_path):
             neb_n_images=3,
             neb_fmax=0.3,
             neb_steps=10,
+            system_type="gas_cluster",
         )
 
         assert isinstance(results, list)

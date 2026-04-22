@@ -28,6 +28,7 @@ from scgo.constants import (
     DEFAULT_PAIR_COR_MAX,
 )
 from scgo.database.metadata import get_metadata
+from scgo.system_types import SystemType, get_system_policy
 from scgo.utils.helpers import extract_energy_from_atoms
 from scgo.utils.logging import get_logger
 from scgo.utils.run_helpers import cleanup_torch_cuda
@@ -96,6 +97,7 @@ def calculate_structure_similarity(
     pair_cor_max: float = DEFAULT_PAIR_COR_MAX,
     *,
     ignore_fixed_atoms: bool = True,
+    use_mic: bool = False,
 ) -> tuple[float, float, bool]:
     """Return (cum_diff, max_diff, are_similar) comparing two Atoms; raises ValueError if counts differ."""
     from scgo.utils.comparators import (
@@ -108,11 +110,12 @@ def calculate_structure_similarity(
             f"Atoms objects have different lengths: {len(atoms1)} vs {len(atoms2)}"
         )
 
-    comparison_indices = (
-        get_shared_mobile_atom_indices(atoms1, atoms2)
-        if ignore_fixed_atoms
-        else np.arange(len(atoms1), dtype=int)
-    )
+    if ignore_fixed_atoms:
+        comparison_indices = get_shared_mobile_atom_indices(
+            atoms1, atoms2, fallback_to_all=False
+        )
+    else:
+        comparison_indices = np.arange(len(atoms1), dtype=int)
     atoms1_cmp = atoms1[comparison_indices]
     atoms2_cmp = atoms2[comparison_indices]
 
@@ -120,7 +123,7 @@ def calculate_structure_similarity(
         n_top=len(atoms1_cmp),
         tol=tolerance,
         pair_cor_max=pair_cor_max,
-        mic=False,
+        mic=use_mic,
     )
 
     cum_diff, max_diff = comparator.get_differences(atoms1_cmp, atoms2_cmp)
@@ -254,6 +257,7 @@ def interpolate_path(
     align_endpoints: bool = True,
     perturb_sigma: float = 0.0,
     rng: np.random.Generator | None = None,
+    system_type: SystemType | None = None,
 ) -> list[Atoms]:
     """Interpolate between two structures and return images including endpoints.
 
@@ -272,6 +276,13 @@ def interpolate_path(
 
     a1_copy = atoms1.copy()
     a2_copy = atoms2.copy()
+
+    if align_endpoints and system_type is not None:
+        system_policy = get_system_policy(system_type)
+        if system_policy.neb_disable_alignment:
+            raise ValueError(
+                f"Endpoint alignment is not allowed for {system_type!r}; set align_endpoints=False."
+            )
 
     if align_endpoints:
         mapping = _match_atoms_by_fingerprint(a1_copy, a2_copy)
@@ -507,6 +518,7 @@ def find_transition_state(
     perturb_sigma: float = 0.0,
     neb_interpolation_mic: bool = False,
     neb_tangent_method: str = DEFAULT_NEB_TANGENT_METHOD,
+    system_type: SystemType | None = None,
 ) -> dict[str, Any]:
     """Run NEB to locate a transition state between two structures.
 
@@ -602,6 +614,7 @@ def find_transition_state(
             align_endpoints=align_endpoints,
             perturb_sigma=perturb_sigma,
             rng=rng,
+            system_type=system_type,
         )
 
         if np.allclose(
@@ -727,6 +740,7 @@ def find_transition_state(
 
 
 _PROVENANCE_KEYS = (
+    "system_type",
     "use_torchsim",
     "use_parallel_neb",
     "climb",

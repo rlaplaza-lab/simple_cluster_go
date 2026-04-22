@@ -5,8 +5,9 @@ the recovered minima primarily through geometric agreement and, secondarily,
 relative energetic ordering. The script doubles as a pytest entry point and a
 standalone CLI for rapid regression checks while tweaking optimization knobs.
 
-Campaign outputs are written under ``benchmark/results/pt_cluster/`` (MACE) or
-``benchmark/results/pt_cluster_uma/`` (UMA); see ``benchmark.benchmark_common``.
+Campaign outputs are written under
+``benchmark/results/<formula>_<backend>_<model>/`` (for example:
+``pt5_mace_mace_matpes_0`` or ``pt5_uma_uma-s-1p2-oc25``).
 """
 
 from __future__ import annotations

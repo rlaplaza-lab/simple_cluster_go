@@ -84,7 +84,9 @@ def test_get_ts_search_params_uma_has_torchsim_when_available(monkeypatch):
 
     monkeypatch.setattr(importlib.util, "find_spec", fake_spec)
 
-    ts = get_ts_search_params(calculator="UMA", calculator_kwargs={})
+    ts = get_ts_search_params(
+        calculator="UMA", calculator_kwargs={}, system_type="gas_cluster"
+    )
     assert ts["use_torchsim"] is True
     assert ts["use_parallel_neb"] is False
 
@@ -99,7 +101,9 @@ def test_get_ts_run_kwargs_uma_sets_fairchem_model_fields(monkeypatch):
 
     monkeypatch.setattr(importlib.util, "find_spec", fake_spec)
 
-    ts = get_ts_search_params(calculator="UMA", calculator_kwargs={})
+    ts = get_ts_search_params(
+        calculator="UMA", calculator_kwargs={}, system_type="gas_cluster"
+    )
     kw = get_ts_run_kwargs(ts)
     assert kw["use_torchsim"] is True
     assert kw["use_parallel_neb"] is False

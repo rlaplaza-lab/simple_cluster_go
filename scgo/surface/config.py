@@ -6,7 +6,10 @@ from dataclasses import dataclass
 
 from ase import Atoms
 
+from scgo.utils.logging import get_logger
 from scgo.utils.validation import validate_positive
+
+logger = get_logger(__name__)
 
 
 @dataclass(frozen=True)
@@ -105,21 +108,14 @@ class SurfaceSystemConfig:
             raise ValueError("Slab must have at least one periodic dimension.")
 
         if not all(self.slab.pbc):
-            import warnings
-
-            warnings.warn(
-                "Extending slab periodicity to 3D for VASP compatibility.", stacklevel=2
-            )
+            logger.warning("Extending slab periodicity to 3D for VASP compatibility.")
             self.slab.pbc = [True, True, True]
 
         vacuum_length = self.slab.cell.lengths()[self.surface_normal_axis]
         if vacuum_length < 10.0:
-            import warnings
-
-            warnings.warn(
-                f"Slab vacuum size ({vacuum_length:.2f} \u00c5) on axis {self.surface_normal_axis} "
+            logger.warning(
+                f"Slab vacuum size ({vacuum_length:.2f} A) on axis {self.surface_normal_axis} "
                 "might be too small to prevent periodic interaction.",
-                stacklevel=2,
             )
 
         if (

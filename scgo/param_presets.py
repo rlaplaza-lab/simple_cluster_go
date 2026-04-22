@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Any
 
 from scgo.constants import (
     BOLTZMANN_K_EV_PER_K,
@@ -12,6 +12,7 @@ from scgo.constants import (
     DEFAULT_PAIR_COR_MAX,
 )
 from scgo.surface.config import SurfaceSystemConfig
+from scgo.system_types import SystemType, get_system_policy
 from scgo.utils.torchsim_policy import resolve_ts_torchsim_flags
 
 # Available MACE model names for use in calculator_kwargs["model_name"]
@@ -29,12 +30,9 @@ AVAILABLE_UMA_MODELS = [
     "uma-m-1p1",
 ]
 
-TsSearchRegime = Literal["gas", "surface"]
-
 __all__ = [
     "AVAILABLE_MACE_MODELS",
     "AVAILABLE_UMA_MODELS",
-    "TsSearchRegime",
     "get_default_params",
     "get_minimal_ga_params",
     "get_testing_params",
@@ -74,6 +72,7 @@ def get_default_params() -> dict[str, Any]:
                 "fmax": 0.05,
                 "niter": 1,
                 "niter_local_relaxation": "auto",
+                "system_type": "gas_cluster",
             },
             "bh": {
                 "optimizer": "FIRE",
@@ -93,6 +92,7 @@ def get_default_params() -> dict[str, Any]:
                 "diversity_reference_db": None,  # For diversity strategy
                 "diversity_max_references": 100,  # Performance limit
                 "diversity_update_interval": 5,  # Update references every N iterations
+                "system_type": "gas_cluster",
             },
             "ga": {
                 "optimizer": "FIRE",
@@ -119,6 +119,7 @@ def get_default_params() -> dict[str, Any]:
                 "diversity_reference_db": None,  # For diversity strategy
                 "diversity_max_references": 100,  # Performance limit
                 "diversity_update_interval": 5,  # Update references every N generations
+                "system_type": "gas_cluster",
             },
         },
     }
@@ -166,12 +167,14 @@ def get_testing_params() -> dict[str, Any]:
                 "fmax": 0.05,
                 "niter": 1,
                 "niter_local_relaxation": 2,
+                "system_type": "gas_cluster",
             },
             "bh": {
                 "optimizer": "FIRE",
                 "niter": 5,
                 "dr": 0.2,
                 "niter_local_relaxation": 2,
+                "system_type": "gas_cluster",
             },
             "ga": {
                 "optimizer": "FIRE",
@@ -180,6 +183,7 @@ def get_testing_params() -> dict[str, Any]:
                 "niter": 2,
                 "niter_local_relaxation": 2,
                 "n_jobs_population_init": -2,  # Parallel for tests/benchmarks
+                "system_type": "gas_cluster",
             },
         },
     }
@@ -271,7 +275,7 @@ def get_default_uma_params() -> dict[str, Any]:
 
 def get_ts_search_params_uma(
     *,
-    regime: TsSearchRegime = "gas",
+    system_type: SystemType,
     surface_config: SurfaceSystemConfig | None = None,
     model_name: str = "uma-s-1p2",
     uma_task: str | None = "oc25",
@@ -280,7 +284,7 @@ def get_ts_search_params_uma(
     return get_ts_search_params(
         calculator="UMA",
         calculator_kwargs={"model_name": model_name, "task_name": uma_task},
-        regime=regime,
+        system_type=system_type,
         surface_config=surface_config,
     )
 
@@ -328,7 +332,7 @@ def get_ts_search_params(
     calculator: str = "MACE",
     calculator_kwargs: dict[str, Any] | None = None,
     *,
-    regime: TsSearchRegime = "gas",
+    system_type: SystemType,
     surface_config: SurfaceSystemConfig | None = None,
 ) -> dict[str, Any]:
     """Return TS search parameters (NEB settings and thresholds).
@@ -342,15 +346,9 @@ def get_ts_search_params(
         flags and raises if TorchSim was requested but the stack is missing.
         Calculators that do not support TorchSim NEB (e.g. ``"EMT"``) must set
         ``use_torchsim=False`` before calling :func:`get_ts_run_kwargs`.
-    regime:
-        ``"gas"`` (nanoparticle / non-periodic): ``neb_n_images=5`` for a thicker
-        initial band (fewer false endpoint-TS bands than 3 images on metals),
-        ``energy_gap_threshold=2.0`` eV so pairs are not dropped when relaxed
-        minima span more than 1 eV, and ``neb_climb=False`` (see preset comments).
-        ``"surface"`` (slab + adsorbate, periodic in-plane): MIC interpolation,
-        ``neb_interpolation_method=idpp``, ``neb_n_images=5``, ``neb_climb=False``,
-        ``fmax=0.1 eV/Å``, and ``neb_align_endpoints=False`` (Pt5-on-graphite NEB sweeps;
-        see ``benchmark/benchmark_neb_knobs.py``).
+    system_type:
+        One of the four explicit SCGO system types. Surface policies are derived
+        from ``system_type`` and configure MIC interpolation plus endpoint alignment.
         Override any key via the returned dict before calling
         :func:`get_ts_run_kwargs`, which applies
         :func:`~scgo.utils.torchsim_policy.resolve_ts_torchsim_flags` to set
@@ -359,14 +357,12 @@ def get_ts_search_params(
         The same :class:`scgo.surface.config.SurfaceSystemConfig` instance wired into
         ``optimizer_params["ga"]["surface_config"]``. Stored on the returned dict
         and forwarded by :func:`get_ts_run_kwargs` so
-        :func:`~scgo.runner_api.run_transition_state_search` (``ts_kwargs=``) reapplies
+        :func:`~scgo.runner_api.run_ts_search` (``ts_kwargs=``) reapplies
         ``attach_slab_constraints`` on NEB endpoints (frozen vs partially relaxed
         slab stays consistent with global optimization). Omit for gas-phase or when
         minima already carry the intended constraints.
     """
-    if regime not in ("gas", "surface"):
-        msg = f"regime must be 'gas' or 'surface', got {regime!r}"
-        raise ValueError(msg)
+    policy = get_system_policy(system_type)
 
     if calculator_kwargs is None:
         calculator_kwargs = {}
@@ -398,7 +394,7 @@ def get_ts_search_params(
             # better than 0.03 on Pt4.
             "neb_perturb_sigma": 0.0,
             "neb_interpolation_mic": False,
-            # Enable retry/fallback when band slides to an endpoint (recommended).
+            # Enable retry when band slides to an endpoint (recommended).
             "use_torchsim": True,
             "torchsim_batch_size": 5,
             "torchsim_fmax": 0.05,
@@ -415,10 +411,11 @@ def get_ts_search_params(
             # and helpers.filter_unique_minima)
             "dedupe_minima": True,
             "minima_energy_tolerance": DEFAULT_ENERGY_TOLERANCE,
+            "system_type": system_type,
         }
     )
 
-    if regime == "surface":
+    if policy.uses_surface:
         # Pt5-on-graphite (MACE + TorchSim NEB when ``scgo[mace]`` is installed),
         # ``benchmark_neb_knobs.py``:
         # (1) ``neb_n_images`` in {3, 5, 7} × ``neb_climb`` with linear + MIC: ``n=5``,
@@ -448,19 +445,21 @@ def get_ts_search_params(
 
 
 def get_ts_run_kwargs(ts_params: dict[str, Any] | None = None) -> dict[str, Any]:
-    """Return a dict suitable for :func:`~scgo.runner_api.run_transition_state_search` ``ts_kwargs``.
+    """Return a dict suitable for :func:`~scgo.runner_api.run_ts_search` ``ts_kwargs``.
 
     Example:
 
-        from scgo.runner_api import run_transition_state_search
+        from scgo.runner_api import run_ts_search
 
         ts_params = get_ts_search_params()
-        results = run_transition_state_search(
+        results = run_ts_search(
             composition, params=go_params, ts_kwargs=get_ts_run_kwargs(ts_params)
         )
     """
     if ts_params is None:
-        ts_params = get_ts_search_params()
+        raise ValueError(
+            "ts_params is required. Build with get_ts_search_params(system_type=...)."
+        )
 
     calc_name = str(ts_params["calculator"])
     use_ts, use_pn = resolve_ts_torchsim_flags(
@@ -474,6 +473,7 @@ def get_ts_run_kwargs(ts_params: dict[str, Any] | None = None) -> dict[str, Any]
             "calculator": ts_params["calculator"],
             "calculator_kwargs": ts_params["calculator_kwargs"],
         },
+        "system_type": ts_params["system_type"],
         "use_torchsim": use_ts,
         "use_parallel_neb": use_pn,
         "torchsim_params": {
@@ -529,7 +529,7 @@ def build_one_element_go_ts_bundle(
     niter: int,
     population_size: int,
     max_pairs: int,
-    regime: TsSearchRegime = "gas",
+    system_type: SystemType = "gas_cluster",
     model_name: str | None = None,
     uma_task: str = "oc25",
     surface_config: SurfaceSystemConfig | None = None,
@@ -557,7 +557,7 @@ def build_one_element_go_ts_bundle(
             uma_task=uma_task,
         )
         ts_params = get_ts_search_params_uma(
-            regime=regime,
+            system_type=system_type,
             surface_config=surface_config,
             model_name=selected_model_name,
             uma_task=uma_task,
@@ -569,13 +569,14 @@ def build_one_element_go_ts_bundle(
             ga_params["calculator_kwargs"]["model_name"] = model_name
 
         ts_params = get_ts_search_params(
-            regime=regime,
+            system_type=system_type,
             surface_config=surface_config,
         )
         if model_name is not None:
             ts_params["calculator_kwargs"]["model_name"] = model_name
 
     ga = ga_params["optimizer_params"]["ga"]
+    ga["system_type"] = system_type
     ga["niter"] = niter
     ga["population_size"] = population_size
     if surface_config is not None:

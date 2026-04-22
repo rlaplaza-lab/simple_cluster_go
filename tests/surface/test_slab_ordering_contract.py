@@ -60,7 +60,7 @@ def test_validate_stored_slab_adsorbate_metadata_with_json() -> None:
     add_metadata(
         combined,
         n_slab_atoms=len(slab),
-        system_kind="slab_adsorbate",
+        system_type="surface_cluster_adsorbate",
         slab_chemical_symbols_json=json.dumps(syms),
     )
     validate_stored_slab_adsorbate_metadata(combined)
@@ -81,7 +81,7 @@ def test_validate_stored_slab_adsorbate_metadata_skips_without_json() -> None:
     add_metadata(
         combined,
         n_slab_atoms=len(slab),
-        system_kind="slab_adsorbate",
+        system_type="surface_cluster_adsorbate",
     )
     validate_stored_slab_adsorbate_metadata(combined)
 
@@ -108,7 +108,7 @@ def test_metadata_validation_keeps_adsorbate_order_for_pt5_two_oh() -> None:
     add_metadata(
         combined,
         n_slab_atoms=len(slab),
-        system_kind="slab_adsorbate",
+        system_type="surface_cluster_adsorbate",
         slab_chemical_symbols_json=json.dumps(slab.get_chemical_symbols()),
     )
     validate_stored_slab_adsorbate_metadata(combined)

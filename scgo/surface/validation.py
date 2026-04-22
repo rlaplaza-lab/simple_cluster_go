@@ -56,10 +56,13 @@ def validate_surface_config_slab_prefix(
 def validate_stored_slab_adsorbate_metadata(atoms: Atoms) -> None:
     """If GA slab metadata is present, verify the atom list still matches it.
 
-    Older databases may only have ``n_slab_atoms`` / ``system_kind`` without
+    Older databases may only have ``n_slab_atoms`` / ``system_type`` without
     ``slab_chemical_symbols_json``; in that case only ``len(atoms) >= n_slab`` is checked.
     """
-    if get_metadata(atoms, "system_kind") != "slab_adsorbate":
+    if get_metadata(atoms, "system_type") not in {
+        "surface_cluster",
+        "surface_cluster_adsorbate",
+    }:
         return
     n_meta = int(get_metadata(atoms, "n_slab_atoms", 0) or 0)
     if n_meta <= 0:

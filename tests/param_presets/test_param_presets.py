@@ -14,7 +14,7 @@ from scgo.utils.run_helpers import resolve_auto_params
 
 
 def test_ts_search_params_expose_dedupe_and_tolerance_defaults():
-    ts = get_ts_search_params()
+    ts = get_ts_search_params(system_type="gas_cluster")
 
     # Defaults must exist and be coherent with project-wide defaults
     assert ts.get("dedupe_minima", None) is True
@@ -32,7 +32,7 @@ def test_ts_search_params_expose_dedupe_and_tolerance_defaults():
 
 
 def test_ts_search_params_allow_overrides():
-    ts = get_ts_search_params()
+    ts = get_ts_search_params(system_type="gas_cluster")
     ts["dedupe_minima"] = False
     ts["minima_energy_tolerance"] = 0.05
 
@@ -45,20 +45,20 @@ def test_ts_search_params_surface_config_forwarded_to_run_kwargs():
     slab = fcc111("Pt", size=(2, 2, 1), vacuum=6.0, orthogonal=True)
     slab.pbc = [True, True, True]
     cfg = SurfaceSystemConfig(slab=slab, fix_all_slab_atoms=True)
-    ts = get_ts_search_params(surface_config=cfg)
+    ts = get_ts_search_params(system_type="surface_cluster", surface_config=cfg)
     assert ts.get("surface_config") is cfg
     kwargs = get_ts_run_kwargs(ts)
     assert kwargs.get("surface_config") is cfg
 
 
 def test_ts_run_kwargs_surface_config_defaults_to_none():
-    ts = get_ts_search_params()
+    ts = get_ts_search_params(system_type="gas_cluster")
     kwargs = get_ts_run_kwargs(ts)
     assert kwargs.get("surface_config") is None
 
 
 def test_ts_search_surface_regime_mic_and_fmax():
-    ts = get_ts_search_params(regime="surface")
+    ts = get_ts_search_params(system_type="surface_cluster")
     assert ts["neb_interpolation_mic"] is True
     assert ts["neb_n_images"] == 5
     assert ts["neb_fmax"] == pytest.approx(0.1)
@@ -80,14 +80,9 @@ def test_ts_search_surface_regime_mic_and_fmax():
     assert kwargs["neb_align_endpoints"] is False
 
 
-def test_ts_search_regime_invalid():
-    with pytest.raises(ValueError, match="regime"):
-        get_ts_search_params(regime="invalid")  # type: ignore[arg-type]
-
-
 def test_ts_search_step_defaults_can_be_auto():
     """TS presets should expose 'auto' for NEB/TorchSim max-steps and pass-through to run kwargs."""
-    ts = get_ts_search_params()
+    ts = get_ts_search_params(system_type="gas_cluster")
 
     # Defaults changed to 'auto' so callers can request size-dependent steps
     assert ts.get("neb_steps") == "auto"
@@ -124,7 +119,7 @@ def test_build_one_element_go_ts_bundle_gas():
         niter=8,
         population_size=18,
         max_pairs=12,
-        regime="gas",
+        system_type="gas_cluster",
     )
     assert bundle["backend"] == "mace"
     ga = bundle["ga_params"]["optimizer_params"]["ga"]
@@ -145,7 +140,7 @@ def test_build_one_element_go_ts_bundle_surface_has_surface_config():
         niter=8,
         population_size=18,
         max_pairs=12,
-        regime="surface",
+        system_type="surface_cluster",
         surface_config=cfg,
     )
     ga = bundle["ga_params"]["optimizer_params"]["ga"]

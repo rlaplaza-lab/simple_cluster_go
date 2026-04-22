@@ -15,6 +15,10 @@ from ase_ga.utilities import (
     get_rotation_matrix,
 )
 
+from scgo.ase_ga_patches._vector_utils import (
+    append_unique_unit_vector as _append_unique_unit_vector,
+)
+from scgo.ase_ga_patches._vector_utils import random_unit_vector as _random_unit_vector
 from scgo.utils.rng_helpers import ensure_rng_or_create as _ensure_rng
 
 
@@ -23,28 +27,6 @@ def _get_blmin_distance(blmin, atomic_number_a, atomic_number_b):
     if key in blmin:
         return blmin[key]
     return blmin[(int(atomic_number_b), int(atomic_number_a))]
-
-
-def _random_unit_vector(rng, fallback=None):
-    vector = rng.normal(0.0, 1.0, 3)
-    norm = np.linalg.norm(vector)
-    if norm <= 1e-12:
-        if fallback is not None:
-            return np.array(fallback, dtype=float)
-        return np.array([1.0, 0.0, 0.0])
-    return vector / norm
-
-
-def _append_unique_unit_vector(candidates, vector, tol=0.995):
-    unit = np.asarray(vector, dtype=float)
-    norm = np.linalg.norm(unit)
-    if norm <= 1e-12:
-        return
-    unit /= norm
-    for existing in candidates:
-        if float(np.dot(unit, existing)) > tol:
-            return
-    candidates.append(unit)
 
 
 class RattleMutation(OffspringCreator):

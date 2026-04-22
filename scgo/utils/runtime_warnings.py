@@ -1,35 +1,22 @@
-"""Third-party warning filters applied when SCGO configures logging."""
+"""Warning integration helpers for SCGO runtime logging."""
 
 from __future__ import annotations
 
-import os
-import warnings
+import logging
 
 _FILTERS_INSTALLED = False
 
 
 def apply_scgo_runtime_warning_filters() -> None:
-    """Register one-time filters for known noisy library warnings."""
+    """Route Python warnings through logging (do not silence them)."""
     global _FILTERS_INSTALLED
-    os.environ.pop("TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD", None)
     if _FILTERS_INSTALLED:
         return
     _FILTERS_INSTALLED = True
-    warnings.filterwarnings(
-        "ignore",
-        message=r".*TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD detected.*",
-        category=UserWarning,
-    )
-    warnings.filterwarnings(
-        "ignore",
-        message=r".*Extending slab periodicity to 3D for VASP compatibility.*",
-        category=UserWarning,
-    )
-    warnings.filterwarnings(
-        "ignore",
-        message=r".*All systems have reached the maximum number of steps: \d+.*",
-        category=UserWarning,
-    )
+    logging.captureWarnings(True)
+    warnings_logger = logging.getLogger("py.warnings")
+    warnings_logger.propagate = True
+    warnings_logger.setLevel(logging.WARNING)
 
 
 __all__ = ["apply_scgo_runtime_warning_filters"]

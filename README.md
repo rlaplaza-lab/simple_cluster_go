@@ -62,11 +62,16 @@ pre-commit install
 ```python
 from scgo import run_go
 from scgo.param_presets import get_testing_params
-results = run_go(["Pt"] * 4, params=get_testing_params(), seed=42)
+results = run_go(
+    ["Pt"] * 4,
+    params=get_testing_params(),
+    seed=42,
+    system_type="gas_cluster",
+)
 ```
 
 - `results` is a list of `(energy, Atoms)` for unique minima (sorted by energy by default).
-- Sequential multi-composition GO: `run_go_campaign([...])`. Size sweeps: `run_go_element_scan` / `run_go_binary_scan`. These live in [`scgo.runner_api`](scgo/runner_api.py) and are re-exported from `scgo`.
+- Sequential multi-composition GO uses `run_go_campaign([...], system_type=...)` from [`scgo.runner_api`](scgo/runner_api.py) (also re-exported from `scgo`).
 
 ---
 
@@ -206,22 +211,17 @@ results = run_go(
     verbosity=1,
     clean=False,
     output_dir=None,
+    system_type="gas_cluster",
 )
 ```
 
 **Algorithm selection** (unchanged): 1–2 atoms → simple; 3 → basin hopping; 4+ → genetic algorithm.
 
-#### `run_go_campaign(compositions, ...)`
+#### `run_go_campaign(compositions, ..., system_type=...)`
 
 Run GO for each composition **sequentially**; returns `dict[formula, list[(energy, Atoms)]]`.
 
-#### `run_go_element_scan(element, min_atoms, max_atoms, ...)`
-
-One element, cluster sizes from `min_atoms` through `max_atoms`.
-
-#### `run_go_binary_scan(element1, element2, min_atoms, max_atoms, ...)`
-
-All compositions `A_i B_{n-i}` for each `n` in the size range.
+For element or binary scans, build compositions explicitly and pass them to `run_go_campaign`.
 
 ### Transition state search
 
@@ -231,35 +231,33 @@ Package-level `run_ts_search` / `run_ts_campaign` take **NEB and pairing options
 
 ```python
 from scgo import run_go, run_ts_search
+from scgo.param_presets import get_ts_run_kwargs, get_ts_search_params
 
 run_go(["Pt", "Pt", "Pt"], params={"calculator": "MACE"}, seed=42)
+ts_kwargs = get_ts_run_kwargs(get_ts_search_params(system_type="gas_cluster"))
 
 ts_results = run_ts_search(
     ["Pt", "Pt", "Pt"],
     output_dir="Pt3_searches",
     params={"calculator": "MACE"},
     seed=42,
-    ts_kwargs={
-        "max_pairs": 10,
-        "neb_fmax": 0.05,
-        "neb_steps": 500,
-        "use_torchsim": True,
-    },
+    ts_kwargs=ts_kwargs,
+    system_type="gas_cluster",
 )
 ```
 
-Use `scgo.param_presets.get_ts_run_kwargs(...)` to build `ts_kwargs` from a preset dict.
+`ts_kwargs` is required in high-level TS APIs. Use `scgo.param_presets.get_ts_run_kwargs(...)` to build it from a preset dict.
 
-#### `run_ts_campaign(compositions, output_dir=None, ..., ts_kwargs=None)`
+#### `run_ts_campaign(compositions, output_dir=None, ..., ts_kwargs, system_type=...)`
 
 Same pattern: pass `ts_kwargs={...}` for per-run options forwarded to each composition’s search.
 
 ### GO then TS
 
 - `run_go_ts(composition, *, ga_params, ts_kwargs, ...)`
-- `run_go_ts_campaign(compositions, *, ga_params, ts_kwargs, ...)`
+- `run_go_ts_campaign(compositions, *, ga_params, ts_kwargs, ..., system_type=...)`
 
-Preset MLIP (MACE/UMA) GO+TS jobs: `run_go_ts_one_element` for a single element × `n_atoms`, or `run_go_ts_with_mlip_preset` for an arbitrary adsorbate composition (formula string, symbol list, or `Atoms`). Use `log_go_ts_summary` after a run to log NEB success counts (and optional wall time).
+Preset MLIP (MACE/UMA) GO+TS jobs should build `ga_params` and `ts_kwargs` from `scgo.param_presets` (for example, `build_one_element_go_ts_bundle(...)`) and then call canonical `run_go_ts(...)`. High-level `run_*` APIs now emit consistent completion summaries (timing and key counts) internally.
 
 ### Advanced / internals
 
@@ -272,7 +270,7 @@ Preset MLIP (MACE/UMA) GO+TS jobs: `run_go_ts_one_element` for a single element 
 
 - TorchSim is an optional tool that provides GPU-accelerated batched optimization when available; SCGO works with EMT (CPU) out of the box for quick tests.
 - For reproducible results, pass `seed=` to the workflow functions above.
-- Optional scripts in `runners/` are short CLIs around `run_go_ts_one_element` / `run_go_ts_with_mlip_preset`, `make_graphite_surface_config`, and `param_presets` (see `benchmark/` for sweep-style entry points).
+- Optional scripts in `runners/` are intentionally minimal, no-CLI examples that set composition/surface + presets and call canonical `run_go_ts(...)` (see `benchmark/` for sweep-style entry points).
 - See `tests/` for concrete usage patterns.
 
 ---

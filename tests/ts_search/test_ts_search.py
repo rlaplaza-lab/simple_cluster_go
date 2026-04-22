@@ -245,6 +245,52 @@ def test_calculate_similarity_ignores_fixed_slab_atoms():
     assert are_similar is True
 
 
+def test_calculate_similarity_uses_mic_for_periodic_surfaces():
+    """MIC-aware similarity should treat periodic translations as equivalent."""
+    cell = [8.0, 8.0, 12.0]
+    a1 = Atoms(
+        "Pt2",
+        positions=[[0.10, 0.0, 0.0], [7.90, 0.0, 0.0]],
+        cell=cell,
+        pbc=[True, True, False],
+    )
+    a2 = Atoms(
+        "Pt2",
+        positions=[[0.10, 0.0, 0.0], [-0.10, 0.0, 0.0]],
+        cell=cell,
+        pbc=[True, True, False],
+    )
+    _, _, no_mic_similar = calculate_structure_similarity(a1, a2, use_mic=False)
+    _, _, mic_similar = calculate_structure_similarity(a1, a2, use_mic=True)
+    assert bool(no_mic_similar) is False
+    assert bool(mic_similar) is True
+
+
+def test_calculate_similarity_uses_adsorbate_slice_when_surface_metadata_present():
+    """When slab constraints are absent, n_slab metadata should scope comparison."""
+    atoms1 = Atoms(
+        "Pt4OH",
+        positions=[
+            [0.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [1.0, 1.0, 0.0],
+            [0.6, 0.4, 2.0],
+            [0.6, 0.4, 2.9],
+        ],
+    )
+    atoms2 = atoms1.copy()
+    atoms1.info.setdefault("metadata", {})["n_slab_atoms"] = 4
+    atoms2.info.setdefault("metadata", {})["n_slab_atoms"] = 4
+    pos2 = atoms2.get_positions()
+    pos2[:4, 0] += 0.7  # slab-only displacement
+    atoms2.set_positions(pos2)
+
+    cum_diff, _, are_similar = calculate_structure_similarity(atoms1, atoms2)
+    assert cum_diff == pytest.approx(0.0, abs=1e-10)
+    assert are_similar is True
+
+
 def test_select_structure_pairs_ignores_fixed_slab_atom_differences():
     """Pair filtering should reject endpoint pairs that differ only in frozen slab atoms."""
     base = Atoms(
@@ -623,6 +669,7 @@ def test_select_structure_pairs_physics_ranking_when_capped(monkeypatch):
         a_j: Atoms,
         tolerance: float = 0.1,
         pair_cor_max: float = 0.1,
+        use_mic: bool = False,
     ) -> tuple[float, float, bool]:
         pair = tuple(
             sorted(

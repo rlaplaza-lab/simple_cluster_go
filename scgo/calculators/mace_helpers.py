@@ -19,11 +19,10 @@ from mace.calculators import mace_mp
 from scgo.utils.logging import get_logger
 from scgo.utils.mlip_extras import ensure_mace_uma_not_both_installed
 
-# Some shells/exporters set this var globally, but MACE/e3nn call ``torch.load``
-# during import and can emit noisy warnings. Clear it before model stack import/use.
-os.environ.pop("TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD", None)
-
 _torch_load_patched = False
+
+# Remove env-level override so third-party imports don't emit warnings about it.
+os.environ.pop("TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD", None)
 
 
 def _ensure_torch_load_mace_checkpoints() -> None:

@@ -52,6 +52,12 @@ from scgo.database.metadata import add_metadata, filter_by_metadata, update_meta
 from scgo.initialization import compute_cell_side
 from scgo.surface.config import SurfaceSystemConfig
 from scgo.surface.constraints import attach_slab_constraints
+from scgo.system_types import (
+    SystemType,
+    uses_surface,
+    validate_structure_for_system_type,
+    validate_system_type_settings,
+)
 from scgo.utils.fitness_strategies import FitnessStrategy, validate_fitness_strategy
 from scgo.utils.helpers import extract_minima_from_database
 from scgo.utils.logging import get_logger, should_show_progress
@@ -78,10 +84,14 @@ def _torchsim_prepare_relaxed_copy(
     cand: Atoms,
     surface_config: SurfaceSystemConfig | None,
     n_slab: int,
+    *,
+    surface_mode: bool = False,
 ) -> Atoms:
     """Copy candidate and attach slab constraints before TorchSim relaxation."""
+    if surface_config is not None and n_slab > 0 and not surface_mode:
+        surface_mode = True
     c = cand.copy()
-    if surface_config is not None and n_slab > 0:
+    if surface_mode and surface_config is not None and n_slab > 0:
         attach_slab_constraints(
             c,
             n_slab,
@@ -104,6 +114,7 @@ def _relax_unrelaxed_candidates(
     run_id: str | None = None,
     surface_config: SurfaceSystemConfig | None = None,
     n_slab: int = 0,
+    system_type: SystemType = "gas_cluster",
     profiling: dict[str, float] | None = None,
 ) -> int:
     """Relax unrelaxed candidates in batches and commit them to the database."""
@@ -145,8 +156,17 @@ def _relax_unrelaxed_candidates(
         return 0
 
     t0 = perf_counter()
+    surface_mode = uses_surface(system_type)
     relaxed_results = relaxer.relax_batch(
-        [_torchsim_prepare_relaxed_copy(cand, surface_config, n_slab) for cand in batch]
+        [
+            _torchsim_prepare_relaxed_copy(
+                cand,
+                surface_config,
+                n_slab,
+                surface_mode=surface_mode,
+            )
+            for cand in batch
+        ]
     )
     if profiling is not None:
         profiling["relax_batch_s"] = profiling.get("relax_batch_s", 0.0) + (
@@ -163,6 +183,12 @@ def _relax_unrelaxed_candidates(
                 original.set_cell(relaxed.get_cell(), scale_atoms=True)
                 original.set_pbc(relaxed.get_pbc())
                 original.set_positions(relaxed.get_positions())
+                validate_structure_for_system_type(
+                    original,
+                    system_type=system_type,
+                    surface_config=surface_config,
+                    n_slab=n_slab if surface_mode else None,
+                )
 
                 # Copy forces if available (already converted to float64 by relaxer)
                 if "forces" in relaxed.arrays:
@@ -176,7 +202,7 @@ def _relax_unrelaxed_candidates(
                         {"potential_energy": energy, "raw_score": -energy},
                     ),
                 )
-                extra = slab_ga_metadata_extras(surface_config, n_slab)
+                extra = slab_ga_metadata_extras(surface_config, n_slab, system_type)
                 if generation is not None:
                     add_metadata(
                         original,
@@ -226,8 +252,8 @@ def ga_go_torchsim(
     mutation_probability: float = 0.4,
     population_size: int = 10,
     offspring_fraction: float = 0.5,
-    n_jobs_population_init: int = -2,
-    n_jobs_offspring: int = -2,
+    n_jobs_population_init: int = 1,
+    n_jobs_offspring: int = 1,
     vacuum: float = 10.0,
     previous_search_glob: str = "**/*.db",
     use_adaptive_mutations: bool = True,
@@ -248,6 +274,8 @@ def ga_go_torchsim(
     diversity_max_references: int = 100,
     diversity_update_interval: int = 5,
     surface_config: SurfaceSystemConfig | None = None,
+    system_type: SystemType = "gas_cluster",
+    write_profile: bool = True,
 ) -> list[tuple[float, Atoms]]:
     """Run the GA using TorchSim for batched relaxations.
 
@@ -288,7 +316,12 @@ def ga_go_torchsim(
     }
     per_generation: list[dict[str, Any]] = []
 
+    if system_type == "gas_cluster" and surface_config is not None:
+        system_type = "surface_cluster"
     validate_composition(composition, allow_empty=False, allow_tuple=False)
+    validate_system_type_settings(
+        system_type=system_type, surface_config=surface_config
+    )
     validate_ga_common_params(
         niter=niter,
         population_size=population_size,
@@ -327,7 +360,8 @@ def ga_go_torchsim(
 
     n_to_optimize = len(composition)
 
-    if surface_config is not None:
+    surface_mode = uses_surface(system_type)
+    if surface_mode:
         if not isinstance(surface_config, SurfaceSystemConfig):
             raise TypeError(
                 "surface_config must be a SurfaceSystemConfig instance or None"
@@ -363,9 +397,13 @@ def ga_go_torchsim(
         logger=logger,
     )
 
-    slab_for_pairing = slab_ref
+    slab_for_pairing = slab_ref if surface_mode else None
     _ = create_ga_pairing(
-        atoms_template, n_to_optimize, rng, slab_atoms=slab_for_pairing
+        atoms_template,
+        n_to_optimize,
+        rng,
+        slab_atoms=slab_for_pairing,
+        system_type=system_type,
     )
 
     adaptive_config = get_adaptive_mutation_config(
@@ -382,9 +420,7 @@ def ga_go_torchsim(
     )
 
     idx_top = (
-        range(n_slab, n_slab + n_to_optimize)
-        if surface_config is not None
-        else range(n_to_optimize)
+        range(n_slab, n_slab + n_to_optimize) if surface_mode else range(n_to_optimize)
     )
     top_z = list({int(atoms_template[i].number) for i in idx_top})
     all_atom_types = get_all_atom_types(atoms_template, top_z)
@@ -396,10 +432,9 @@ def ga_go_torchsim(
         blmin=blmin,
         rng=rng,
         use_adaptive=use_adaptive_mutations,
+        system_type=system_type,
         n_slab=n_slab,
-        surface_normal_axis=(
-            surface_config.surface_normal_axis if surface_config is not None else 2
-        ),
+        surface_normal_axis=(surface_config.surface_normal_axis if surface_mode else 2),
     )
 
     _ = update_mutation_weights(
@@ -414,12 +449,10 @@ def ga_go_torchsim(
         else adaptive_config["mutation_probability"]
     )
 
-    comp_mic = (
-        bool(surface_config.comparator_use_mic) if surface_config is not None else False
-    )
+    comp_mic = bool(surface_config.comparator_use_mic) if surface_mode else False
     comp = create_structure_comparator(n_to_optimize, energy_tolerance, mic=comp_mic)
 
-    if surface_config is not None:
+    if surface_mode:
         assert slab_ref is not None
         start_generator = SurfaceClusterStartGenerator(
             composition,
@@ -503,6 +536,12 @@ def ga_go_torchsim(
 
         t0 = perf_counter()
         for cand in initial_population:
+            validate_structure_for_system_type(
+                cand,
+                system_type=system_type,
+                surface_config=surface_config,
+                n_slab=n_slab,
+            )
             database_retry(
                 lambda _cand=cand: _insert_unrelaxed(_cand),
                 max_retries=5,
@@ -519,6 +558,12 @@ def ga_go_torchsim(
                     original.set_cell(relaxed.get_cell(), scale_atoms=True)
                     original.set_pbc(relaxed.get_pbc())
                     original.set_positions(relaxed.get_positions())
+                    validate_structure_for_system_type(
+                        original,
+                        system_type=system_type,
+                        surface_config=surface_config,
+                        n_slab=n_slab if surface_mode else None,
+                    )
 
                     # Copy forces if available
                     if "forces" in relaxed.arrays:
@@ -536,7 +581,7 @@ def ga_go_torchsim(
                         original,
                         generation=0,
                         run_id=run_id,
-                        **slab_ga_metadata_extras(surface_config, n_slab),
+                        **slab_ga_metadata_extras(surface_config, n_slab, system_type),
                     )
                     original.calc = SinglePointCalculator(original, energy=energy)
                     da.add_relaxed_step(original)
@@ -550,7 +595,12 @@ def ga_go_torchsim(
             t_start = perf_counter()
             relaxed_results = relaxer.relax_batch(
                 [
-                    _torchsim_prepare_relaxed_copy(c, surface_config, n_slab)
+                    _torchsim_prepare_relaxed_copy(
+                        c,
+                        surface_config,
+                        n_slab,
+                        surface_mode=surface_mode,
+                    )
                     for c in batch
                 ]
             )
@@ -701,6 +751,7 @@ def ga_go_torchsim(
                         n_to_optimize,
                         task_rng,
                         slab_atoms=slab_for_pairing,
+                        system_type=system_type,
                     )
                     local_ops, local_name_map = create_mutation_operators(
                         composition=composition,
@@ -708,11 +759,10 @@ def ga_go_torchsim(
                         blmin=blmin,
                         rng=task_rng,
                         use_adaptive=use_adaptive_mutations,
+                        system_type=system_type,
                         n_slab=n_slab,
                         surface_normal_axis=(
-                            surface_config.surface_normal_axis
-                            if surface_config is not None
-                            else 2
+                            surface_config.surface_normal_axis if surface_mode else 2
                         ),
                     )
                     local_mutations = update_mutation_weights(
@@ -742,6 +792,12 @@ def ga_go_torchsim(
                         mutation_s = perf_counter() - mutation_t0
                         if mutated is not None:
                             child = mutated
+                    validate_structure_for_system_type(
+                        child,
+                        system_type=system_type,
+                        surface_config=surface_config,
+                        n_slab=n_slab,
+                    )
                     return {
                         "index": job["index"],
                         "child": child,
@@ -856,6 +912,7 @@ def ga_go_torchsim(
                 run_id=run_id,
                 surface_config=surface_config,
                 n_slab=n_slab,
+                system_type=system_type,
                 profiling=profile_timings,
             )
             relax_call_wall_s = perf_counter() - t0_relax_call
@@ -955,6 +1012,7 @@ def ga_go_torchsim(
             run_id=run_id,
             surface_config=surface_config,
             n_slab=n_slab,
+            system_type=system_type,
             profiling=profile_timings,
         )
         profile_timings["total_wall_s"] = perf_counter() - profile_t0
@@ -962,18 +1020,19 @@ def ga_go_torchsim(
             0.0,
             profile_timings["total_wall_s"] - profile_timings.get("relax_batch_s", 0.0),
         )
-        profile_path = os.path.join(output_dir, "ga_profile.json")
-        with open(profile_path, "w") as f:
-            json.dump(
-                {
-                    "backend": "torchsim_ga",
-                    "timings_s": profile_timings,
-                    "counters": profile_counters,
-                    "per_generation": per_generation,
-                },
-                f,
-                indent=2,
-            )
+        if write_profile:
+            profile_path = os.path.join(output_dir, "ga_profile.json")
+            with open(profile_path, "w") as f:
+                json.dump(
+                    {
+                        "backend": "torchsim_ga",
+                        "timings_s": profile_timings,
+                        "counters": profile_counters,
+                        "per_generation": per_generation,
+                    },
+                    f,
+                    indent=2,
+                )
 
         all_candidates = database_retry(
             da.get_all_relaxed_candidates,

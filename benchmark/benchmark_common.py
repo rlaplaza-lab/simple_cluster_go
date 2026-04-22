@@ -20,7 +20,7 @@ from ase.io import read
 from ase.units import Hartree
 
 from scgo.param_presets import get_torchsim_ga_params, get_uma_ga_benchmark_params
-from scgo.runner_api import run_go_element_scan
+from scgo.runner_api import run_go_campaign
 from scgo.utils.atoms_helpers import parse_energy_from_xyz_comment
 from scgo.utils.comparators import (
     PureInteratomicDistanceComparator as InteratomicDistanceComparator,
@@ -43,7 +43,6 @@ BENCHMARK_DIR = PROJECT_ROOT / "benchmark" / "benchmark_files_Pt"
 # Campaign outputs (used by benchmark_Pt and surface benchmark scripts).
 # Each suite writes under ``results/<suite>/``; per-formula runs use ``<Formula>_searches``.
 BENCHMARK_RESULTS_ROOT = PROJECT_ROOT / "benchmark" / "results"
-PT_CLUSTER_RESULTS_DIR = BENCHMARK_RESULTS_ROOT / "pt_cluster"
 PT_SURFACE_GRAPHITE_RESULTS_DIR = BENCHMARK_RESULTS_ROOT / "pt_surface_graphite"
 
 
@@ -344,13 +343,13 @@ def _get_campaign_results(
         return cached
 
     params_copy = deepcopy(params)
-    results = run_go_element_scan(
-        element,
-        min_atoms,
-        max_atoms,
+    compositions = [[element] * n for n in range(min_atoms, max_atoms + 1)]
+    results = run_go_campaign(
+        compositions,
         params=params_copy,
         seed=seed,
         output_dir=output_dir,
+        system_type="gas_cluster",
     )
     _CAMPAIGN_RESULTS_CACHE[key] = results
     return results

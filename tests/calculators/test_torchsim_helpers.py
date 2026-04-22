@@ -338,21 +338,16 @@ def test_torchsim_autobatcher_probe_cap_defaults_to_torchsim_when_unset(monkeypa
     assert "max_atoms_to_try" not in captured
 
 
-def test_torchsim_autobatcher_true_on_cpu_warns_and_coerces():
-    """Passing ``autobatcher=True`` on CPU emits a RuntimeWarning and disables autobatching."""
-    import warnings
-
+def test_torchsim_autobatcher_true_on_cpu_warns_and_coerces(caplog):
+    """Passing ``autobatcher=True`` on CPU logs warning and disables autobatching."""
     from scgo.calculators.torchsim_helpers import TorchSimBatchRelaxer
 
-    with warnings.catch_warnings(record=True) as caught:
-        warnings.simplefilter("always")
-        relaxer = TorchSimBatchRelaxer(
-            device="cpu",
-            mace_model_name="mace_matpes_0",
-            autobatcher=True,
-        )
-    runtime_warnings = [w for w in caught if issubclass(w.category, RuntimeWarning)]
-    assert any("autobatching" in str(w.message).lower() for w in runtime_warnings)
+    relaxer = TorchSimBatchRelaxer(
+        device="cpu",
+        mace_model_name="mace_matpes_0",
+        autobatcher=True,
+    )
+    assert any("autobatching" in rec.message.lower() for rec in caplog.records)
     assert "autobatcher" not in relaxer._runner_kwargs
 
 

@@ -24,6 +24,14 @@ from scgo.constants import (
 from scgo.database import HPC_DATABASE_EXCEPTIONS, SCGODatabaseManager, setup_database
 from scgo.database.metadata import persist_provenance
 from scgo.database.sync import retry_with_backoff
+from scgo.surface.config import SurfaceSystemConfig
+from scgo.surface.constraints import attach_slab_constraints_from_surface_config
+from scgo.system_types import (
+    SystemType,
+    get_system_policy,
+    validate_structure_for_system_type,
+    validate_system_type_settings,
+)
 from scgo.utils.comparators import PureInteratomicDistanceComparator
 from scgo.utils.diversity_scorer import DiversityScorer
 from scgo.utils.fitness_strategies import (
@@ -56,6 +64,7 @@ def _move_atoms(
     move_fraction: float = 0.3,
     move_strategy: str = "random",
     rng: np.random.Generator | None = None,
+    movable_indices: list[int] | None = None,
 ) -> tuple[Atoms, str]:
     """Apply a random displacement to a subset of atoms.
 
@@ -74,22 +83,26 @@ def _move_atoms(
     """
     atoms_new = atoms.copy()
 
-    n_atoms = len(atoms_new)
+    if movable_indices is None:
+        movable_indices = list(range(len(atoms_new)))
+    n_atoms = len(movable_indices)
 
     if n_atoms <= 1:
-        return atoms_new, "Moved_atoms: 1 1"
+        moved = movable_indices[0] if movable_indices else 0
+        return atoms_new, f"Moved_atoms: {moved + 1} {moved + 1}"
 
     n_to_move_calculated = int(n_atoms * move_fraction)
     n_to_move = min(n_atoms, max(2, n_to_move_calculated))
 
     if move_strategy == "random":
         indices_to_move = list(
-            rng.choice(range(n_atoms), size=n_to_move, replace=False),
+            rng.choice(movable_indices, size=n_to_move, replace=False),
         )
     elif move_strategy in ["highest_force", "lowest_force"]:
         forces = atoms.get_forces()
-        force_magnitudes = np.linalg.norm(forces, axis=1)
-        sorted_indices = np.argsort(force_magnitudes)
+        force_magnitudes = np.linalg.norm(forces[movable_indices], axis=1)
+        sorted_local = np.argsort(force_magnitudes)
+        sorted_indices = np.asarray(movable_indices, dtype=int)[sorted_local]
         if move_strategy == "highest_force":
             indices_to_move = sorted_indices[-n_to_move:]
         else:  # lowest_force
@@ -136,6 +149,9 @@ def bh_go(
     diversity_reference_db: str | None = None,
     diversity_max_references: int = 100,
     diversity_update_interval: int = 5,
+    surface_config: SurfaceSystemConfig | None = None,
+    n_slab: int = 0,
+    system_type: SystemType = "gas_cluster",
     *,
     rng: np.random.Generator,
 ) -> list[tuple[float, Atoms]]:
@@ -188,6 +204,17 @@ def bh_go(
     validate_in_choices(
         "move_strategy", move_strategy, ["random", "highest_force", "lowest_force"]
     )
+    validate_system_type_settings(
+        system_type=system_type, surface_config=surface_config
+    )
+    policy = get_system_policy(system_type)
+    surface_mode = policy.uses_surface
+    effective_dr = dr * (
+        policy.adsorbate_move_scale if policy.constrain_adsorbate_moves else 1.0
+    )
+    effective_move_fraction = (
+        min(move_fraction, 0.25) if policy.constrain_adsorbate_moves else move_fraction
+    )
 
     logger = get_logger(__name__)
 
@@ -201,8 +228,19 @@ def bh_go(
         n_top=comparator_n_top if comparator_n_top is not None else None,
         tol=comparator_tol,
         pair_cor_max=comparator_pair_cor_max,
-        mic=False,
+        mic=surface_mode,
     )
+    movable_indices = list(range(len(atoms)))
+    if surface_mode:
+        if n_slab <= 0:
+            if surface_config is None:
+                raise ValueError(
+                    "Surface system type requires n_slab > 0 or surface_config."
+                )
+            n_slab = len(surface_config.slab)
+        movable_indices = list(range(n_slab, len(atoms)))
+        if not movable_indices:
+            raise ValueError("Surface system has no movable atoms above slab.")
 
     # Load reference structures and create DiversityScorer for diversity strategy
     diversity_scorer = None
@@ -257,12 +295,20 @@ def bh_go(
             backoff_factor=2.0,
             exception_types=_HPC_RETRY_EXCEPTIONS,
         )
+        if surface_mode and surface_config is not None:
+            attach_slab_constraints_from_surface_config(a_current, surface_config)
         e_current = perform_local_relaxation(
             a_current,
             calculator,
             optimizer,
             fmax,
             niter_local_relaxation,
+        )
+        validate_structure_for_system_type(
+            a_current,
+            system_type=system_type,
+            surface_config=surface_config,
+            n_slab=n_slab if surface_mode else None,
         )
 
         if run_id is not None and a_current is not None:
@@ -302,11 +348,14 @@ def bh_go(
         for iteration in iteration_iterator:
             a_trial, desc = _move_atoms(
                 a_current,
-                dr,
-                move_fraction,
+                effective_dr,
+                effective_move_fraction,
                 move_strategy=move_strategy,
                 rng=rng,
+                movable_indices=movable_indices,
             )
+            if surface_mode and surface_config is not None:
+                attach_slab_constraints_from_surface_config(a_trial, surface_config)
             if run_id is not None:
                 persist_provenance(a_trial, run_id=run_id)
 
@@ -326,6 +375,12 @@ def bh_go(
                 optimizer,
                 fmax,
                 niter_local_relaxation,
+            )
+            validate_structure_for_system_type(
+                a_trial,
+                system_type=system_type,
+                surface_config=surface_config,
+                n_slab=n_slab if surface_mode else None,
             )
             if run_id is not None:
                 persist_provenance(a_trial, run_id=run_id)

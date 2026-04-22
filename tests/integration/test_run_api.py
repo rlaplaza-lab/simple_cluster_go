@@ -16,11 +16,10 @@ from scgo.runner_api import (
     run_go,
     run_go_campaign,
     run_go_ts_campaign,
-    run_go_ts_one_element,
-    run_go_ts_with_mlip_preset,
     run_ts_campaign,
     run_ts_search,
 )
+from scgo.system_types import get_system_policy
 
 
 def test_parse_composition_arg_formats():
@@ -194,7 +193,7 @@ def test_run_scgo_one_element_go_ts_pipeline_smoke(monkeypatch, tmp_path):
         "Pt",
         5,
         ga_params=get_testing_params(),
-        ts_kwargs={"max_pairs": 2},
+        ts_kwargs={"max_pairs": 2, "system_type": "gas_cluster"},
         seed=42,
         verbosity=0,
         output_dir=tmp_path / "pt5_gas",
@@ -214,14 +213,104 @@ def test_run_go_atoms_matches_explicit_list(monkeypatch):
 
     monkeypatch.setattr("scgo.runner_api.run_scgo_trials", _fake_trials)
 
-    run_go(Atoms("Pt3"), params=None, verbosity=0)
+    run_go(Atoms("Pt3"), params=None, verbosity=0, system_type="gas_cluster")
     assert captured["composition"] == ["Pt", "Pt", "Pt"]
 
-    run_go(["Pt", "Pt", "Pt"], params=None, verbosity=0)
+    run_go(["Pt", "Pt", "Pt"], params=None, verbosity=0, system_type="gas_cluster")
     assert captured["composition"] == ["Pt", "Pt", "Pt"]
 
-    run_go("Pt3", params=None, verbosity=0)
+    run_go("Pt3", params=None, verbosity=0, system_type="gas_cluster")
     assert captured["composition"] == ["Pt", "Pt", "Pt"]
+
+
+def test_run_go_system_type_wires_optimizer_params(monkeypatch):
+    captured: dict[str, object] = {}
+
+    def _fake_trials(composition, *args, **kwargs):
+        captured["params"] = kwargs["params"]
+        return []
+
+    monkeypatch.setattr("scgo.runner_api.run_scgo_trials", _fake_trials)
+    run_go(
+        "Pt5O2H2",
+        params={"optimizer_params": {"ga": {}, "bh": {}}},
+        verbosity=0,
+        system_type="surface_cluster_adsorbate",
+    )
+    params = captured["params"]
+    assert (
+        params["optimizer_params"]["ga"]["system_type"] == "surface_cluster_adsorbate"
+    )
+    assert (
+        params["optimizer_params"]["bh"]["system_type"] == "surface_cluster_adsorbate"
+    )
+    assert (
+        params["optimizer_params"]["simple"]["system_type"]
+        == "surface_cluster_adsorbate"
+    )
+    assert params["optimizer_params"]["ga"]["write_profile"] is True
+
+
+def test_run_go_profile_toggle(monkeypatch):
+    captured: dict[str, object] = {}
+
+    def _fake_trials(composition, *args, **kwargs):
+        captured["params"] = kwargs["params"]
+        return []
+
+    monkeypatch.setattr("scgo.runner_api.run_scgo_trials", _fake_trials)
+    run_go(
+        "Pt3",
+        params={"optimizer_params": {"ga": {}}},
+        verbosity=0,
+        system_type="gas_cluster",
+        profile_ga=False,
+    )
+    params = captured["params"]
+    assert params["optimizer_params"]["ga"]["write_profile"] is False
+
+
+@pytest.mark.parametrize(
+    "system_type",
+    [
+        "gas_cluster",
+        "surface_cluster",
+        "gas_cluster_adsorbate",
+        "surface_cluster_adsorbate",
+    ],
+)
+def test_run_go_system_type_matrix(monkeypatch, system_type):
+    captured: dict[str, object] = {}
+
+    def _fake_trials(composition, *args, **kwargs):
+        captured["params"] = kwargs["params"]
+        return []
+
+    monkeypatch.setattr("scgo.runner_api.run_scgo_trials", _fake_trials)
+    run_go(
+        "Pt3",
+        params={"optimizer_params": {"simple": {}, "ga": {}, "bh": {}}},
+        verbosity=0,
+        system_type=system_type,
+    )
+    params = captured["params"]
+    assert params["optimizer_params"]["simple"]["system_type"] == system_type
+    assert params["optimizer_params"]["ga"]["system_type"] == system_type
+    assert params["optimizer_params"]["bh"]["system_type"] == system_type
+
+
+def test_system_policy_surface_neb_defaults():
+    gas = get_system_policy("gas_cluster")
+    surf = get_system_policy("surface_cluster_adsorbate")
+    assert gas.neb_force_mic is False
+    assert gas.neb_disable_alignment is False
+    assert surf.neb_force_mic is True
+    assert surf.neb_disable_alignment is True
+
+
+def test_run_go_requires_system_type():
+    with pytest.raises(ValueError, match="system_type is required"):
+        run_go("Pt3", params=None, verbosity=0)
 
 
 def test_run_go_campaign_normalizes_items(monkeypatch):
@@ -240,13 +329,19 @@ def test_run_go_campaign_normalizes_items(monkeypatch):
         [Atoms("Au2"), "Pt", ["Cu", "Cu"]],
         params=None,
         verbosity=0,
+        system_type="gas_cluster",
     )
     assert captured == [["Au", "Au"], ["Pt"], ["Cu", "Cu"]]
 
 
 def test_run_go_campaign_empty_raises():
     with pytest.raises(ValueError, match="empty"):
-        run_go_campaign([], params=None, verbosity=0)
+        run_go_campaign([], params=None, verbosity=0, system_type="gas_cluster")
+
+
+def test_run_go_campaign_requires_system_type():
+    with pytest.raises(ValueError, match="system_type is required"):
+        run_go_campaign(["Pt2"], params=None, verbosity=0)
 
 
 def test_run_ts_search_normalizes_composition(monkeypatch):
@@ -261,18 +356,73 @@ def test_run_ts_search_normalizes_composition(monkeypatch):
         _fake,
     )
 
-    run_ts_search("Cu2", params={"calculator": "EMT"}, verbosity=0)
+    run_ts_search(
+        "Cu2",
+        params={"calculator": "EMT"},
+        ts_kwargs={"params": {"calculator": "EMT"}, "system_type": "gas_cluster"},
+        verbosity=0,
+        system_type="gas_cluster",
+    )
     assert captured["composition"] == ["Cu", "Cu"]
 
-    run_ts_search(Atoms("Cu2"), params={"calculator": "EMT"}, verbosity=0)
+    run_ts_search(
+        Atoms("Cu2"),
+        params={"calculator": "EMT"},
+        ts_kwargs={"params": {"calculator": "EMT"}, "system_type": "gas_cluster"},
+        verbosity=0,
+        system_type="gas_cluster",
+    )
     assert captured["composition"] == ["Cu", "Cu"]
 
     run_ts_search(
         ["Cu", "Cu"],
         params={"calculator": "EMT"},
+        ts_kwargs={"params": {"calculator": "EMT"}, "system_type": "gas_cluster"},
         verbosity=0,
+        system_type="gas_cluster",
     )
     assert captured["composition"] == ["Cu", "Cu"]
+
+
+def test_run_ts_search_passes_system_type(monkeypatch):
+    captured: dict[str, object] = {}
+
+    def _fake(composition, **kwargs):
+        captured["kwargs"] = kwargs
+        return []
+
+    monkeypatch.setattr("scgo.runner_api._ts_search", _fake)
+    run_ts_search(
+        "Pt5O2H2",
+        params={"calculator": "EMT"},
+        ts_kwargs={
+            "params": {"calculator": "EMT"},
+            "system_type": "surface_cluster_adsorbate",
+        },
+        verbosity=0,
+        system_type="surface_cluster_adsorbate",
+    )
+    assert captured["kwargs"]["system_type"] == "surface_cluster_adsorbate"
+
+
+def test_run_ts_search_requires_system_type():
+    with pytest.raises(ValueError, match="system_type is required"):
+        run_ts_search(
+            "Pt2",
+            params={"calculator": "EMT"},
+            ts_kwargs={"params": {"calculator": "EMT"}, "system_type": "gas_cluster"},
+            verbosity=0,
+        )
+
+
+def test_run_ts_search_requires_ts_kwargs():
+    with pytest.raises(ValueError, match="ts_kwargs is required"):
+        run_ts_search(
+            "Pt2",
+            params={"calculator": "EMT"},
+            verbosity=0,
+            system_type="gas_cluster",
+        )
 
 
 def test_run_ts_campaign_normalizes_items(monkeypatch):
@@ -290,9 +440,31 @@ def test_run_ts_campaign_normalizes_items(monkeypatch):
     run_ts_campaign(
         [Atoms("Au2"), "Pt"],
         params={"calculator": "EMT"},
+        ts_kwargs={"params": {"calculator": "EMT"}, "system_type": "gas_cluster"},
         verbosity=0,
+        system_type="gas_cluster",
     )
     assert captured == [["Au", "Au"], ["Pt"]]
+
+
+def test_run_ts_campaign_requires_ts_kwargs():
+    with pytest.raises(ValueError, match="ts_kwargs is required"):
+        run_ts_campaign(
+            [Atoms("Au2"), "Pt"],
+            params={"calculator": "EMT"},
+            verbosity=0,
+            system_type="gas_cluster",
+        )
+
+
+def test_run_ts_campaign_requires_system_type():
+    with pytest.raises(ValueError, match="system_type is required"):
+        run_ts_campaign(
+            [Atoms("Au2"), "Pt"],
+            params={"calculator": "EMT"},
+            ts_kwargs={"params": {"calculator": "EMT"}, "system_type": "gas_cluster"},
+            verbosity=0,
+        )
 
 
 def test_run_go_ts_campaign_paths(monkeypatch, tmp_path):
@@ -308,15 +480,38 @@ def test_run_go_ts_campaign_paths(monkeypatch, tmp_path):
     run_go_ts_campaign(
         ["Pt2", ["Au", "Au"]],
         ga_params={},
-        ts_kwargs={},
+        ts_kwargs={"params": {"calculator": "EMT"}, "system_type": "gas_cluster"},
         verbosity=0,
         output_dir=root,
+        system_type="gas_cluster",
     )
     assert len(calls) == 2
     assert calls[0][0] == ["Pt", "Pt"]
     assert calls[0][1] == root / "Pt2_campaign"
     assert calls[1][0] == ["Au", "Au"]
     assert calls[1][1] == root / "Au2_campaign"
+
+
+def test_run_go_ts_wires_profile_toggle(monkeypatch):
+    from scgo.runner_api import run_go_ts
+
+    captured: dict[str, object] = {}
+
+    def _fake_pipeline(composition, **kwargs):
+        captured["ga_params"] = kwargs["ga_params"]
+        return {"ts_results": []}
+
+    monkeypatch.setattr("scgo.runner_api.run_scgo_go_ts_pipeline", _fake_pipeline)
+    run_go_ts(
+        "Pt2",
+        ga_params={"optimizer_params": {"ga": {}}},
+        ts_kwargs={"params": {"calculator": "EMT"}, "system_type": "gas_cluster"},
+        verbosity=0,
+        system_type="gas_cluster",
+        profile_ga=False,
+    )
+    ga_params = captured["ga_params"]
+    assert ga_params["optimizer_params"]["ga"]["write_profile"] is False
 
 
 def test_run_go_ts_campaign_no_output_dir(
@@ -333,79 +528,48 @@ def test_run_go_ts_campaign_no_output_dir(
     run_go_ts_campaign(
         ["H2"],
         ga_params={},
-        ts_kwargs={},
+        ts_kwargs={"params": {"calculator": "EMT"}, "system_type": "gas_cluster"},
         verbosity=0,
         output_dir=None,
+        system_type="gas_cluster",
     )
     assert calls == [None]
 
 
-def test_run_go_ts_with_mlip_preset_wires_output(monkeypatch, tmp_path):
-    calls: list[tuple[list[str], object, bool]] = []
-
-    def _fake_bundle(**kwargs):
-        return {"ga_params": {}, "ts_kwargs": {}}
-
-    monkeypatch.setattr("scgo.runner_api.build_one_element_go_ts_bundle", _fake_bundle)
-
-    def _fake_pipeline(
-        composition,
-        *,
-        ga_params,
-        ts_kwargs,
-        output_dir,
-        infer_ts_composition_from_minima,
-        **kwargs,
-    ):
-        calls.append(
-            (list(composition), output_dir, infer_ts_composition_from_minima)
+def test_run_go_ts_campaign_requires_ts_kwargs():
+    with pytest.raises(ValueError, match="ts_kwargs is required"):
+        run_go_ts_campaign(
+            ["H2"],
+            ga_params={},
+            ts_kwargs={},
+            verbosity=0,
+            output_dir=None,
+            system_type="gas_cluster",
         )
-        return {"ts_results": [], "output_dir": output_dir}
-
-    monkeypatch.setattr("scgo.runner_api.run_scgo_go_ts_pipeline", _fake_pipeline)
-
-    run_go_ts_with_mlip_preset(
-        ["Pt", "Pt", "O"],
-        default_output_parent=tmp_path,
-        default_output_subdir="pt2o",
-        backend="mace",
-        seed=1,
-        niter=2,
-        population_size=3,
-        max_pairs=2,
-        infer_ts_composition_from_minima=True,
-        verbosity=0,
-    )
-    assert len(calls) == 1
-    assert calls[0][0] == ["Pt", "Pt", "O"]
-    assert calls[0][1] == (tmp_path / "pt2o_mace").resolve()
-    assert calls[0][2] is True
 
 
-def test_run_go_ts_one_element_delegates(monkeypatch, tmp_path):
-    captured: dict[str, object] = {}
+def test_run_go_ts_campaign_requires_system_type():
+    with pytest.raises(ValueError, match="system_type is required"):
+        run_go_ts_campaign(
+            ["H2"],
+            ga_params={},
+            ts_kwargs={"params": {"calculator": "EMT"}, "system_type": "gas_cluster"},
+            verbosity=0,
+            output_dir=None,
+        )
 
-    def _fake(comp, **kwargs):
-        captured["composition"] = comp
-        captured["infer"] = kwargs.get("infer_ts_composition_from_minima")
-        return {"ts_results": []}
 
-    monkeypatch.setattr("scgo.runner_api.run_go_ts_with_mlip_preset", _fake)
+def test_run_go_ts_requires_ts_kwargs():
+    with pytest.raises(ValueError, match="ts_kwargs is required"):
+        from scgo.runner_api import run_go_ts
 
-    run_go_ts_one_element(
-        "Cu",
-        2,
-        default_output_parent=tmp_path,
-        default_output_subdir="cu2",
-        backend="mace",
-        seed=0,
-        niter=1,
-        population_size=2,
-        max_pairs=1,
-        verbosity=0,
-    )
-    assert captured["composition"] == ["Cu", "Cu"]
-    assert captured["infer"] is False
+        run_go_ts(
+            "H2",
+            ga_params={},
+            ts_kwargs={},
+            verbosity=0,
+            system_type="gas_cluster",
+        )
 
 
 def test_log_go_ts_summary():

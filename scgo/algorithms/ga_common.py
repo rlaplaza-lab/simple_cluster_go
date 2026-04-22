@@ -57,6 +57,7 @@ from scgo.surface.deposition import (
     create_deposited_cluster,
     create_deposited_cluster_batch,
 )
+from scgo.system_types import SystemType, get_system_policy, uses_surface
 from scgo.utils.rng_helpers import create_child_rng, ensure_rng_or_create
 from scgo.utils.validation import (
     validate_in_range,
@@ -66,12 +67,13 @@ from scgo.utils.validation import (
 
 
 def slab_ga_metadata_extras(
-    surface_config: SurfaceSystemConfig | None, n_slab: int
+    surface_config: SurfaceSystemConfig | None, n_slab: int, system_type: SystemType
 ) -> dict[str, int | str]:
     """Extra metadata for slab+adsorbate GA (atom order: slab indices 0..n_slab-1)."""
-    if surface_config is None or n_slab <= 0:
-        return {}
-    return {"n_slab_atoms": n_slab, "system_kind": "slab_adsorbate"}
+    metadata: dict[str, int | str] = {"system_type": system_type}
+    if uses_surface(system_type) and surface_config is not None and n_slab > 0:
+        metadata["n_slab_atoms"] = n_slab
+    return metadata
 
 
 def validate_ga_common_params(
@@ -269,6 +271,7 @@ def create_ga_pairing(
     n_to_optimize: int,
     rng: np.random.Generator | None = None,
     slab_atoms: Atoms | None = None,
+    system_type: SystemType = "gas_cluster",
     *,
     exploratory_crossover_probability: float = 0.2,
     exploratory_minfrac: float | None = None,
@@ -294,8 +297,12 @@ def create_ga_pairing(
         :class:`~scgo.ase_ga_patches.cutandsplicepairing.CutAndSplicePairing` or
         :class:`~scgo.ase_ga_patches.cutandsplicepairing.DualCutAndSplicePairing`.
     """
+    if system_type == "gas_cluster" and slab_atoms is not None and len(slab_atoms) > 0:
+        system_type = "surface_cluster"
     n_template = len(atoms_template)
-    if slab_atoms is not None and len(slab_atoms) > 0:
+    if uses_surface(system_type):
+        if slab_atoms is None or len(slab_atoms) == 0:
+            raise ValueError("Surface system types require slab_atoms for pairing.")
         if n_template != len(slab_atoms) + n_to_optimize:
             raise ValueError(
                 "atoms_template length must equal len(slab_atoms) + n_to_optimize "
@@ -317,7 +324,7 @@ def create_ga_pairing(
     all_atom_types = get_all_atom_types(atoms_template, top_z)
     blmin = closest_distances_generator(all_atom_types, ratio_of_covalent_radii=0.7)
 
-    if slab_atoms is not None and len(slab_atoms) > 0:
+    if uses_surface(system_type):
         slab = slab_atoms.copy()
     else:
         slab = Atoms(cell=atoms_template.get_cell(), pbc=atoms_template.get_pbc())
@@ -331,6 +338,7 @@ def create_ga_pairing(
             blmin,
             minfrac=min_parent_fraction,
             rng=child_rng_primary,
+            system_type=system_type,
         )
 
     expl_minfrac = (
@@ -345,6 +353,7 @@ def create_ga_pairing(
             blmin,
             minfrac=min_parent_fraction,
             rng=child_rng_primary,
+            system_type=system_type,
         )
 
     primary = CutAndSplicePairing(  # type: ignore[arg-type]
@@ -353,6 +362,7 @@ def create_ga_pairing(
         blmin,
         minfrac=min_parent_fraction,
         rng=child_rng_primary,
+        system_type=system_type,
     )
     exploratory = CutAndSplicePairing(  # type: ignore[arg-type]
         slab,
@@ -360,6 +370,7 @@ def create_ga_pairing(
         blmin,
         minfrac=expl_minfrac,
         rng=create_child_rng(rng) if rng is not None else None,
+        system_type=system_type,
     )
     return DualCutAndSplicePairing(
         primary,
@@ -375,6 +386,7 @@ def create_mutation_operators(
     blmin: dict,
     rng: np.random.Generator | None = None,
     use_adaptive: bool = True,
+    system_type: SystemType = "gas_cluster",
     *,
     n_slab: int = 0,
     surface_normal_axis: int = 2,
@@ -412,14 +424,20 @@ def create_mutation_operators(
     Returns:
         Tuple of (operators_list, operator_name_to_index_map).
     """
+    if system_type == "gas_cluster" and n_slab > 0:
+        system_type = "surface_cluster"
     operators = []
     name_map = {}
+    policy = get_system_policy(system_type)
+    move_scale = (
+        policy.adsorbate_move_scale if policy.constrain_adsorbate_moves else 1.0
+    )
 
     rattle: RattleMutation = RattleMutation(
         blmin,
         n_to_optimize,
-        rattle_strength=0.8,
-        rattle_prop=0.4,
+        rattle_strength=0.8 * move_scale,
+        rattle_prop=min(0.4, 0.4 * move_scale),
         rng=create_child_rng(rng) if rng is not None else None,  # type: ignore[arg-type]
     )
     operators.append(rattle)
@@ -433,12 +451,12 @@ def create_mutation_operators(
     operators.append(overlap_relief)
     name_map["overlap_relief"] = len(operators) - 1
 
-    if len(set(composition)) > 1:
+    if len(set(composition)) > 1 and policy.allow_composition_permutations:
         permutation: CustomPermutationMutation = CustomPermutationMutation(
             n_to_optimize,
             rng=create_child_rng(rng) if rng is not None else None,  # type: ignore[arg-type]
             blmin=blmin,
-            test_dist_to_slab=True,
+            test_dist_to_slab=uses_surface(system_type),
         )
         operators.append(permutation)
         name_map["permutation"] = len(operators) - 1
@@ -447,7 +465,7 @@ def create_mutation_operators(
             n_to_optimize,
             rng=create_child_rng(rng) if rng is not None else None,  # type: ignore[arg-type]
             blmin=blmin,
-            test_dist_to_slab=True,
+            test_dist_to_slab=uses_surface(system_type),
         )
         operators.append(shell_swap)
         name_map["shell_swap"] = len(operators) - 1
@@ -485,9 +503,9 @@ def create_mutation_operators(
         anisotropic: AnisotropicRattleMutation = AnisotropicRattleMutation(
             blmin,
             n_to_optimize,
-            in_plane_strength=1.0,
-            normal_strength=0.2,
-            rattle_prop=0.5,
+            in_plane_strength=1.0 * move_scale,
+            normal_strength=0.2 * move_scale,
+            rattle_prop=min(0.5, 0.5 * move_scale),
             rng=create_child_rng(rng) if rng is not None else None,  # type: ignore[arg-type]
         )
         operators.append(anisotropic)
@@ -496,15 +514,15 @@ def create_mutation_operators(
         breathing: BreathingMutation = BreathingMutation(
             blmin,
             n_to_optimize,
-            scale_min=breathing_scale_min,
-            scale_max=breathing_scale_max,
+            scale_min=1.0 - (1.0 - breathing_scale_min) * move_scale,
+            scale_max=1.0 + (breathing_scale_max - 1.0) * move_scale,
             rng=create_child_rng(rng) if rng is not None else None,  # type: ignore[arg-type]
             max_inner_attempts=breathing_max_inner_attempts,
         )
         operators.append(breathing)
         name_map["breathing"] = len(operators) - 1
 
-        if n_slab > 0:
+        if uses_surface(system_type) and n_slab > 0:
             slide: InPlaneSlideMutation = InPlaneSlideMutation(
                 blmin,
                 n_to_optimize,

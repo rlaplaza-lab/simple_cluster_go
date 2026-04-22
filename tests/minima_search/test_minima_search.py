@@ -7,6 +7,7 @@ import numpy as np
 import pytest
 import torch
 from ase import Atoms
+from ase.build import fcc111
 from ase.calculators.emt import EMT
 
 import scgo.minima_search.core as main_mod
@@ -80,7 +81,11 @@ class TestScgoFunction:
         """Test scgo() with basin hopping optimizer."""
         composition = ["Pt", "Pt", "Pt"]
         output_dir = str(tmp_path / "test_bh")
-        optimizer_kwargs = {"niter": 2, "niter_local_relaxation": 3}
+        optimizer_kwargs = {
+            "niter": 2,
+            "niter_local_relaxation": 3,
+            "system_type": "gas_cluster",
+        }
 
         results = scgo(
             composition=composition,
@@ -104,6 +109,7 @@ class TestScgoFunction:
             "niter": 2,
             "population_size": 3,
             "niter_local_relaxation": 3,
+            "system_type": "gas_cluster",
         }
 
         results = scgo(
@@ -123,7 +129,7 @@ class TestScgoFunction:
         """Test scgo() with simple optimizer."""
         composition = ["Pt", "Pt"]
         output_dir = str(tmp_path / "test_simple")
-        optimizer_kwargs = {"niter": 1}
+        optimizer_kwargs = {"niter": 1, "system_type": "gas_cluster"}
 
         results = scgo(
             composition=composition,
@@ -136,6 +142,41 @@ class TestScgoFunction:
 
         assert isinstance(results, list)
 
+    def test_scgo_surface_bh_is_supported(self, tmp_path, rng, monkeypatch):
+        slab = fcc111("Pt", size=(2, 2, 1), vacuum=6.0, orthogonal=True)
+        surface_config = main_mod.SurfaceSystemConfig(
+            slab=slab,
+            adsorption_height_min=1.0,
+            adsorption_height_max=2.5,
+        )
+
+        captured: dict[str, object] = {}
+
+        def _fake_bh_go(*, atoms, **kwargs):
+            captured["atoms"] = atoms
+            captured["kwargs"] = kwargs
+            return []
+
+        monkeypatch.setattr(main_mod, "bh_go", _fake_bh_go)
+        monkeypatch.setitem(main_mod._ALGORITHM_REGISTRY["bh"], "function", _fake_bh_go)
+
+        results = scgo(
+            composition=["Pt", "O", "H"],
+            global_optimizer="bh",
+            global_optimizer_kwargs={
+                "niter": 1,
+                "niter_local_relaxation": 1,
+                "system_type": "surface_cluster_adsorbate",
+                "surface_config": surface_config,
+            },
+            output_dir=str(tmp_path / "surface_bh"),
+            rng=rng,
+            calculator_for_global_optimization=EMT(),
+            verbosity=0,
+        )
+        assert results == []
+        assert len(captured["atoms"]) > len(slab)
+
     def test_scgo_unknown_optimizer(self, tmp_path, rng):
         """Test scgo() raises error for unknown optimizer."""
         composition = ["Pt", "Pt"]
@@ -145,7 +186,7 @@ class TestScgoFunction:
             scgo(
                 composition=composition,
                 global_optimizer="unknown",
-                global_optimizer_kwargs={},
+                global_optimizer_kwargs={"system_type": "gas_cluster"},
                 output_dir=output_dir,
                 rng=rng,
                 verbosity=0,
@@ -164,7 +205,7 @@ class TestScgoFunction:
             scgo(
                 composition=composition,
                 global_optimizer="bh",
-                global_optimizer_kwargs={"niter": 1},
+                global_optimizer_kwargs={"niter": 1, "system_type": "gas_cluster"},
                 output_dir=output_dir,
                 rng=rng,
                 calculator_for_global_optimization=BadCalculator(),
@@ -179,7 +220,7 @@ class TestScgoFunction:
         scgo(
             composition=composition,
             global_optimizer="simple",
-            global_optimizer_kwargs={"niter": 1},
+            global_optimizer_kwargs={"niter": 1, "system_type": "gas_cluster"},
             output_dir=output_dir,
             rng=rng,
             verbosity=0,
@@ -196,7 +237,7 @@ class TestScgoFunction:
         results = scgo(
             composition=composition,
             global_optimizer="simple",
-            global_optimizer_kwargs={"niter": 1},
+            global_optimizer_kwargs={"niter": 1, "system_type": "gas_cluster"},
             output_dir=output_dir,
             rng=rng,
             trial_id=5,
@@ -236,7 +277,11 @@ class TestRunTrials:
         results = run_trials(
             composition=composition,
             global_optimizer="bh",
-            global_optimizer_kwargs={"niter": 2, "niter_local_relaxation": 3},
+            global_optimizer_kwargs={
+                "niter": 2,
+                "niter_local_relaxation": 3,
+                "system_type": "gas_cluster",
+            },
             n_trials=1,
             output_dir=output_dir,
             rng=rng,
@@ -256,7 +301,11 @@ class TestRunTrials:
         results = run_trials(
             composition=composition,
             global_optimizer="bh",
-            global_optimizer_kwargs={"niter": 2, "niter_local_relaxation": 3},
+            global_optimizer_kwargs={
+                "niter": 2,
+                "niter_local_relaxation": 3,
+                "system_type": "gas_cluster",
+            },
             n_trials=3,
             output_dir=output_dir,
             rng=rng,
@@ -279,7 +328,7 @@ class TestRunTrials:
             run_trials(
                 composition=composition,
                 global_optimizer="bh",
-                global_optimizer_kwargs={"niter": 1},
+                global_optimizer_kwargs={"niter": 1, "system_type": "gas_cluster"},
                 n_trials=0,
                 output_dir=output_dir,
                 rng=rng,
@@ -295,7 +344,7 @@ class TestRunTrials:
             run_trials(
                 composition=composition,
                 global_optimizer="bh",
-                global_optimizer_kwargs={"niter": 1},
+                global_optimizer_kwargs={"niter": 1, "system_type": "gas_cluster"},
                 n_trials=-1,
                 output_dir=output_dir,
                 rng=rng,
@@ -310,7 +359,7 @@ class TestRunTrials:
         run_trials(
             composition=composition,
             global_optimizer="simple",
-            global_optimizer_kwargs={"niter": 1},
+            global_optimizer_kwargs={"niter": 1, "system_type": "gas_cluster"},
             n_trials=1,
             output_dir=output_dir,
             rng=rng,
@@ -331,7 +380,7 @@ class TestRunTrials:
         run_trials(
             composition=composition,
             global_optimizer="simple",
-            global_optimizer_kwargs={"niter": 1},
+            global_optimizer_kwargs={"niter": 1, "system_type": "gas_cluster"},
             n_trials=1,
             output_dir=output_dir,
             rng=rng,
@@ -353,7 +402,7 @@ class TestRunTrials:
         run_trials(
             composition=composition,
             global_optimizer="simple",
-            global_optimizer_kwargs={"niter": 1},
+            global_optimizer_kwargs={"niter": 1, "system_type": "gas_cluster"},
             n_trials=1,
             output_dir=output_dir,
             rng=rng,
@@ -365,7 +414,7 @@ class TestRunTrials:
         results = run_trials(
             composition=composition,
             global_optimizer="simple",
-            global_optimizer_kwargs={"niter": 1},
+            global_optimizer_kwargs={"niter": 1, "system_type": "gas_cluster"},
             n_trials=1,
             output_dir=output_dir,
             rng=rng,
@@ -389,6 +438,7 @@ class TestRunTrials:
                 "population_size": 3,
                 "niter_local_relaxation": 3,
                 "n_jobs_population_init": -2,  # Parallel for tests
+                "system_type": "gas_cluster",
             },
             n_trials=1,
             output_dir=output_dir,
@@ -409,7 +459,7 @@ class TestRunTrials:
         results = run_trials(
             composition=composition,
             global_optimizer="simple",
-            global_optimizer_kwargs={"niter": 1},
+            global_optimizer_kwargs={"niter": 1, "system_type": "gas_cluster"},
             n_trials=1,
             output_dir=output_dir,
             rng=rng,

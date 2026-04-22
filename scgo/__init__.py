@@ -9,6 +9,8 @@ import os
 from typing import Any
 
 os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
+# SCGO sets torch.load behavior explicitly for trusted model loads; avoid the
+# global env override that triggers third-party import warnings.
 os.environ.pop("TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD", None)
 
 # Algorithms
@@ -57,6 +59,7 @@ from scgo.param_presets import (
     get_minimal_ga_params,
     get_testing_params,
     get_ts_run_kwargs,
+    get_ts_search_params,
     get_ts_search_params_uma,
 )
 from scgo.runner_api import (
@@ -64,13 +67,9 @@ from scgo.runner_api import (
     log_go_ts_summary,
     parse_composition_arg,
     run_go,
-    run_go_binary_scan,
     run_go_campaign,
-    run_go_element_scan,
     run_go_ts,
     run_go_ts_campaign,
-    run_go_ts_one_element,
-    run_go_ts_with_mlip_preset,
     run_ts_campaign,
     run_ts_search,
 )
@@ -157,18 +156,15 @@ __all__ = [
     "get_minimal_ga_params",
     "get_testing_params",
     "get_ts_run_kwargs",
+    "get_ts_search_params",
     "get_default_uma_params",
     "get_ts_search_params_uma",
     # Main run API (see scgo.runner_api)
     "CompositionInput",
     "run_go",
-    "run_go_binary_scan",
     "run_go_campaign",
-    "run_go_element_scan",
     "run_go_ts",
     "run_go_ts_campaign",
-    "run_go_ts_one_element",
-    "run_go_ts_with_mlip_preset",
     "log_go_ts_summary",
     "parse_composition_arg",
     "run_ts_campaign",

@@ -262,6 +262,7 @@ def select_structure_pairs(
                     atoms_j,
                     tolerance=similarity_tolerance,
                     pair_cor_max=similarity_pair_cor_max,
+                    use_mic=surface_aware,
                 )
 
                 if are_similar:

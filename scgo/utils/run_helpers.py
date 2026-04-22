@@ -16,6 +16,11 @@ from ase.calculators.emt import EMT
 
 from scgo.constants import BOLTZMANN_K_EV_PER_K, SURFACE_GA_MIN_LOCAL_RELAX_STEPS
 from scgo.param_presets import get_default_params
+from scgo.system_types import (
+    SystemType,
+    get_system_policy,
+    validate_system_type_settings,
+)
 from scgo.utils.fitness_strategies import validate_fitness_strategy
 from scgo.utils.helpers import (
     auto_niter,
@@ -139,7 +144,13 @@ def validate_algorithm_params(
         verbosity: Logging verbosity level (0=quiet, 1=normal, 2=debug, 3=trace).
     """
     valid_algo_params = {
-        "simple": {"optimizer", "fmax", "niter", "niter_local_relaxation"},
+        "simple": {
+            "optimizer",
+            "fmax",
+            "niter",
+            "niter_local_relaxation",
+            "system_type",
+        },
         "bh": {
             "optimizer",
             "fmax",
@@ -159,6 +170,9 @@ def validate_algorithm_params(
             "diversity_reference_db",
             "diversity_max_references",
             "diversity_update_interval",
+            "system_type",
+            "surface_config",
+            "n_slab",
         },
         "ga": {
             "optimizer",
@@ -175,7 +189,6 @@ def validate_algorithm_params(
             "vacuum",
             "previous_search_glob",
             "energy_tolerance",
-            "use_torchsim",
             "use_adaptive_mutations",
             "stagnation_trigger",
             "stagnation_full_trigger",
@@ -189,6 +202,8 @@ def validate_algorithm_params(
             "diversity_max_references",
             "diversity_update_interval",
             "surface_config",
+            "system_type",
+            "write_profile",
         },
     }
 
@@ -229,7 +244,15 @@ def resolve_auto_params(
         if niter_local_val in ("auto", None)
         else niter_local_val
     )
-    if chosen_go == "ga" and algo_params.get("surface_config") is not None:
+    system_type_raw = algo_params.get("system_type")
+    system_type = system_type_raw if isinstance(system_type_raw, str) else None
+    if system_type is None and algo_params.get("surface_config") is not None:
+        system_type = "surface_cluster"
+    if (
+        chosen_go == "ga"
+        and system_type is not None
+        and get_system_policy(system_type).uses_surface
+    ):
         nlr = int(resolved["niter_local_relaxation"])
         resolved["niter_local_relaxation"] = max(SURFACE_GA_MIN_LOCAL_RELAX_STEPS, nlr)
 
@@ -345,6 +368,26 @@ def resolve_diversity_params(
     return diversity_params
 
 
+def resolve_and_validate_system_type(
+    *,
+    algo_params: dict[str, Any],
+) -> SystemType:
+    """Require explicit system_type and validate companion settings."""
+    system_type_raw = algo_params.get("system_type")
+    if not isinstance(system_type_raw, str):
+        if algo_params.get("surface_config") is not None:
+            resolved_type: SystemType = "surface_cluster"
+        else:
+            resolved_type = "gas_cluster"
+    else:
+        resolved_type = system_type_raw
+    validate_system_type_settings(
+        system_type=resolved_type,
+        surface_config=algo_params.get("surface_config"),
+    )
+    return resolved_type
+
+
 def prepare_algorithm_kwargs(
     algo_params: dict[str, Any],
     params: dict[str, Any],
@@ -367,11 +410,30 @@ def prepare_algorithm_kwargs(
         Dictionary ready for direct algorithm execution.
     """
     resolved = resolve_auto_params(algo_params, composition, chosen_go)
+    system_type: SystemType | None = None
+    if chosen_go in {"simple", "bh", "ga"}:
+        system_type = resolve_and_validate_system_type(
+            algo_params=algo_params,
+        )
+        if chosen_go == "simple":
+            policy = get_system_policy(system_type)
+            if policy.uses_surface or policy.has_adsorbate:
+                raise ValueError(
+                    f"simple optimizer only supports system_type='gas_cluster', got {system_type!r}."
+                )
 
     base_kwargs = filter_dict_keys(
         algo_params, {"n_trials", "niter", "population_size"}
     )
     base_kwargs.update(resolved)
+    if system_type is not None:
+        base_kwargs["system_type"] = system_type
+        policy = get_system_policy(system_type)
+        if chosen_go == "ga" and policy.uses_surface:
+            nlr = int(base_kwargs["niter_local_relaxation"])
+            base_kwargs["niter_local_relaxation"] = max(
+                SURFACE_GA_MIN_LOCAL_RELAX_STEPS, nlr
+            )
 
     if "optimizer" in base_kwargs:
         base_kwargs["optimizer"] = _normalize_optimizer_class(base_kwargs["optimizer"])

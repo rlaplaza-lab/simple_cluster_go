@@ -59,15 +59,6 @@ def seed_random():
         np.random.set_state(prev_np_state)
 
 
-@pytest.fixture
-def no_sleep(monkeypatch):
-    """Disable sleeping in tests that may otherwise wait during retries/backoff."""
-    import time
-
-    monkeypatch.setattr(time, "sleep", lambda *_: None)
-    return None
-
-
 @pytest.fixture(params=INITIALIZATION_MODES)
 def init_mode(request):
     """Parametrized fixture providing all initialization modes.
@@ -84,16 +75,6 @@ def init_mode(request):
             assert_cluster_valid(atoms, [...])
     """
     return request.param
-
-
-@pytest.fixture(scope="function", params=[42, 123, 456])
-def rng_varied(request):
-    """Provide parametrized RNG with different seeds for robustness testing.
-
-    Function scope ensures each test gets a fresh RNG instance,
-    preventing race conditions in parallel/multiprocess test runs.
-    """
-    return np.random.default_rng(request.param)
 
 
 @pytest.fixture
@@ -132,13 +113,6 @@ def pt4_tetrahedron():
 def pt2_atoms():
     """Create a simple Pt2 dimer for testing."""
     atoms = Atoms("Pt2", positions=[[0, 0, 0], [2.5, 0, 0]])
-    return setup_test_atoms(atoms)
-
-
-@pytest.fixture
-def h2_atoms():
-    """Create a simple H2 molecule for testing."""
-    atoms = Atoms("H2", positions=[[0, 0, 0], [0, 0, 0.74]])
     return setup_test_atoms(atoms)
 
 
@@ -237,12 +211,6 @@ def single_atom():
 
 
 @pytest.fixture
-def emt_calculator():
-    """Provide EMT calculator for testing."""
-    return EMT()
-
-
-@pytest.fixture
 def pt2_with_calc():
     """Create a Pt2 dimer with EMT calculator attached."""
     atoms = Atoms("Pt2", positions=[[0, 0, 0], [2.5, 0, 0]])
@@ -258,25 +226,6 @@ def pt3_with_calc():
     setup_test_atoms(atoms)
     atoms.calc = EMT()
     return atoms
-
-
-@pytest.fixture(params=["Pt2", "Pt3", "Au2", "PtAu"])
-def small_composition(request):
-    """Parametrized fixture providing various small compositions."""
-    formula = request.param
-    compositions = {
-        "Pt2": ["Pt", "Pt"],
-        "Pt3": ["Pt", "Pt", "Pt"],
-        "Au2": ["Au", "Au"],
-        "PtAu": ["Pt", "Au"],
-    }
-    return compositions[formula]
-
-
-@pytest.fixture(params=[2, 3, 4, 5])
-def cluster_size(request):
-    """Parametrized fixture providing different cluster sizes."""
-    return request.param
 
 
 @pytest.fixture
@@ -323,21 +272,6 @@ def test_database(tmp_path):
 
 
 @pytest.fixture
-def tmp_db(tmp_path):
-    """Create a temporary empty database for testing.
-
-    Returns the path to an empty database file that can be used for testing
-    database operations without pre-populated data.
-    """
-    from ase.db import connect
-
-    db_path = tmp_path / "tmp.db"
-    with connect(str(db_path)):
-        pass
-    return str(db_path)
-
-
-@pytest.fixture
 def calculator_factory():
     """Factory fixture for creating calculators.
 
@@ -366,22 +300,6 @@ def calculator_factory():
             raise ValueError(f"Unknown calculator: {name}")
 
     return _create_calculator
-
-
-@pytest.fixture(
-    params=[["Pt"], ["Pt", "Pt"], ["Pt", "Pt", "Pt"], ["Pt", "Au"], ["Pt", "Au", "Pd"]]
-)
-def composition_fixtures(request):
-    """Parametrized fixture providing various compositions for testing.
-
-    Provides compositions of different sizes and element types:
-    - Single atom: ["Pt"]
-    - Dimer: ["Pt", "Pt"]
-    - Trimer: ["Pt", "Pt", "Pt"]
-    - Bimetallic: ["Pt", "Au"]
-    - Trimetallic: ["Pt", "Au", "Pd"]
-    """
-    return request.param
 
 
 @pytest.fixture(autouse=True)

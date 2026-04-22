@@ -16,7 +16,6 @@ import functools
 import json
 import os
 import time
-import warnings
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -409,11 +408,9 @@ class TorchSimBatchRelaxer:
         else:
             use_autobatcher = bool(self.autobatcher)
             if use_autobatcher and on_cpu:
-                warnings.warn(
+                logger.warning(
                     "TorchSim autobatching is not supported on CPU; disabling "
-                    "the autobatcher. Pass autobatcher=False to silence this warning.",
-                    RuntimeWarning,
-                    stacklevel=2,
+                    "the autobatcher. Pass autobatcher=False to avoid this warning."
                 )
                 use_autobatcher = False
         if use_autobatcher and "autobatcher" not in self._runner_kwargs:
@@ -588,22 +585,18 @@ class TorchSimBatchRelaxer:
         # `steps=0` is our single-point mode (endpoint energies and batched force
         # evaluations in NEB/TS paths). We intentionally stay on ts.optimize rather
         # than ts.static because we need the final SimState with positions/forces;
-        # ts.static returns property dicts only. torch-sim emits a benign
-        # "max steps reached: 0" UserWarning in this mode — silence just that one.
+        # ts.static returns property dicts only.
         max_steps_now = runner_kwargs.get("max_steps", self.max_steps)
         if max_steps_now == 0:
-            with warnings.catch_warnings():
-                warnings.filterwarnings(
-                    "ignore",
-                    message=r"All systems have reached the maximum number of steps: 0\.",
-                    category=UserWarning,
-                )
-                state = self._ts.optimize(  # type: ignore[call-arg]
-                    system=system_in,
-                    model=self.model,
-                    optimizer=self.optimizer,
-                    **runner_kwargs,
-                )
+            logger.info(
+                "Running TorchSim single-point evaluation via optimize(max_steps=0)."
+            )
+            state = self._ts.optimize(  # type: ignore[call-arg]
+                system=system_in,
+                model=self.model,
+                optimizer=self.optimizer,
+                **runner_kwargs,
+            )
         else:
             state = self._ts.optimize(  # type: ignore[call-arg]
                 system=system_in,

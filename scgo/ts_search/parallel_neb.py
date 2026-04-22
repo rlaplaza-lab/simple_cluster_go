@@ -11,6 +11,7 @@ from ase.optimize import FIRE
 
 from scgo.calculators import torchsim_helpers as _tsh
 from scgo.surface.config import SurfaceSystemConfig
+from scgo.system_types import SystemType, validate_structure_for_system_type
 from scgo.utils.logging import get_logger
 
 from .transition_state import (
@@ -193,6 +194,7 @@ def _neb_endpoint_copies(
     atoms_i: Atoms,
     atoms_j: Atoms,
     surface_config: SurfaceSystemConfig | None,
+    system_type: SystemType,
 ) -> tuple[Atoms, Atoms]:
     """Copy minima endpoints, optionally re-attaching surface FixAtoms constraints."""
     from scgo.surface.constraints import attach_slab_constraints_from_surface_config
@@ -202,6 +204,12 @@ def _neb_endpoint_copies(
     if surface_config is not None:
         attach_slab_constraints_from_surface_config(react, surface_config)
         attach_slab_constraints_from_surface_config(prod, surface_config)
+    validate_structure_for_system_type(
+        react, system_type=system_type, surface_config=surface_config
+    )
+    validate_structure_for_system_type(
+        prod, system_type=system_type, surface_config=surface_config
+    )
     return react, prod
 
 
@@ -223,6 +231,7 @@ def run_parallel_neb_search(
     neb_interpolation_mic: bool,
     neb_tangent_method: str,
     torchsim_params: dict[str, Any],
+    system_type: SystemType,
 ) -> list[dict[str, Any]]:
     """Run all pairs through ParallelNEBBatch and return TS-result dicts.
 
@@ -235,7 +244,9 @@ def run_parallel_neb_search(
     endpoints: list[Atoms] = []
     pair_endpoint_index: list[tuple[int, int]] = []
     for i, j in pairs:
-        ri, rj = _neb_endpoint_copies(minima[i][1], minima[j][1], surface_config)
+        ri, rj = _neb_endpoint_copies(
+            minima[i][1], minima[j][1], surface_config, system_type
+        )
         endpoints.append(ri)
         endpoints.append(rj)
         pair_endpoint_index.append((len(endpoints) - 2, len(endpoints) - 1))
@@ -251,7 +262,7 @@ def run_parallel_neb_search(
     for (i, j), (react_e, prod_e) in zip(pairs, pair_endpoint_energies, strict=True):
         pair_id = f"{i}_{j}"
         react_ep, prod_ep = _neb_endpoint_copies(
-            minima[i][1], minima[j][1], surface_config
+            minima[i][1], minima[j][1], surface_config, system_type
         )
         images = interpolate_path(
             react_ep,
@@ -262,6 +273,7 @@ def run_parallel_neb_search(
             align_endpoints=neb_align_endpoints,
             perturb_sigma=neb_perturb_sigma,
             rng=rng,
+            system_type=system_type,
         )
         neb_instances.append(
             TorchSimNEB(
@@ -291,6 +303,7 @@ def run_parallel_neb_search(
                 product_energy=prod_e,
             )
         )
+        pair_results[-1]["system_type"] = system_type
 
     neb_steps_i = int(neb_steps)
     batch = ParallelNEBBatch(neb_instances, relaxer, max_total_steps=neb_steps_i)

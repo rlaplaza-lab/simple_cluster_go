@@ -43,6 +43,12 @@ from scgo.database.sync import retry_with_backoff
 from scgo.initialization import compute_cell_side
 from scgo.surface.config import SurfaceSystemConfig
 from scgo.surface.constraints import attach_slab_constraints
+from scgo.system_types import (
+    SystemType,
+    uses_surface,
+    validate_structure_for_system_type,
+    validate_system_type_settings,
+)
 from scgo.utils.fitness_strategies import FitnessStrategy, validate_fitness_strategy
 from scgo.utils.helpers import (
     extract_minima_from_database,
@@ -66,7 +72,7 @@ def ga_go(
     mutation_probability: float = 0.4,
     population_size: int = 10,
     offspring_fraction: float = 0.5,
-    n_jobs_population_init: int = -2,
+    n_jobs_population_init: int = 1,
     vacuum: float = 10.0,
     previous_search_glob: str = "**/*.db",
     use_adaptive_mutations: bool = True,
@@ -87,6 +93,8 @@ def ga_go(
     *,
     rng: np.random.Generator | None = None,
     surface_config: SurfaceSystemConfig | None = None,
+    system_type: SystemType = "gas_cluster",
+    write_profile: bool = True,
 ) -> list[tuple[float, Atoms]]:
     """Genetic Algorithm global optimization with adaptive mutations.
 
@@ -144,7 +152,12 @@ def ga_go(
     profile_counters: dict[str, int] = {"offspring_created": 0}
     per_generation: list[dict[str, Any]] = []
 
+    if system_type == "gas_cluster" and surface_config is not None:
+        system_type = "surface_cluster"
     validate_composition(composition, allow_empty=False, allow_tuple=False)
+    validate_system_type_settings(
+        system_type=system_type, surface_config=surface_config
+    )
     validate_ga_common_params(
         niter=niter,
         population_size=population_size,
@@ -166,7 +179,8 @@ def ga_go(
 
     n_to_optimize = len(composition)
 
-    if surface_config is not None:
+    surface_mode = uses_surface(system_type)
+    if surface_mode:
         if not isinstance(surface_config, SurfaceSystemConfig):
             raise TypeError(
                 "surface_config must be a SurfaceSystemConfig instance or None"
@@ -204,9 +218,13 @@ def ga_go(
         logger=logger,
     )
 
-    slab_for_pairing = slab_ref if surface_config is not None else None
+    slab_for_pairing = slab_ref if surface_mode else None
     pairing = create_ga_pairing(
-        atoms_template, n_to_optimize, rng, slab_atoms=slab_for_pairing
+        atoms_template,
+        n_to_optimize,
+        rng,
+        slab_atoms=slab_for_pairing,
+        system_type=system_type,
     )
 
     adaptive_config = get_adaptive_mutation_config(
@@ -223,9 +241,7 @@ def ga_go(
     )
 
     idx_top = (
-        range(n_slab, n_slab + n_to_optimize)
-        if surface_config is not None
-        else range(n_to_optimize)
+        range(n_slab, n_slab + n_to_optimize) if surface_mode else range(n_to_optimize)
     )
     top_z = list({int(atoms_template[i].number) for i in idx_top})
     all_atom_types = get_all_atom_types(atoms_template, top_z)
@@ -237,10 +253,9 @@ def ga_go(
         blmin=blmin,
         rng=rng,
         use_adaptive=use_adaptive_mutations,
+        system_type=system_type,
         n_slab=n_slab,
-        surface_normal_axis=(
-            surface_config.surface_normal_axis if surface_config is not None else 2
-        ),
+        surface_normal_axis=(surface_config.surface_normal_axis if surface_mode else 2),
     )
 
     mutations = update_mutation_weights(
@@ -255,12 +270,10 @@ def ga_go(
         else adaptive_config["mutation_probability"]
     )
 
-    comp_mic = (
-        bool(surface_config.comparator_use_mic) if surface_config is not None else False
-    )
+    comp_mic = bool(surface_config.comparator_use_mic) if surface_mode else False
     comp = create_structure_comparator(n_to_optimize, energy_tolerance, mic=comp_mic)
 
-    if surface_config is not None:
+    if surface_mode:
         start_generator = SurfaceClusterStartGenerator(
             composition,
             slab_ref,
@@ -338,6 +351,12 @@ def ga_go(
 
         t0 = perf_counter()
         for cand in starting_population:
+            validate_structure_for_system_type(
+                cand,
+                system_type=system_type,
+                surface_config=surface_config,
+                n_slab=n_slab,
+            )
             retry_with_backoff(
                 lambda _cand=cand: _insert_unrelaxed(_cand),
                 max_retries=5,
@@ -351,7 +370,7 @@ def ga_go(
         t_relax = 0.0
         t_write = 0.0
         for cand in starting_population:
-            if surface_config is not None:
+            if surface_mode:
                 attach_slab_constraints(
                     cand,
                     n_slab,
@@ -369,12 +388,18 @@ def ga_go(
                 niter_local_relaxation,
                 center_after_relax=center_after_relax,
             )
+            validate_structure_for_system_type(
+                cand,
+                system_type=system_type,
+                surface_config=surface_config,
+                n_slab=n_slab if surface_mode else None,
+            )
             t_relax += perf_counter() - t_start
             add_metadata(
                 cand,
                 generation=0,
                 run_id=run_id,
-                **slab_ga_metadata_extras(surface_config, n_slab),
+                **slab_ga_metadata_extras(surface_config, n_slab, system_type),
             )
 
             t_start = perf_counter()
@@ -491,6 +516,12 @@ def ga_go(
                     t_mutation_gen += perf_counter() - t0
                     if a3_mutated is not None:
                         a3 = a3_mutated
+                validate_structure_for_system_type(
+                    a3,
+                    system_type=system_type,
+                    surface_config=surface_config,
+                    n_slab=n_slab,
+                )
 
                 t_start = perf_counter()
                 retry_with_backoff(
@@ -504,7 +535,7 @@ def ga_go(
                 )
                 t_db_unrelaxed_gen += perf_counter() - t_start
 
-                if surface_config is not None:
+                if surface_mode:
                     attach_slab_constraints(
                         a3,
                         n_slab,
@@ -522,13 +553,19 @@ def ga_go(
                     niter_local_relaxation,
                     center_after_relax=center_after_relax,
                 )
+                validate_structure_for_system_type(
+                    a3,
+                    system_type=system_type,
+                    surface_config=surface_config,
+                    n_slab=n_slab if surface_mode else None,
+                )
                 t_relax_gen += perf_counter() - t_start
 
                 add_metadata(
                     a3,
                     generation=generation,
                     run_id=run_id,
-                    **slab_ga_metadata_extras(surface_config, n_slab),
+                    **slab_ga_metadata_extras(surface_config, n_slab, system_type),
                 )
                 t_start = perf_counter()
                 retry_with_backoff(
@@ -653,18 +690,19 @@ def ga_go(
             - profile_timings.get("initial_local_relaxation_s", 0.0)
             - profile_timings.get("offspring_local_relaxation_s", 0.0),
         )
-        profile_path = os.path.join(output_dir, "ga_profile.json")
-        with open(profile_path, "w") as f:
-            json.dump(
-                {
-                    "backend": "ase_ga",
-                    "timings_s": profile_timings,
-                    "counters": profile_counters,
-                    "per_generation": per_generation,
-                },
-                f,
-                indent=2,
-            )
+        if write_profile:
+            profile_path = os.path.join(output_dir, "ga_profile.json")
+            with open(profile_path, "w") as f:
+                json.dump(
+                    {
+                        "backend": "ase_ga",
+                        "timings_s": profile_timings,
+                        "counters": profile_counters,
+                        "per_generation": per_generation,
+                    },
+                    f,
+                    indent=2,
+                )
 
         return all_minima
 

@@ -3,73 +3,60 @@
 
 from __future__ import annotations
 
-import argparse
+from copy import deepcopy
 from pathlib import Path
-from time import perf_counter
 
-from scgo.param_presets import pt5_graphite_go_ts_defaults
-from scgo.runner_api import log_go_ts_summary, run_go_ts_with_mlip_preset
+from scgo.param_presets import (
+    build_one_element_go_ts_bundle,
+    pt5_graphite_go_ts_defaults,
+)
+from scgo.runner_api import resolve_runner_output_dir, run_go_ts
 from scgo.surface import make_graphite_surface_config
-from scgo.utils.helpers import get_cluster_formula
-from scgo.utils.logging import get_logger
-
-logger = get_logger(__name__)
 
 COMPOSITION = ["Pt", "Pt", "Pt", "Pt", "Pt", "O", "H", "O", "H"]
+BACKEND = "mace"
+SEED = 42
 DEFAULT_OUTPUT_PARENT = Path(__file__).resolve().parent / "results"
 DEFAULT_OUTPUT_SUBDIR = "pt5_2oh_graphite"
 
 
 def main() -> None:
     d0 = pt5_graphite_go_ts_defaults()
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--backend", choices=("mace", "uma"), default="mace")
-    parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--model-name", default=None)
-    parser.add_argument("--uma-task", default="oc25")
-    parser.add_argument("--niter", type=int, default=d0["niter"])
-    parser.add_argument("--population-size", type=int, default=d0["population_size"])
-    parser.add_argument("--max-pairs", type=int, default=d0["max_pairs"])
-    parser.add_argument("--output-root", type=Path, default=None)
-    parser.add_argument("--slab-layers", type=int, default=None)
-    parser.add_argument("--slab-repeat-xy", type=int, default=None)
-    args = parser.parse_args()
-
-    slab_kw = {}
-    if args.slab_layers is not None:
-        slab_kw["slab_layers"] = args.slab_layers
-    if args.slab_repeat_xy is not None:
-        slab_kw["slab_repeat_xy"] = args.slab_repeat_xy
-    surface_config = make_graphite_surface_config(**slab_kw)
-
-    formula = get_cluster_formula(COMPOSITION)
-    t0 = perf_counter()
-    summary = run_go_ts_with_mlip_preset(
-        COMPOSITION,
-        default_output_parent=DEFAULT_OUTPUT_PARENT,
-        default_output_subdir=DEFAULT_OUTPUT_SUBDIR,
-        backend=args.backend,
-        seed=args.seed,
-        niter=args.niter,
-        population_size=args.population_size,
-        max_pairs=args.max_pairs,
-        regime="surface",
-        model_name=args.model_name,
-        uma_task=args.uma_task,
+    surface_config = make_graphite_surface_config()
+    bundle = build_one_element_go_ts_bundle(
+        backend=BACKEND,
+        seed=SEED,
+        niter=d0["niter"],
+        population_size=d0["population_size"],
+        max_pairs=d0["max_pairs"],
+        system_type="surface_cluster_adsorbate",
         surface_config=surface_config,
-        output_dir=args.output_root,
-        verbosity=1,
-        infer_ts_composition_from_minima=True,
         ga_n_jobs_population_init=d0["ga_n_jobs_population_init"],
         ga_batch_size=d0["ga_batch_size"],
     )
-    logger.info(
-        "GO+TS for %s on graphite (backend=%s) under %s",
-        formula,
-        args.backend,
-        summary.get("output_dir"),
+    ga_params = deepcopy(bundle["ga_params"])
+    ts_kwargs = deepcopy(bundle["ts_kwargs"])
+    # Prefer closer-energy endpoint pairs first; graphite runs can otherwise spend
+    # budget on distant minima that rarely produce interior saddles.
+    ts_kwargs["energy_gap_threshold"] = 1.0
+    # Give difficult surface pathways extra band resolution and optimizer headroom.
+    ts_kwargs["neb_n_images"] = 7
+    ts_kwargs["neb_steps"] = 800
+    run_go_ts(
+        COMPOSITION,
+        ga_params=ga_params,
+        ts_kwargs=ts_kwargs,
+        seed=SEED,
+        output_dir=resolve_runner_output_dir(
+            default_output_parent=DEFAULT_OUTPUT_PARENT,
+            default_output_subdir=DEFAULT_OUTPUT_SUBDIR,
+            backend=BACKEND,
+            output_dir=None,
+        ),
+        verbosity=1,
+        infer_ts_composition_from_minima=True,
+        system_type="surface_cluster_adsorbate",
     )
-    log_go_ts_summary(logger, summary, wall_time_s=perf_counter() - t0)
 
 
 if __name__ == "__main__":

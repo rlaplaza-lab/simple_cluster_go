@@ -36,7 +36,7 @@ def test_get_ts_search_params_uma_default_torchsim_flags():
     pytest.importorskip("fairchem")
     from scgo.param_presets import get_ts_search_params_uma
 
-    ts = get_ts_search_params_uma()
+    ts = get_ts_search_params_uma(system_type="gas_cluster")
     assert ts["calculator"] == "UMA"
     assert ts["use_torchsim"] is True
     assert ts["use_parallel_neb"] is False

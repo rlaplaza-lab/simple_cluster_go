@@ -23,7 +23,7 @@ from benchmark.benchmark_common import (
     load_latest_ga_profile,
     parse_atom_count,
 )
-from scgo.runner_api import run_go_element_scan
+from scgo.runner_api import run_go_campaign
 from scgo.surface import (
     DEFAULT_GRAPHITE_SLAB_LAYERS,
     DEFAULT_GRAPHITE_SLAB_REPEAT_XY,
@@ -45,9 +45,7 @@ def parse_args() -> argparse.Namespace:
     )
     add_common_benchmark_cli(parser)
     parser.set_defaults(niter=6, population_size=24)
-    parser.add_argument(
-        "--slab-layers", type=int, default=DEFAULT_GRAPHITE_SLAB_LAYERS
-    )
+    parser.add_argument("--slab-layers", type=int, default=DEFAULT_GRAPHITE_SLAB_LAYERS)
     parser.add_argument(
         "--slab-repeat-xy",
         type=int,
@@ -90,13 +88,12 @@ def main() -> None:
     for formula in clusters:
         n_atoms = parse_atom_count(formula)
         formula = get_cluster_formula(["Pt"] * n_atoms)
-        results = run_go_element_scan(
-            "Pt",
-            n_atoms,
-            n_atoms,
+        results = run_go_campaign(
+            [["Pt"] * n_atoms],
             params=params,
             seed=args.seed,
             output_dir=output_root,
+            system_type="surface_cluster",
         )
         minima = results.get(formula, [])
         n_found = len(minima)

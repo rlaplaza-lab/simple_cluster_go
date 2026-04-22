@@ -17,6 +17,7 @@ from ase import Atoms
 from ase.calculators.calculator import Calculator
 from ase.calculators.emt import EMT
 from ase.io import write
+from ase_ga.utilities import closest_distances_generator, get_all_atom_types
 
 from scgo.algorithms import bh_go, ga_go, simple_go
 from scgo.database import SCGODatabaseManager
@@ -27,6 +28,8 @@ from scgo.database.metadata import (
 )
 from scgo.initialization import create_initial_cluster
 from scgo.surface.config import SurfaceSystemConfig
+from scgo.surface.deposition import create_deposited_cluster
+from scgo.system_types import get_system_policy
 from scgo.utils.helpers import (
     canonicalize_storage_frame,
     compute_final_id,
@@ -50,6 +53,38 @@ from scgo.utils.validation import validate_composition
 
 # Default required calculator methods
 _DEFAULT_REQUIRED_METHODS = ["get_potential_energy", "get_forces"]
+
+
+def _create_surface_initialized_atoms(
+    *,
+    composition: list[str],
+    surface_config: SurfaceSystemConfig,
+    rng: np.random.Generator,
+) -> Atoms:
+    slab = surface_config.slab
+    n_slab = len(slab)
+    n_top = len(composition)
+    template = Atoms(
+        symbols=list(slab.get_chemical_symbols()) + composition,
+        positions=np.vstack([slab.get_positions(), np.zeros((n_top, 3))]),
+        cell=slab.cell,
+        pbc=slab.pbc,
+    )
+    idx_top = range(n_slab, n_slab + n_top)
+    blmin = closest_distances_generator(
+        get_all_atom_types(template, idx_top),
+        ratio_of_covalent_radii=0.7,
+    )
+    deposited = create_deposited_cluster(
+        composition=composition,
+        slab=slab,
+        blmin=blmin,
+        rng=rng,
+        config=surface_config,
+    )
+    if deposited is None:
+        raise RuntimeError("Failed to create initial surface-supported structure.")
+    return deposited
 
 
 def _sanitize_global_optimizer_kwargs_for_metadata(
@@ -90,17 +125,14 @@ _ALGORITHM_REGISTRY: dict[str, dict[str, Any]] = {
     "simple": {
         "function": simple_go,
         "default_niter": 1,
-        "requires_calculator": False,
     },
     "bh": {
         "function": bh_go,
         "default_niter": 100,
-        "requires_calculator": False,
     },
     "ga": {
         "function": None,  # Special handling via _select_and_run_ga
         "default_niter": 10,
-        "requires_calculator": True,
     },
 }
 
@@ -176,8 +208,8 @@ def ga_go_torchsim(*args, **kwargs):
 def _filter_ga_kwargs_for_torchsim(
     optimizer_kwargs: dict[str, Any],
 ) -> dict[str, Any]:
-    """Filter optimizer kwargs for TorchSim GA (drops ASE-only keys, including stale ``use_torchsim``)."""
-    return filter_dict_keys(optimizer_kwargs, {"optimizer", "use_torchsim"})
+    """Filter optimizer kwargs for TorchSim GA (drops ASE-only keys)."""
+    return filter_dict_keys(optimizer_kwargs, {"optimizer"})
 
 
 def _filter_ga_kwargs_for_ase(
@@ -195,7 +227,7 @@ def _filter_ga_kwargs_for_ase(
     """
     ase_ga_kwargs = filter_dict_keys(
         optimizer_kwargs,
-        {"relaxer", "batch_size", "use_torchsim", "n_jobs_offspring"},
+        {"relaxer", "batch_size", "n_jobs_offspring"},
     )
 
     optimizer_name = ase_ga_kwargs.get("optimizer")
@@ -210,10 +242,8 @@ def _resolve_ga_backend(
     calculator: Calculator,
     logger: Any,
 ) -> tuple[bool, dict[str, Any], dict[str, Any]]:
-    """TorchSim GA for MLIPs; ASE GA otherwise. Ignores any ``use_torchsim`` key (removed from public API)."""
-    requested_torchsim = optimizer_kwargs.get("relaxer") is not None or bool(
-        optimizer_kwargs.get("use_torchsim")
-    )
+    """TorchSim GA for MLIPs; ASE GA otherwise."""
+    requested_torchsim = optimizer_kwargs.get("relaxer") is not None
     ml = _is_ml_calculator_for_torchsim(calculator)
     torchsim_kwargs = _filter_ga_kwargs_for_torchsim(optimizer_kwargs)
     ase_ga_kwargs = _filter_ga_kwargs_for_ase(optimizer_kwargs)
@@ -366,18 +396,21 @@ def scgo(
 
     # Filter keys handled at scgo/run_trials level so **optimizer_kwargs cannot
     # override explicit run_id/clean.
-    optimizer_kwargs = filter_dict_keys(
-        global_optimizer_kwargs, {"n_trials", "run_id", "clean"}
-    )
-
-    ensure_directory_exists(output_dir)
-
     optimizer_name_lower = global_optimizer.lower()
     if optimizer_name_lower not in _ALGORITHM_REGISTRY:
         raise ValueError(
             f"Unknown global_optimizer: {global_optimizer}. "
             f"Must be one of {list(_ALGORITHM_REGISTRY.keys())}"
         )
+    optimizer_kwargs = filter_dict_keys(
+        global_optimizer_kwargs, {"n_trials", "run_id", "clean"}
+    )
+    system_type = optimizer_kwargs.get("system_type", "gas_cluster")
+    if not isinstance(system_type, str):
+        raise ValueError("system_type must be a string literal.")
+    policy = get_system_policy(system_type)
+
+    ensure_directory_exists(output_dir)
 
     algo_config = _ALGORITHM_REGISTRY[optimizer_name_lower]
     algo_function = algo_config["function"]
@@ -395,8 +428,22 @@ def scgo(
             clean=clean,
         )
     else:
-        # Other algorithms use standard function signature and need atoms
-        atoms = create_initial_cluster(composition, rng=rng)
+        # Non-GA algorithms need explicit starting atoms.
+        if policy.uses_surface:
+            surface_config = optimizer_kwargs.get("surface_config")
+            if not isinstance(surface_config, SurfaceSystemConfig):
+                raise ValueError(
+                    f"system_type={system_type!r} requires surface_config for "
+                    f"{optimizer_name_lower.upper()} initialization."
+                )
+            atoms = _create_surface_initialized_atoms(
+                composition=composition,
+                surface_config=surface_config,
+                rng=rng,
+            )
+            optimizer_kwargs.setdefault("n_slab", len(surface_config.slab))
+        else:
+            atoms = create_initial_cluster(composition, rng=rng)
         atoms.calc = calculator_for_global_optimization
         all_minima = algo_function(
             atoms=atoms,
@@ -660,7 +707,11 @@ def run_trials(
         atoms_clean = atoms.copy()
         atoms_clean.calc = None
         n_slab_meta = get_metadata(atoms_clean, "n_slab_atoms", 0) or 0
-        if get_metadata(atoms_clean, "system_kind") == "slab_adsorbate" and n_slab_meta:
+        system_type = get_metadata(atoms_clean, "system_type")
+        if (
+            system_type in {"surface_cluster", "surface_cluster_adsorbate"}
+            and n_slab_meta
+        ):
             canonicalize_storage_frame(
                 atoms_clean,
                 pbc_aware=True,

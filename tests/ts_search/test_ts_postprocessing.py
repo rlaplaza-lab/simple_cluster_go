@@ -6,6 +6,7 @@ import pytest
 from ase import Atoms
 from ase.constraints import FixAtoms
 
+from scgo.surface.config import SurfaceSystemConfig
 from scgo.ts_search.transition_state_io import write_final_unique_ts
 from scgo.ts_search.transition_state_run import integrate_ts_to_database
 from scgo.utils.ts_provenance import TS_OUTPUT_SCHEMA_VERSION
@@ -705,6 +706,101 @@ def test_run_transition_state_search_resolves_torchsim_maxsteps_auto(monkeypatch
         torchsim_params={"max_steps": "auto", "force_tol": 0.05},
         verbosity=0,
     )
+
+
+def test_run_transition_state_search_rejects_buried_surface_ts(monkeypatch, tmp_path):
+    """Surface TS results failing supported-deposit geometry should be rejected."""
+    from scgo.ts_search.transition_state_run import run_transition_state_search
+
+    slab = Atoms(
+        "C2",
+        positions=[[0.0, 0.0, 0.0], [1.4, 0.0, 0.0]],
+        cell=[8.0, 8.0, 12.0],
+        pbc=[True, True, False],
+    )
+    surface_config = SurfaceSystemConfig(
+        slab=slab,
+        surface_normal_axis=2,
+        fix_all_slab_atoms=False,
+        n_relax_top_slab_layers=1,
+    )
+    react = slab + Atoms(
+        "PtOH", positions=[[0.4, 0.4, 1.8], [0.5, 0.4, 2.8], [0.4, 0.5, 3.6]]
+    )
+    prod = react.copy()
+    # Build an invalid TS with adsorbate pushed below slab top.
+    buried_ts = react.copy()
+    ts_pos = buried_ts.get_positions()
+    ts_pos[len(slab) :, 2] = -0.6
+    buried_ts.set_positions(ts_pos)
+
+    minima = [(0.0, react.copy()), (0.1, prod.copy())]
+    monkeypatch.setattr(
+        "scgo.ts_search.transition_state_run.get_cluster_formula",
+        lambda _comp: "X",
+    )
+    monkeypatch.setattr(
+        "scgo.ts_search.transition_state_run.load_minima_by_composition",
+        lambda *_a, **_k: {"X": minima},
+    )
+    monkeypatch.setattr(
+        "scgo.ts_search.transition_state_run.select_structure_pairs",
+        lambda minima, **kwargs: [(0, 1)],
+    )
+    monkeypatch.setattr(
+        "scgo.ts_search.transition_state_run.save_neb_result", lambda *a, **k: None
+    )
+    monkeypatch.setattr(
+        "scgo.ts_search.transition_state_run.save_transition_state_results",
+        lambda *a, **k: None,
+    )
+    monkeypatch.setattr(
+        "scgo.ts_search.transition_state_run.save_ts_network_metadata",
+        lambda *a, **k: None,
+    )
+    monkeypatch.setattr(
+        "scgo.ts_search.transition_state_run.write_final_unique_ts",
+        lambda *a, **k: [],
+    )
+    monkeypatch.setattr(
+        "scgo.ts_search.transition_state_run.tag_unique_ts_in_databases",
+        lambda *a, **k: None,
+    )
+
+    def fake_find_transition_state(*args, **kwargs):
+        return {
+            "pair_id": "0_1",
+            "status": "success",
+            "neb_converged": True,
+            "transition_state": buried_ts,
+            "reactant_structure": react.copy(),
+            "product_structure": prod.copy(),
+            "ts_energy": 1.0,
+            "barrier_height": 0.9,
+            "n_images": 5,
+            "spring_constant": 0.1,
+            "reactant_energy": 0.0,
+            "product_energy": 0.1,
+            "error": None,
+        }
+
+    monkeypatch.setattr(
+        "scgo.ts_search.transition_state_run.find_transition_state",
+        fake_find_transition_state,
+    )
+
+    results = run_transition_state_search(
+        ["Pt", "O", "H"],
+        output_dir=str(tmp_path),
+        params={"calculator": "EMT", "calculator_kwargs": {}},
+        system_type="surface_cluster_adsorbate",
+        surface_config=surface_config,
+        max_pairs=1,
+        verbosity=0,
+    )
+    assert len(results) == 1
+    assert results[0]["status"] == "failed"
+    assert "failed surface geometry validation" in str(results[0].get("error", ""))
 
 
 def test_final_unique_ts_and_network_statistics_consistent(tmp_path):

@@ -21,6 +21,13 @@ from scgo.surface.constraints import (
     attach_slab_constraints_from_surface_config,
     surface_slab_constraint_summary,
 )
+from scgo.surface.validation import validate_supported_cluster_deposit
+from scgo.system_types import (
+    SystemType,
+    get_system_policy,
+    validate_structure_for_system_type,
+    validate_system_type_settings,
+)
 from scgo.utils.helpers import (
     auto_niter_ts,
     filter_unique_minima,
@@ -83,6 +90,7 @@ def _run_serial_neb_search(
     neb_interpolation_mic: bool,
     neb_tangent_method: str,
     verbosity: int,
+    system_type: SystemType | None = None,
 ) -> list[dict[str, Any]]:
     """Run NEBs sequentially via :func:`find_transition_state` (one calc per pair)."""
     logger = get_logger(__name__)
@@ -113,6 +121,16 @@ def _run_serial_neb_search(
         if surface_config is not None:
             attach_slab_constraints_from_surface_config(react_ep, surface_config)
             attach_slab_constraints_from_surface_config(prod_ep, surface_config)
+        validate_structure_for_system_type(
+            react_ep,
+            system_type=system_type,
+            surface_config=surface_config,
+        )
+        validate_structure_for_system_type(
+            prod_ep,
+            system_type=system_type,
+            surface_config=surface_config,
+        )
 
         calculator: Any = None
         if not use_torchsim:
@@ -138,6 +156,7 @@ def _run_serial_neb_search(
                 perturb_sigma=neb_perturb_sigma,
                 neb_interpolation_mic=neb_interpolation_mic,
                 neb_tangent_method=neb_tangent_method,
+                system_type=system_type,
                 use_torchsim=use_torchsim,
                 torchsim_params=torchsim_params,
                 verbosity=verbosity,
@@ -175,6 +194,7 @@ def _run_serial_neb_search(
 
         if result.get("transition_state") is not None:
             _detach_calc(result["transition_state"])
+        result["system_type"] = system_type
 
         attach_minima_traceability(result, minima, i, j)
         ts_results.append(result)
@@ -186,6 +206,87 @@ def _run_serial_neb_search(
         cleanup_torch_cuda(logger=logger)
 
     return ts_results
+
+
+def _warn_on_surface_mobile_indices(
+    minima: list[tuple[float, Any]],
+    *,
+    system_type: SystemType,
+) -> None:
+    """Log diagnostics when surface minima expose suspicious mobile-index sets."""
+    logger = get_logger(__name__)
+    policy = get_system_policy(system_type)
+    if not policy.uses_surface:
+        return
+
+    from scgo.utils.comparators import get_shared_mobile_atom_indices
+
+    sample_count = min(3, len(minima))
+    for i in range(sample_count):
+        for j in range(i + 1, sample_count):
+            ai = minima[i][1]
+            aj = minima[j][1]
+            try:
+                shared = get_shared_mobile_atom_indices(ai, aj, fallback_to_all=False)
+            except ValueError:
+                logger.warning(
+                    "Surface TS pair (%d,%d) has no shared mobile atoms from constraints; "
+                    "pair similarity will be skipped.",
+                    i,
+                    j,
+                )
+                continue
+            if shared.size >= len(ai):
+                logger.warning(
+                    "Surface TS pair (%d,%d) compares all atoms as mobile; this often "
+                    "means slab constraints are missing on minima.",
+                    i,
+                    j,
+                )
+
+
+def _apply_surface_ts_geometry_gate(
+    ts_results: list[dict[str, Any]],
+    *,
+    surface_config: SurfaceSystemConfig | None,
+    system_type: SystemType,
+) -> None:
+    """Reject successful TS results that violate supported-deposit geometry."""
+    if surface_config is None:
+        return
+    policy = get_system_policy(system_type)
+    if not (policy.uses_surface and policy.has_adsorbate):
+        return
+
+    n_slab = len(surface_config.slab)
+    use_mic = bool(surface_config.comparator_use_mic)
+    axis = int(surface_config.surface_normal_axis)
+    checks = (
+        ("reactant", "reactant_structure"),
+        ("product", "product_structure"),
+        ("transition_state", "transition_state"),
+    )
+    for result in ts_results:
+        if result.get("status") != "success":
+            continue
+        for label, key in checks:
+            atoms = result.get(key)
+            if atoms is None:
+                result["status"] = "failed"
+                result["neb_converged"] = False
+                result["error"] = f"Missing {label} structure for surface TS validation"
+                break
+            ok, msg = validate_supported_cluster_deposit(
+                atoms,
+                n_slab,
+                surface_normal_axis=axis,
+                use_mic=use_mic,
+            )
+            if not ok:
+                result["status"] = "failed"
+                result["neb_converged"] = False
+                result["error"] = f"{label} failed surface geometry validation: {msg}"
+                break
 
 
 def run_transition_state_search(
@@ -218,6 +319,7 @@ def run_transition_state_search(
     tag_ts_in_db: bool = True,
     ts_energy_tolerance: float = DEFAULT_ENERGY_TOLERANCE,
     surface_config: SurfaceSystemConfig | None = None,
+    system_type: SystemType | None = None,
 ) -> list[dict[str, Any]]:
     """Run transition state search for clusters of given composition.
 
@@ -266,6 +368,18 @@ def run_transition_state_search(
     cleanup_torch_cuda(logger=logger)
 
     validate_composition(composition, allow_empty=False)
+    resolved_system_type = (
+        system_type if isinstance(system_type, str) else "gas_cluster"
+    )
+    validate_system_type_settings(
+        system_type=resolved_system_type,
+        surface_config=surface_config,
+    )
+    system_policy = get_system_policy(resolved_system_type)
+    if system_policy.neb_force_mic:
+        neb_interpolation_mic = True
+    if system_policy.neb_disable_alignment:
+        neb_align_endpoints = False
     rng = ensure_rng(seed)
 
     if use_parallel_neb and not use_torchsim:
@@ -310,6 +424,7 @@ def run_transition_state_search(
         torchsim_params["max_steps"] = auto_niter_ts(composition)
 
     run_context: dict[str, Any] = {
+        "system_type": resolved_system_type,
         "calculator_name": calculator_name,
         "neb_fmax": neb_fmax,
         "neb_steps_resolved": int(neb_steps)
@@ -353,6 +468,7 @@ def run_transition_state_search(
 
     if verbosity >= 1:
         logger.info(f"Found {len(minima)} minima for {formula}")
+    _warn_on_surface_mobile_indices(minima, system_type=resolved_system_type)
 
     pairs = select_structure_pairs(
         minima,
@@ -392,6 +508,7 @@ def run_transition_state_search(
             neb_interpolation_mic=neb_interpolation_mic,
             neb_tangent_method=neb_tangent_method,
             torchsim_params=torchsim_params,
+            system_type=resolved_system_type,
         )
         cleanup_torch_cuda(logger=logger)
     else:
@@ -416,7 +533,14 @@ def run_transition_state_search(
             neb_interpolation_mic=neb_interpolation_mic,
             neb_tangent_method=neb_tangent_method,
             verbosity=verbosity,
+            system_type=resolved_system_type,
         )
+
+    _apply_surface_ts_geometry_gate(
+        ts_results,
+        surface_config=surface_config,
+        system_type=resolved_system_type,
+    )
 
     save_transition_state_results(
         ts_results,

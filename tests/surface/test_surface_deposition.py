@@ -80,11 +80,21 @@ def test_create_ga_pairing_surface_requires_matching_template(pt_slab: Atoms) ->
     n_slab = len(pt_slab)
     wrong = Atoms("Pt", positions=[[0, 0, 0]], cell=pt_slab.cell, pbc=pt_slab.pbc)
     with pytest.raises(ValueError, match="surface GA"):
-        create_ga_pairing(wrong, len(composition), default_rng(0), slab_atoms=pt_slab)
+        create_ga_pairing(
+            wrong,
+            len(composition),
+            default_rng(0),
+            slab_atoms=pt_slab,
+            system_type="surface_cluster",
+        )
 
     tmpl = _build_surface_template(pt_slab, composition)
     pairing = create_ga_pairing(
-        tmpl, len(composition), default_rng(0), slab_atoms=pt_slab
+        tmpl,
+        len(composition),
+        default_rng(0),
+        slab_atoms=pt_slab,
+        system_type="surface_cluster",
     )
     if hasattr(pairing, "primary"):
         assert len(pairing.primary.slab) == n_slab

@@ -64,6 +64,23 @@ def get_sorted_dist_list(atoms: Atoms, mic: bool = False) -> dict[int, np.ndarra
     return pair_cor
 
 
+def _n_slab_from_metadata(atoms: Atoms) -> int | None:
+    """Best-effort extraction of slab-prefix length from atoms metadata."""
+    meta = atoms.info.get("metadata", {}) if isinstance(atoms.info, dict) else {}
+    n_slab = meta.get("n_slab_atoms")
+    if n_slab is None:
+        n_slab = (
+            atoms.info.get("n_slab_atoms") if isinstance(atoms.info, dict) else None
+        )
+    try:
+        n_slab_i = int(n_slab)
+    except (TypeError, ValueError):
+        return None
+    if 0 < n_slab_i < len(atoms):
+        return n_slab_i
+    return None
+
+
 def get_mobile_atom_indices(atoms: Atoms) -> np.ndarray:
     """Return indices for atoms not constrained by ``FixAtoms``.
 
@@ -86,7 +103,12 @@ def get_mobile_atom_indices(atoms: Atoms) -> np.ndarray:
     return mobile
 
 
-def get_shared_mobile_atom_indices(a1: Atoms, a2: Atoms) -> np.ndarray:
+def get_shared_mobile_atom_indices(
+    a1: Atoms,
+    a2: Atoms,
+    *,
+    fallback_to_all: bool = True,
+) -> np.ndarray:
     """Return index set suitable for comparing two structures.
 
     Uses the intersection of mobile (non-``FixAtoms``) indices from both
@@ -101,7 +123,23 @@ def get_shared_mobile_atom_indices(a1: Atoms, a2: Atoms) -> np.ndarray:
     idx2 = get_mobile_atom_indices(a2)
     shared = np.intersect1d(idx1, idx2, assume_unique=False)
     if shared.size == 0:
-        return np.arange(len(a1), dtype=int)
+        if fallback_to_all:
+            return np.arange(len(a1), dtype=int)
+        raise ValueError("No shared mobile atoms across endpoints.")
+    # Surface minima may occasionally lose constraints on load. When both
+    # endpoints expose slab-prefix metadata, compare only adsorbate+cluster atoms.
+    # This avoids slab motion dominating TS pair similarity.
+    n_slab_1 = _n_slab_from_metadata(a1)
+    n_slab_2 = _n_slab_from_metadata(a2)
+    if (
+        n_slab_1 is not None
+        and n_slab_2 is not None
+        and n_slab_1 == n_slab_2
+        and shared.size == len(a1)
+    ):
+        ads_idx = np.arange(n_slab_1, len(a1), dtype=int)
+        if ads_idx.size > 0:
+            return ads_idx
     return shared.astype(int, copy=False)
 
 
