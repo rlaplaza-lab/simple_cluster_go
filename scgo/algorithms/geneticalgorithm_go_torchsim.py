@@ -320,7 +320,9 @@ def ga_go_torchsim(
             mace_model_name="mace_matpes_0",
             max_steps=niter_local_relaxation,
         )
-    elif getattr(relaxer, "max_steps", None) is None:
+    elif (
+        isinstance(niter_local_relaxation, int) and niter_local_relaxation > 0
+    ) or getattr(relaxer, "max_steps", None) is None:
         relaxer.max_steps = niter_local_relaxation
 
     n_to_optimize = len(composition)

@@ -9,6 +9,7 @@ import os
 from typing import Any
 
 os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
+os.environ.pop("TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD", None)
 
 # Algorithms
 from scgo.algorithms import (
@@ -60,6 +61,7 @@ from scgo.param_presets import (
 )
 from scgo.runner_api import (
     CompositionInput,
+    log_go_ts_summary,
     parse_composition_arg,
     run_go,
     run_go_binary_scan,
@@ -68,6 +70,7 @@ from scgo.runner_api import (
     run_go_ts,
     run_go_ts_campaign,
     run_go_ts_one_element,
+    run_go_ts_with_mlip_preset,
     run_ts_campaign,
     run_ts_search,
 )
@@ -76,6 +79,7 @@ from scgo.runner_api import (
 from scgo.surface import (
     SurfaceSystemConfig,
     adsorption_energy,
+    make_graphite_surface_config,
 )
 
 # Utilities
@@ -131,6 +135,7 @@ __all__ = [
     # Surface
     "SurfaceSystemConfig",
     "adsorption_energy",
+    "make_graphite_surface_config",
     # Cluster + adsorbate
     "ClusterAdsorbateConfig",
     "ClusterOHConfig",
@@ -163,6 +168,8 @@ __all__ = [
     "run_go_ts",
     "run_go_ts_campaign",
     "run_go_ts_one_element",
+    "run_go_ts_with_mlip_preset",
+    "log_go_ts_summary",
     "parse_composition_arg",
     "run_ts_campaign",
     "run_ts_search",

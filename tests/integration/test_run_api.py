@@ -12,9 +12,12 @@ from scgo.run_minima import (
     run_scgo_trials,
 )
 from scgo.runner_api import (
+    log_go_ts_summary,
     run_go,
     run_go_campaign,
     run_go_ts_campaign,
+    run_go_ts_one_element,
+    run_go_ts_with_mlip_preset,
     run_ts_campaign,
     run_ts_search,
 )
@@ -190,7 +193,7 @@ def test_run_scgo_one_element_go_ts_pipeline_smoke(monkeypatch, tmp_path):
     summary = run_scgo_one_element_go_ts_pipeline(
         "Pt",
         5,
-        ga_params={},
+        ga_params=get_testing_params(),
         ts_kwargs={"max_pairs": 2},
         seed=42,
         verbosity=0,
@@ -335,3 +338,89 @@ def test_run_go_ts_campaign_no_output_dir(
         output_dir=None,
     )
     assert calls == [None]
+
+
+def test_run_go_ts_with_mlip_preset_wires_output(monkeypatch, tmp_path):
+    calls: list[tuple[list[str], object, bool]] = []
+
+    def _fake_bundle(**kwargs):
+        return {"ga_params": {}, "ts_kwargs": {}}
+
+    monkeypatch.setattr("scgo.runner_api.build_one_element_go_ts_bundle", _fake_bundle)
+
+    def _fake_pipeline(
+        composition,
+        *,
+        ga_params,
+        ts_kwargs,
+        output_dir,
+        infer_ts_composition_from_minima,
+        **kwargs,
+    ):
+        calls.append(
+            (list(composition), output_dir, infer_ts_composition_from_minima)
+        )
+        return {"ts_results": [], "output_dir": output_dir}
+
+    monkeypatch.setattr("scgo.runner_api.run_scgo_go_ts_pipeline", _fake_pipeline)
+
+    run_go_ts_with_mlip_preset(
+        ["Pt", "Pt", "O"],
+        default_output_parent=tmp_path,
+        default_output_subdir="pt2o",
+        backend="mace",
+        seed=1,
+        niter=2,
+        population_size=3,
+        max_pairs=2,
+        infer_ts_composition_from_minima=True,
+        verbosity=0,
+    )
+    assert len(calls) == 1
+    assert calls[0][0] == ["Pt", "Pt", "O"]
+    assert calls[0][1] == (tmp_path / "pt2o_mace").resolve()
+    assert calls[0][2] is True
+
+
+def test_run_go_ts_one_element_delegates(monkeypatch, tmp_path):
+    captured: dict[str, object] = {}
+
+    def _fake(comp, **kwargs):
+        captured["composition"] = comp
+        captured["infer"] = kwargs.get("infer_ts_composition_from_minima")
+        return {"ts_results": []}
+
+    monkeypatch.setattr("scgo.runner_api.run_go_ts_with_mlip_preset", _fake)
+
+    run_go_ts_one_element(
+        "Cu",
+        2,
+        default_output_parent=tmp_path,
+        default_output_subdir="cu2",
+        backend="mace",
+        seed=0,
+        niter=1,
+        population_size=2,
+        max_pairs=1,
+        verbosity=0,
+    )
+    assert captured["composition"] == ["Cu", "Cu"]
+    assert captured["infer"] is False
+
+
+def test_log_go_ts_summary():
+    class _Log:
+        def __init__(self) -> None:
+            self.messages: list[str] = []
+
+        def info(self, fmt: str, *args: object) -> None:
+            self.messages.append(fmt % args if args else fmt)
+
+    log = _Log()
+    log_go_ts_summary(
+        log,
+        {"ts_results": [{"status": "success"}, {"status": "failed"}]},
+        wall_time_s=3.25,
+    )
+    assert log.messages[0] == "Successful NEBs: 1/2"
+    assert log.messages[1] == "Total wall time: 3.25 s"

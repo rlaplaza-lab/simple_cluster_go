@@ -76,7 +76,7 @@ def main() -> None:
         args.seed,
         model_name=args.model_name,
         backend=args.backend,
-        uma_task_name=args.uma_task,
+        uma_task=args.uma_task,
     )
     params["optimizer_params"]["ga"]["niter"] = args.niter
     params["optimizer_params"]["ga"]["population_size"] = args.population_size

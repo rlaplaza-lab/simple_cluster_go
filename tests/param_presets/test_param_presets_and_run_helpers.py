@@ -223,6 +223,29 @@ class TestResolveAutoParams:
         assert isinstance(resolved["niter_local_relaxation"], int)
         assert isinstance(resolved["population_size"], int)
 
+    def test_resolve_auto_params_surface_ga_floors_niter_local(self):
+        from ase.build import fcc111
+
+        from scgo.constants import SURFACE_GA_MIN_LOCAL_RELAX_STEPS
+        from scgo.surface.config import SurfaceSystemConfig
+
+        slab = fcc111("Pt", size=(2, 2, 1), vacuum=6.0, orthogonal=True)
+        cfg = SurfaceSystemConfig(slab=slab, fix_all_slab_atoms=True)
+        composition = ["Pt"] * 4
+        base = {"surface_config": cfg}
+        assert (
+            resolve_auto_params(
+                {**base, "niter_local_relaxation": "auto"}, composition, "ga"
+            )["niter_local_relaxation"]
+            >= SURFACE_GA_MIN_LOCAL_RELAX_STEPS
+        )
+        assert (
+            resolve_auto_params(
+                {**base, "niter_local_relaxation": 40}, composition, "ga"
+            )["niter_local_relaxation"]
+            == SURFACE_GA_MIN_LOCAL_RELAX_STEPS
+        )
+
 
 class TestNormalizeOptimizerClass:
     """Tests for _normalize_optimizer_class helper function."""

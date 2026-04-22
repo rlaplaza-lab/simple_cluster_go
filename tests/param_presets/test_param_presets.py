@@ -10,6 +10,7 @@ from scgo.param_presets import (
     get_ts_search_params,
 )
 from scgo.surface.config import SurfaceSystemConfig
+from scgo.utils.run_helpers import resolve_auto_params
 
 
 def test_ts_search_params_expose_dedupe_and_tolerance_defaults():
@@ -147,7 +148,9 @@ def test_build_one_element_go_ts_bundle_surface_has_surface_config():
         regime="surface",
         surface_config=cfg,
     )
-    assert bundle["ga_params"]["optimizer_params"]["ga"]["surface_config"] is cfg
+    ga = bundle["ga_params"]["optimizer_params"]["ga"]
+    assert ga["surface_config"] is cfg
+    assert resolve_auto_params(ga, ["Pt"] * 5, "ga")["niter_local_relaxation"] >= 400
     assert bundle["ts_kwargs"]["surface_config"] is cfg
 
 

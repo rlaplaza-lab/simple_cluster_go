@@ -37,7 +37,7 @@ def test_run_scgo_trials_passes_surface_config_when_ga_selected(
                     "niter": 2,
                     "population_size": 4,
                     "offspring_fraction": 0.5,
-                    "niter_local_relaxation": 40,
+                    "niter_local_relaxation": 400,
                     "n_jobs_population_init": 1,
                     "early_stopping_niter": 0,
                     "surface_config": surface_config,

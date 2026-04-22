@@ -6,6 +6,8 @@ import logging
 import os
 import sys
 
+from scgo.utils.runtime_warnings import apply_scgo_runtime_warning_filters
+
 # Define custom TRACE logging level (below DEBUG)
 TRACE = 5
 logging.addLevelName(TRACE, "TRACE")
@@ -55,6 +57,7 @@ def configure_logging(
     """
     if hpc_mode is None:
         hpc_mode = os.environ.get("SCGO_LOCAL_DEV") != "1"
+    apply_scgo_runtime_warning_filters()
     if verbosity not in VERBOSITY_LEVELS:
         raise ValueError(
             f"Invalid verbosity level: {verbosity}. Must be 0, 1, 2, or 3."

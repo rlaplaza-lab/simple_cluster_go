@@ -259,7 +259,7 @@ Same pattern: pass `ts_kwargs={...}` for per-run options forwarded to each compo
 - `run_go_ts(composition, *, ga_params, ts_kwargs, ...)`
 - `run_go_ts_campaign(compositions, *, ga_params, ts_kwargs, ...)`
 
-Preset one-element jobs: `run_go_ts_one_element`.
+Preset MLIP (MACE/UMA) GO+TS jobs: `run_go_ts_one_element` for a single element × `n_atoms`, or `run_go_ts_with_mlip_preset` for an arbitrary adsorbate composition (formula string, symbol list, or `Atoms`). Use `log_go_ts_summary` after a run to log NEB success counts (and optional wall time).
 
 ### Advanced / internals
 
@@ -272,7 +272,7 @@ Preset one-element jobs: `run_go_ts_one_element`.
 
 - TorchSim is an optional tool that provides GPU-accelerated batched optimization when available; SCGO works with EMT (CPU) out of the box for quick tests.
 - For reproducible results, pass `seed=` to the workflow functions above.
-- Optional reference scripts live in `runners/` (workflow examples) and `benchmark/` (benchmark entry points).
+- Optional scripts in `runners/` are short CLIs around `run_go_ts_one_element` / `run_go_ts_with_mlip_preset`, `make_graphite_surface_config`, and `param_presets` (see `benchmark/` for sweep-style entry points).
 - See `tests/` for concrete usage patterns.
 
 ---

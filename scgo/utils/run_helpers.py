@@ -14,7 +14,7 @@ from typing import Any
 import numpy as np
 from ase.calculators.emt import EMT
 
-from scgo.constants import BOLTZMANN_K_EV_PER_K
+from scgo.constants import BOLTZMANN_K_EV_PER_K, SURFACE_GA_MIN_LOCAL_RELAX_STEPS
 from scgo.param_presets import get_default_params
 from scgo.utils.fitness_strategies import validate_fitness_strategy
 from scgo.utils.helpers import (
@@ -229,6 +229,9 @@ def resolve_auto_params(
         if niter_local_val in ("auto", None)
         else niter_local_val
     )
+    if chosen_go == "ga" and algo_params.get("surface_config") is not None:
+        nlr = int(resolved["niter_local_relaxation"])
+        resolved["niter_local_relaxation"] = max(SURFACE_GA_MIN_LOCAL_RELAX_STEPS, nlr)
 
     if chosen_go == "ga":
         pop_size_val = algo_params.get("population_size")

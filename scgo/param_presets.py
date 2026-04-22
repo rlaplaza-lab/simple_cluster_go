@@ -536,7 +536,7 @@ def build_one_element_go_ts_bundle(
     ga_n_jobs_population_init: int | None = None,
     ga_batch_size: int | None = None,
 ) -> dict[str, Any]:
-    """Build GA params + TS kwargs for one-element GO->TS example workflows."""
+    """Build GA + TS kwargs for a fixed adsorbate composition (any symbols; same MLIP presets)."""
     backend_norm = str(backend).strip().lower()
     if backend_norm not in {"mace", "uma"}:
         raise ValueError("backend must be 'mace' or 'uma'")

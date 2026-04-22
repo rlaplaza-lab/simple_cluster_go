@@ -18,7 +18,6 @@ from scgo.run_minima import (
     parse_composition_arg,
     run_scgo_campaign_arbitrary_compositions,
     run_scgo_go_ts_pipeline,
-    run_scgo_one_element_go_ts_pipeline,
     run_scgo_trials,
 )
 from scgo.surface.config import SurfaceSystemConfig
@@ -277,14 +276,18 @@ def run_ts_search(
     surface_config: SurfaceSystemConfig | None = None,
     ts_kwargs: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
+    merged_kwargs = dict(ts_kwargs or {})
+    # Keep wrapper-level explicit args authoritative unless they are omitted.
+    if "params" not in merged_kwargs:
+        merged_kwargs["params"] = params
+    if "surface_config" not in merged_kwargs:
+        merged_kwargs["surface_config"] = surface_config
     return _ts_search(
         _as_composition(composition),
         output_dir=output_dir,
-        params=params,
         seed=seed,
         verbosity=verbosity,
-        surface_config=surface_config,
-        **(ts_kwargs or {}),
+        **merged_kwargs,
     )
 
 
@@ -303,6 +306,57 @@ def run_ts_campaign(
         seed=seed,
         verbosity=verbosity,
         ts_kwargs=ts_kwargs,
+    )
+
+
+def run_go_ts_with_mlip_preset(
+    composition: CompositionInput,
+    *,
+    default_output_parent: Path,
+    default_output_subdir: str,
+    backend: str,
+    seed: int,
+    niter: int,
+    population_size: int,
+    max_pairs: int,
+    regime: TsSearchRegime = "gas",
+    model_name: str | None = None,
+    uma_task: str = "oc25",
+    surface_config: SurfaceSystemConfig | None = None,
+    output_dir: str | Path | None = None,
+    verbosity: int = 1,
+    infer_ts_composition_from_minima: bool = False,
+    ga_n_jobs_population_init: int | None = None,
+    ga_batch_size: int | None = None,
+) -> dict[str, Any]:
+    """Run GO then TS using MACE/TorchSim or UMA GA+TS presets (any adsorbate composition)."""
+    bn = normalize_backend(backend)
+    bundle = build_one_element_go_ts_bundle(
+        backend=bn,
+        seed=seed,
+        model_name=model_name,
+        uma_task=uma_task,
+        niter=niter,
+        population_size=population_size,
+        max_pairs=max_pairs,
+        regime=regime,
+        surface_config=surface_config,
+        ga_n_jobs_population_init=ga_n_jobs_population_init,
+        ga_batch_size=ga_batch_size,
+    )
+    return run_go_ts(
+        composition,
+        ga_params=bundle["ga_params"],
+        ts_kwargs=bundle["ts_kwargs"],
+        seed=seed,
+        verbosity=verbosity,
+        output_dir=resolve_runner_output_dir(
+            default_output_parent=default_output_parent,
+            default_output_subdir=default_output_subdir,
+            backend=bn,
+            output_dir=output_dir,
+        ),
+        infer_ts_composition_from_minima=infer_ts_composition_from_minima,
     )
 
 
@@ -327,39 +381,47 @@ def run_go_ts_one_element(
     ga_n_jobs_population_init: int | None = None,
     ga_batch_size: int | None = None,
 ) -> dict[str, Any]:
-    bn = normalize_backend(backend)
-    bundle = build_one_element_go_ts_bundle(
-        backend=bn,
+    _require_nonempty_symbol(element, "element")
+    if n_atoms < 1:
+        raise ValueError("n_atoms must be >= 1")
+    return run_go_ts_with_mlip_preset(
+        [element] * n_atoms,
+        default_output_parent=default_output_parent,
+        default_output_subdir=default_output_subdir,
+        backend=backend,
         seed=seed,
-        model_name=model_name,
-        uma_task=uma_task,
         niter=niter,
         population_size=population_size,
         max_pairs=max_pairs,
         regime=regime,
+        model_name=model_name,
+        uma_task=uma_task,
         surface_config=surface_config,
+        output_dir=output_dir,
+        verbosity=verbosity,
+        infer_ts_composition_from_minima=infer_ts_composition_from_minima,
         ga_n_jobs_population_init=ga_n_jobs_population_init,
         ga_batch_size=ga_batch_size,
     )
-    return run_scgo_one_element_go_ts_pipeline(
-        element,
-        n_atoms,
-        ga_params=bundle["ga_params"],
-        ts_kwargs=bundle["ts_kwargs"],
-        seed=seed,
-        verbosity=verbosity,
-        output_dir=resolve_runner_output_dir(
-            default_output_parent=default_output_parent,
-            default_output_subdir=default_output_subdir,
-            backend=bn,
-            output_dir=output_dir,
-        ),
-        infer_ts_composition_from_minima=infer_ts_composition_from_minima,
-    )
+
+
+def log_go_ts_summary(
+    logger: Any,
+    summary: dict[str, Any],
+    *,
+    wall_time_s: float | None = None,
+) -> None:
+    """Log NEB success counts from a ``run_go_ts*`` summary dict."""
+    ts_results = summary.get("ts_results") or []
+    ok = sum(1 for r in ts_results if r.get("status") == "success")
+    logger.info("Successful NEBs: %d/%d", ok, len(ts_results))
+    if wall_time_s is not None:
+        logger.info("Total wall time: %.2f s", wall_time_s)
 
 
 __all__ = [
     "CompositionInput",
+    "log_go_ts_summary",
     "normalize_backend",
     "parse_composition_arg",
     "resolve_runner_output_dir",
@@ -370,6 +432,7 @@ __all__ = [
     "run_go_ts",
     "run_go_ts_campaign",
     "run_go_ts_one_element",
+    "run_go_ts_with_mlip_preset",
     "run_ts_campaign",
     "run_ts_search",
 ]

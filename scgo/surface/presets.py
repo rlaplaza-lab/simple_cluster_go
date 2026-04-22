@@ -6,6 +6,9 @@ from ase import Atoms
 from ase.build import graphene
 
 from scgo.surface.config import SurfaceSystemConfig
+from scgo.utils.runtime_warnings import apply_scgo_runtime_warning_filters
+
+apply_scgo_runtime_warning_filters()
 
 DEFAULT_GRAPHITE_SLAB_LAYERS = 5
 DEFAULT_GRAPHITE_SLAB_REPEAT_XY = 4
@@ -32,12 +35,7 @@ def make_graphite_surface_config(
     slab_repeat_xy: int = DEFAULT_GRAPHITE_SLAB_REPEAT_XY,
     vacuum: float = DEFAULT_GRAPHITE_SLAB_VACUUM,
 ) -> SurfaceSystemConfig:
-    """Graphite slab with settings aligned to Pt-on-graphite example workflows.
-
-    Matches the former ``runners/run_pt5_graphite.py`` and
-    ``benchmark/benchmark_Pt_surface_graphite.py`` surface configuration
-    (top slab layer relaxes during GO/NEB).
-    """
+    """Graphite slab preset (top layer relaxes with adsorbate during GO/NEB)."""
     slab = build_graphite_slab(
         layers=slab_layers, vacuum=vacuum, repeat_xy=slab_repeat_xy
     )

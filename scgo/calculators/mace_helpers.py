@@ -7,7 +7,9 @@ global optimization workflows.
 
 from __future__ import annotations
 
+import os
 from enum import StrEnum
+from typing import Any
 
 import torch
 from ase import Atoms
@@ -16,6 +18,34 @@ from mace.calculators import mace_mp
 
 from scgo.utils.logging import get_logger
 from scgo.utils.mlip_extras import ensure_mace_uma_not_both_installed
+
+# Some shells/exporters set this var globally, but MACE/e3nn call ``torch.load``
+# during import and can emit noisy warnings. Clear it before model stack import/use.
+os.environ.pop("TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD", None)
+
+_torch_load_patched = False
+
+
+def _ensure_torch_load_mace_checkpoints() -> None:
+    """Default ``torch.load(..., weights_only=False)`` when omitted (PyTorch 2.6+).
+
+    MACE checkpoints pickle full model graphs with many custom classes; PyTorch
+    2.6+ defaults ``weights_only=True``, which rejects those pickles. SCGO only
+    loads foundation checkpoints from trusted sources (same policy as upstream
+    MACE).
+    """
+    global _torch_load_patched
+    if _torch_load_patched:
+        return
+    _torch_load_patched = True
+    _orig_load = torch.load
+
+    def _load(*args: Any, **kwargs: Any) -> Any:
+        if "weights_only" not in kwargs:
+            kwargs["weights_only"] = False
+        return _orig_load(*args, **kwargs)
+
+    torch.load = _load  # type: ignore[method-assign]
 
 
 class MaceUrls(StrEnum):
@@ -93,6 +123,7 @@ class MACE(Calculator):
             f'Initializing MACE calculator ("{model_name}" model) on device: "{selected_device}"',
         )
 
+        _ensure_torch_load_mace_checkpoints()
         # The mace_mp function from mace.calculators automatically handles
         # downloading and loading the specified pretrained MACE model.
         # It returns a fully functional ASE calculator instance.

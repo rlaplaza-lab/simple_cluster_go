@@ -13,58 +13,28 @@ from __future__ import annotations
 import argparse
 import time
 
-from ase import Atoms
-from ase.build import graphene
-
 from benchmark.benchmark_common import (
     DEFAULT_CLUSTERS,
     PT_SURFACE_GRAPHITE_RESULTS_DIR,
     add_common_benchmark_cli,
+    apply_ga_benchmark_overrides,
     format_ga_profile_lines,
     get_benchmark_params,
     load_latest_ga_profile,
     parse_atom_count,
 )
-from scgo.run_minima import run_scgo_campaign_one_element
-from scgo.surface.config import SurfaceSystemConfig
+from scgo.runner_api import run_go_element_scan
+from scgo.surface import (
+    DEFAULT_GRAPHITE_SLAB_LAYERS,
+    DEFAULT_GRAPHITE_SLAB_REPEAT_XY,
+    make_graphite_surface_config,
+)
 from scgo.utils.helpers import get_cluster_formula
 from scgo.utils.logging import get_logger
 
-DEFAULT_SLAB_LAYERS = 5
-DEFAULT_SLAB_REPEAT_XY = 4
-DEFAULT_SLAB_VACUUM = 12.0
 DEFAULT_OUTPUT_ROOT = PT_SURFACE_GRAPHITE_RESULTS_DIR.resolve()
 
 logger = get_logger(__name__)
-
-
-def _build_graphite_slab(
-    layers: int = DEFAULT_SLAB_LAYERS,
-    vacuum: float = DEFAULT_SLAB_VACUUM,
-    repeat_xy: int = DEFAULT_SLAB_REPEAT_XY,
-) -> Atoms:
-    """Build a graphite slab with periodic in-plane boundary conditions."""
-    slab = graphene(formula="C2", vacuum=vacuum)
-    slab = slab.repeat((repeat_xy, repeat_xy, max(1, layers)))
-    slab.center(vacuum=vacuum, axis=2)
-    slab.pbc = (True, True, False)
-    return slab
-
-
-def _make_surface_config(
-    slab_layers: int,
-    slab_repeat_xy: int,
-) -> SurfaceSystemConfig:
-    slab = _build_graphite_slab(layers=slab_layers, repeat_xy=slab_repeat_xy)
-    return SurfaceSystemConfig(
-        slab=slab,
-        adsorption_height_min=1.6,
-        adsorption_height_max=3.2,
-        fix_all_slab_atoms=False,
-        n_relax_top_slab_layers=1,
-        comparator_use_mic=True,
-        max_placement_attempts=600,
-    )
 
 
 def parse_args() -> argparse.Namespace:
@@ -75,11 +45,13 @@ def parse_args() -> argparse.Namespace:
     )
     add_common_benchmark_cli(parser)
     parser.set_defaults(niter=6, population_size=24)
-    parser.add_argument("--slab-layers", type=int, default=DEFAULT_SLAB_LAYERS)
+    parser.add_argument(
+        "--slab-layers", type=int, default=DEFAULT_GRAPHITE_SLAB_LAYERS
+    )
     parser.add_argument(
         "--slab-repeat-xy",
         type=int,
-        default=DEFAULT_SLAB_REPEAT_XY,
+        default=DEFAULT_GRAPHITE_SLAB_REPEAT_XY,
         help="In-plane supercell repeats; default is large enough for Pt4-Pt11 adsorption.",
     )
     return parser.parse_args()
@@ -91,19 +63,25 @@ def main() -> None:
     output_root.mkdir(parents=True, exist_ok=True)
     clusters = args.clusters or DEFAULT_CLUSTERS
 
-    surface_config = _make_surface_config(args.slab_layers, args.slab_repeat_xy)
+    surface_config = make_graphite_surface_config(
+        slab_layers=args.slab_layers,
+        slab_repeat_xy=args.slab_repeat_xy,
+    )
 
-    params = get_benchmark_params(
-        seed=args.seed,
+    base_params = get_benchmark_params(
+        args.seed,
         model_name=args.model_name,
         backend=args.backend,
-        uma_task_name=args.uma_task,
+        uma_task=args.uma_task,
     )
-    params["optimizer_params"]["ga"]["surface_config"] = surface_config
-    params["optimizer_params"]["ga"]["n_jobs_population_init"] = -2
-    params["optimizer_params"]["ga"]["niter"] = args.niter
-    params["optimizer_params"]["ga"]["population_size"] = args.population_size
-    params["optimizer_params"]["ga"]["batch_size"] = 4
+    params = apply_ga_benchmark_overrides(
+        base_params,
+        niter=args.niter,
+        population_size=args.population_size,
+        surface_config=surface_config,
+        n_jobs_population_init=-2,
+        batch_size=4,
+    )
 
     t0 = time.perf_counter()
 
@@ -112,7 +90,7 @@ def main() -> None:
     for formula in clusters:
         n_atoms = parse_atom_count(formula)
         formula = get_cluster_formula(["Pt"] * n_atoms)
-        results = run_scgo_campaign_one_element(
+        results = run_go_element_scan(
             "Pt",
             n_atoms,
             n_atoms,
