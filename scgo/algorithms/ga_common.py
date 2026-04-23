@@ -6,6 +6,7 @@ implementations to reduce duplication.
 
 from __future__ import annotations
 
+import json
 import logging
 import math
 import typing
@@ -73,6 +74,9 @@ def slab_ga_metadata_extras(
     metadata: dict[str, int | str] = {"system_type": system_type}
     if uses_surface(system_type) and surface_config is not None and n_slab > 0:
         metadata["n_slab_atoms"] = n_slab
+        metadata["slab_chemical_symbols_json"] = json.dumps(
+            list(surface_config.slab.get_chemical_symbols())
+        )
     return metadata
 
 
@@ -297,10 +301,24 @@ def create_ga_pairing(
         :class:`~scgo.ase_ga_patches.cutandsplicepairing.CutAndSplicePairing` or
         :class:`~scgo.ase_ga_patches.cutandsplicepairing.DualCutAndSplicePairing`.
     """
-    if system_type == "gas_cluster" and slab_atoms is not None and len(slab_atoms) > 0:
-        system_type = "surface_cluster"
+    resolved_system_type: SystemType = (
+        "surface_cluster"
+        if system_type == "gas_cluster"
+        and slab_atoms is not None
+        and len(slab_atoms) > 0
+        else system_type
+    )
+    if (
+        not uses_surface(resolved_system_type)
+        and slab_atoms is not None
+        and len(slab_atoms) > 0
+    ):
+        raise ValueError(
+            f"Received non-empty slab_atoms with non-surface system_type={resolved_system_type!r}. "
+            "Use surface_cluster or surface_cluster_adsorbate."
+        )
     n_template = len(atoms_template)
-    if uses_surface(system_type):
+    if uses_surface(resolved_system_type):
         if slab_atoms is None or len(slab_atoms) == 0:
             raise ValueError("Surface system types require slab_atoms for pairing.")
         if n_template != len(slab_atoms) + n_to_optimize:
@@ -324,7 +342,7 @@ def create_ga_pairing(
     all_atom_types = get_all_atom_types(atoms_template, top_z)
     blmin = closest_distances_generator(all_atom_types, ratio_of_covalent_radii=0.7)
 
-    if uses_surface(system_type):
+    if uses_surface(resolved_system_type):
         slab = slab_atoms.copy()
     else:
         slab = Atoms(cell=atoms_template.get_cell(), pbc=atoms_template.get_pbc())
@@ -338,7 +356,7 @@ def create_ga_pairing(
             blmin,
             minfrac=min_parent_fraction,
             rng=child_rng_primary,
-            system_type=system_type,
+            system_type=resolved_system_type,
         )
 
     expl_minfrac = (
@@ -353,7 +371,7 @@ def create_ga_pairing(
             blmin,
             minfrac=min_parent_fraction,
             rng=child_rng_primary,
-            system_type=system_type,
+            system_type=resolved_system_type,
         )
 
     primary = CutAndSplicePairing(  # type: ignore[arg-type]
@@ -362,7 +380,7 @@ def create_ga_pairing(
         blmin,
         minfrac=min_parent_fraction,
         rng=child_rng_primary,
-        system_type=system_type,
+        system_type=resolved_system_type,
     )
     exploratory = CutAndSplicePairing(  # type: ignore[arg-type]
         slab,
@@ -370,7 +388,7 @@ def create_ga_pairing(
         blmin,
         minfrac=expl_minfrac,
         rng=create_child_rng(rng) if rng is not None else None,
-        system_type=system_type,
+        system_type=resolved_system_type,
     )
     return DualCutAndSplicePairing(
         primary,
@@ -424,11 +442,19 @@ def create_mutation_operators(
     Returns:
         Tuple of (operators_list, operator_name_to_index_map).
     """
-    if system_type == "gas_cluster" and n_slab > 0:
-        system_type = "surface_cluster"
+    resolved_system_type: SystemType = (
+        "surface_cluster"
+        if system_type == "gas_cluster" and n_slab > 0
+        else system_type
+    )
+    if not uses_surface(resolved_system_type) and n_slab > 0:
+        raise ValueError(
+            f"Received n_slab > 0 with non-surface system_type={resolved_system_type!r}. "
+            "Use surface_cluster or surface_cluster_adsorbate."
+        )
     operators = []
     name_map = {}
-    policy = get_system_policy(system_type)
+    policy = get_system_policy(resolved_system_type)
     move_scale = (
         policy.adsorbate_move_scale if policy.constrain_adsorbate_moves else 1.0
     )
@@ -456,7 +482,7 @@ def create_mutation_operators(
             n_to_optimize,
             rng=create_child_rng(rng) if rng is not None else None,  # type: ignore[arg-type]
             blmin=blmin,
-            test_dist_to_slab=uses_surface(system_type),
+            test_dist_to_slab=uses_surface(resolved_system_type),
         )
         operators.append(permutation)
         name_map["permutation"] = len(operators) - 1
@@ -465,7 +491,7 @@ def create_mutation_operators(
             n_to_optimize,
             rng=create_child_rng(rng) if rng is not None else None,  # type: ignore[arg-type]
             blmin=blmin,
-            test_dist_to_slab=uses_surface(system_type),
+            test_dist_to_slab=uses_surface(resolved_system_type),
         )
         operators.append(shell_swap)
         name_map["shell_swap"] = len(operators) - 1
@@ -522,7 +548,7 @@ def create_mutation_operators(
         operators.append(breathing)
         name_map["breathing"] = len(operators) - 1
 
-        if uses_surface(system_type) and n_slab > 0:
+        if uses_surface(resolved_system_type) and n_slab > 0:
             slide: InPlaneSlideMutation = InPlaneSlideMutation(
                 blmin,
                 n_to_optimize,

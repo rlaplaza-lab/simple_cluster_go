@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 from ase import Atoms
 
 from scgo.algorithms.ga_common import slab_ga_metadata_extras
@@ -36,4 +38,5 @@ def test_slab_ga_metadata_extras_and_add_metadata(pt_slab_small) -> None:
     meta = combined.info["metadata"]
     assert meta["n_slab_atoms"] == n_slab
     assert meta["system_type"] == "surface_cluster_adsorbate"
+    assert json.loads(meta["slab_chemical_symbols_json"]) == slab.get_chemical_symbols()
     assert meta["run_id"] == "run_test"

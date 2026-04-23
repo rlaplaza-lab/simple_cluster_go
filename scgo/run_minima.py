@@ -17,7 +17,8 @@ from typing import Any
 from ase import Atoms
 
 from scgo.minima_search import run_trials
-from scgo.system_types import SystemType, get_system_policy
+from scgo.optimization.algorithm_select import select_scgo_minima_algorithm
+from scgo.system_types import SystemType
 from scgo.utils.helpers import get_cluster_formula
 from scgo.utils.logging import configure_logging, get_logger
 from scgo.utils.rng_helpers import ensure_rng
@@ -28,7 +29,6 @@ from scgo.utils.run_helpers import (
     log_configuration,
     prepare_algorithm_kwargs,
     validate_algorithm_params,
-    validate_calculator,
 )
 from scgo.utils.run_tracking import ensure_run_id
 from scgo.utils.timing_report import log_timing_summary, sum_neb_seconds_from_ts_results
@@ -37,23 +37,18 @@ from scgo.utils.validation import validate_composition
 
 def _select_algorithm(n_atoms: int, system_type: SystemType, logger: Any) -> str:
     """Choose algorithm 'simple', 'bh' or 'ga' based on atom count."""
-    policy = get_system_policy(system_type)
-    simple_allowed = not policy.uses_surface and not policy.has_adsorbate
-    if n_atoms <= 2 and simple_allowed:
-        chosen_go = "simple"
+    chosen = select_scgo_minima_algorithm(n_atoms, system_type)
+    if chosen == "simple":
         logger.info(
             f"Selected simple optimization for {n_atoms}-atom cluster (trivial structure)"
         )
-    elif n_atoms == 3:
-        chosen_go = "bh"
+    elif chosen == "bh":
         logger.info(
             f"Selected Basin Hopping for {n_atoms}-atom cluster (small cluster)"
         )
     else:
-        chosen_go = "ga"
         logger.info(f"Selected Genetic Algorithm for {n_atoms}-atom cluster")
-
-    return chosen_go
+    return chosen
 
 
 def _resolve_explicit_system_type(params: dict[str, Any]) -> SystemType:
@@ -63,9 +58,12 @@ def _resolve_explicit_system_type(params: dict[str, Any]) -> SystemType:
         if isinstance(value, str):
             candidates.append(value)
     if not candidates:
-        raise ValueError(
-            "Missing required optimizer_params[algo]['system_type'] in parameters."
+        any_surface_config = any(
+            params.get("optimizer_params", {}).get(algo, {}).get("surface_config")
+            is not None
+            for algo in ("simple", "bh", "ga")
         )
+        return "surface_cluster" if any_surface_config else "gas_cluster"
     if len(set(candidates)) != 1:
         raise ValueError(
             "All optimizer_params system_type values must match exactly for one run."
@@ -97,7 +95,7 @@ def run_scgo_trials(
 
     # Validate calculator availability
     calculator_name = params.get("calculator", "MACE")
-    validate_calculator(calculator_name)
+    _ = get_calculator_class(calculator_name)
 
     # Validate params structure - rng should not be in optimizer_params
     for algo in ["bh", "ga"]:
@@ -457,17 +455,16 @@ def run_scgo_campaign_arbitrary_compositions(
 def run_scgo_go_ts_pipeline(
     composition: list[str],
     *,
-    go: dict[str, Any],
+    go_params: dict[str, Any],
     ts_kwargs: dict[str, Any],
     seed: int | None = None,
     verbosity: int = 1,
     output_dir: str | Path | None = None,
-    ts_composition: list[str] | None = None,
-    infer_ts_composition_from_minima: bool = False,
 ) -> dict[str, Any]:
     """Run global optimization then transition-state search; return a compact run summary.
 
-    Minima are written under ``output_path / f"{formula}_searches"`` so
+    ``go_params`` is the same global-optimization dict as ``run_go`` / ``run_go_ts``'s
+    ``go_params=``. Minima are written under ``output_path / f"{formula}_searches"`` so
     :func:`~scgo.ts_search.transition_state_run.run_transition_state_search` can
     load them. For high-level entry points see :mod:`scgo.runner_api`.
     """
@@ -486,9 +483,9 @@ def run_scgo_go_ts_pipeline(
     ts_base_dir = output_path / f"{formula}_searches"
 
     pipeline_t0 = perf_counter()
-    merged_ga = initialize_params(None if go is None else dict(go))
+    merged_ga = initialize_params(None if go_params is None else dict(go_params))
     calculator_kwargs = merged_ga.get("calculator_kwargs", {})
-    validate_calculator(merged_ga.get("calculator", "MACE"))
+    _ = get_calculator_class(merged_ga.get("calculator", "MACE"))
     calculator_for_global_optimization = get_calculator_class(merged_ga["calculator"])(
         **calculator_kwargs,
     )
@@ -509,16 +506,6 @@ def run_scgo_go_ts_pipeline(
 
     minima_by_formula = {formula: minima_list}
 
-    if ts_composition is not None:
-        composition_for_ts = ts_composition
-    elif infer_ts_composition_from_minima:
-        from scgo.runner_surface import read_full_composition_from_first_xyz
-
-        final_minima_dir = ts_base_dir / "final_unique_minima"
-        composition_for_ts = read_full_composition_from_first_xyz(final_minima_dir)
-    else:
-        composition_for_ts = composition
-
     ts_kwargs_local = dict(ts_kwargs)
     ts_kwargs_local.pop("base_dir", None)
     ts_kwargs_local.pop("seed", None)
@@ -528,7 +515,7 @@ def run_scgo_go_ts_pipeline(
     from scgo.ts_search import run_transition_state_search
 
     ts_results = run_transition_state_search(
-        composition_for_ts,
+        composition,
         output_dir=ts_base_dir,
         seed=seed,
         verbosity=verbosity,
@@ -570,13 +557,11 @@ def run_scgo_one_element_go_ts_pipeline(
     element: str,
     n_atoms: int,
     *,
-    go: dict[str, Any],
+    go_params: dict[str, Any],
     ts_kwargs: dict[str, Any],
     seed: int | None = None,
     verbosity: int = 1,
     output_dir: str | Path | None = None,
-    ts_composition: list[str] | None = None,
-    infer_ts_composition_from_minima: bool = False,
 ) -> dict[str, Any]:
     """Run one-element GO then TS and return a compact run summary."""
     if not element or not isinstance(element, str):
@@ -586,13 +571,11 @@ def run_scgo_one_element_go_ts_pipeline(
     composition = [element] * n_atoms
     return run_scgo_go_ts_pipeline(
         composition,
-        go=go,
+        go_params=go_params,
         ts_kwargs=ts_kwargs,
         seed=seed,
         verbosity=verbosity,
         output_dir=output_dir,
-        ts_composition=ts_composition,
-        infer_ts_composition_from_minima=infer_ts_composition_from_minima,
     )
 
 

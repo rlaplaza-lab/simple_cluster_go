@@ -61,11 +61,13 @@ from scgo.param_presets import (
     get_torchsim_ga_params,
     get_ts_search_params,
     get_ts_search_params_uma,
+    get_uma_ga_benchmark_params,
 )
 from scgo.runner_api import (
     CompositionInput,
     log_go_ts_summary,
     parse_composition_arg,
+    resolve_workflow_seed,
     run_go,
     run_go_campaign,
     run_go_ts,
@@ -159,8 +161,10 @@ __all__ = [
     "get_default_uma_params",
     "get_ts_search_params_uma",
     "get_torchsim_ga_params",
+    "get_uma_ga_benchmark_params",
     # Main run API (see scgo.runner_api)
     "CompositionInput",
+    "resolve_workflow_seed",
     "run_go",
     "run_go_campaign",
     "run_go_ts",

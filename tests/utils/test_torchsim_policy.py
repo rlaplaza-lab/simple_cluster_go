@@ -105,7 +105,7 @@ def test_coerce_ts_params_uma_sets_fairchem_model_fields(monkeypatch):
     ts = get_ts_search_params(
         calculator="UMA", calculator_kwargs={}, system_type="gas_cluster"
     )
-    kw = coerce_ts_params_to_runner_kwargs(ts)
+    kw = coerce_ts_params_to_runner_kwargs(ts, system_type="gas_cluster")
     assert kw["use_torchsim"] is True
     assert kw["use_parallel_neb"] is False
     tsp = kw["torchsim_params"]

@@ -142,6 +142,17 @@ class TestScgoFunction:
 
         assert isinstance(results, list)
 
+    def test_scgo_infers_gas_system_type_when_missing(self, tmp_path, rng):
+        results = scgo(
+            composition=["Pt", "Pt"],
+            global_optimizer="simple",
+            global_optimizer_kwargs={"niter": 1},
+            output_dir=str(tmp_path / "missing_system_type"),
+            rng=rng,
+            verbosity=0,
+        )
+        assert isinstance(results, list)
+
     def test_scgo_surface_bh_is_supported(self, tmp_path, rng, monkeypatch):
         slab = fcc111("Pt", size=(2, 2, 1), vacuum=6.0, orthogonal=True)
         surface_config = main_mod.SurfaceSystemConfig(

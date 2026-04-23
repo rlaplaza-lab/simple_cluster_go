@@ -19,8 +19,8 @@ class SurfaceSystemConfig:
     Atom ordering in combined systems must be ``slab`` atoms first, then the
     ``len(composition)`` adsorbate atoms (matching ASE GA patches: ``n_top``
     trailing atoms are optimized). Pass the same instance to TS search
-    (``get_ts_search_params(..., surface_config=...)`` or
-    ``run_ts_search(..., ts=..., system_type=..., surface_config=...)``) so NEB uses the
+    (    ``get_ts_search_params(..., surface_config=...)`` or
+    ``run_ts_search(..., ts_params=..., system_type=..., surface_config=...)``) so NEB uses the
     identical slab ``FixAtoms`` policy as local relaxation.
     At runtime, :func:`scgo.surface.validation.validate_surface_config_slab_prefix`
     checks that combined systems still begin with ``slab``'s symbols in order.

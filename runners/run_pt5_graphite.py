@@ -12,43 +12,52 @@ from scgo.surface import make_graphite_surface_config
 N_ATOMS = 5
 ELEMENT = "Pt"
 SEED = 42
+SYSTEM_TYPE = "surface_cluster"
 DEFAULT_OUTPUT_ROOT = Path(__file__).resolve().parent / "results"
 OUTPUT_STEM = "pt5_graphite"
 
-# HPC / production GO+TS numbers
 NITER = 6
 POPULATION_SIZE = 24
 MAX_PAIRS = 10
-GA_N_JOBS_POPULATION_INIT = -2
 GA_BATCH_SIZE = 4
+
+
+def _build_go_params(surface_config) -> dict:
+    """Load GO preset, then apply surface-specific knobs for this run."""
+    go_params = get_torchsim_ga_params(SEED)
+    go_params["calculator"] = "MACE"
+    go_params["optimizer_params"]["ga"].update(
+        niter=NITER,
+        population_size=POPULATION_SIZE,
+        surface_config=surface_config,
+        batch_size=GA_BATCH_SIZE,
+    )
+    return go_params
+
+
+def _build_ts_params(surface_config) -> dict:
+    """Load TS preset, then tweak max pair budget."""
+    ts_params = get_ts_search_params(
+        system_type=SYSTEM_TYPE,
+        seed=SEED,
+    )
+    ts_params["max_pairs"] = MAX_PAIRS
+    return ts_params
 
 
 def main() -> None:
     surface_config = make_graphite_surface_config()
-    go = get_torchsim_ga_params(SEED)
-    go["calculator"] = "MACE"
-    ga = go["optimizer_params"]["ga"]
-    ga["niter"] = NITER
-    ga["population_size"] = POPULATION_SIZE
-    ga["surface_config"] = surface_config
-    ga["n_jobs_population_init"] = GA_N_JOBS_POPULATION_INIT
-    ga["batch_size"] = GA_BATCH_SIZE
-    ts = get_ts_search_params(
-        system_type="surface_cluster",
-        surface_config=surface_config,
-    )
-    ts["max_pairs"] = MAX_PAIRS
+    go_params = _build_go_params(surface_config)
+    ts_params = _build_ts_params(surface_config)
     run_go_ts(
         [ELEMENT] * N_ATOMS,
-        go=go,
-        ts=ts,
+        go_params=go_params,
+        ts_params=ts_params,
         seed=SEED,
-        output_dir=None,
         output_root=DEFAULT_OUTPUT_ROOT,
         output_stem=OUTPUT_STEM,
-        verbosity=1,
-        infer_ts_composition_from_minima=True,
-        system_type="surface_cluster",
+        surface_config=surface_config,
+        system_type=SYSTEM_TYPE,
     )
 
 

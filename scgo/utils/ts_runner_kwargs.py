@@ -5,11 +5,15 @@ from __future__ import annotations
 from typing import Any
 
 from scgo.constants import DEFAULT_ENERGY_TOLERANCE, DEFAULT_NEB_TANGENT_METHOD
+from scgo.system_types import SystemType
 from scgo.utils.torchsim_policy import resolve_ts_torchsim_flags
 
 
 def coerce_ts_params_to_runner_kwargs(
     ts_params: dict[str, Any] | None,
+    *,
+    system_type: SystemType,
+    surface_config: Any | None = None,
 ) -> dict[str, Any]:
     """Map ``get_ts_search_params`` output to ``run_transition_state_search`` kwargs."""
     if ts_params is None:
@@ -18,6 +22,11 @@ def coerce_ts_params_to_runner_kwargs(
         )
 
     calc_name = str(ts_params["calculator"])
+    if system_type not in SystemType.__args__:
+        raise ValueError(
+            f"Unsupported system_type={system_type!r}; "
+            f"expected one of {SystemType.__args__!r}."
+        )
     use_ts, use_pn = resolve_ts_torchsim_flags(
         calc_name,
         ts_params.get("use_torchsim"),
@@ -29,7 +38,7 @@ def coerce_ts_params_to_runner_kwargs(
             "calculator": ts_params["calculator"],
             "calculator_kwargs": ts_params.get("calculator_kwargs") or {},
         },
-        "system_type": ts_params["system_type"],
+        "system_type": system_type,
         "use_torchsim": use_ts,
         "use_parallel_neb": use_pn,
         "torchsim_params": {
@@ -62,7 +71,10 @@ def coerce_ts_params_to_runner_kwargs(
         "surface_config",
     ]
     for key in direct_keys:
-        kwargs[key] = ts_params.get(key)
+        if key == "surface_config":
+            kwargs[key] = surface_config
+        else:
+            kwargs[key] = ts_params.get(key)
 
     default_keys = {
         "neb_interpolation_mic": False,

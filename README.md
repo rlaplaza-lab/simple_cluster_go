@@ -73,6 +73,20 @@ results = run_go(
 - `results` is a list of `(energy, Atoms)` for unique minima (sorted by energy by default).
 - Sequential multi-composition GO uses `run_go_campaign([...], system_type=...)` from [`scgo.runner_api`](scgo/runner_api.py) (also re-exported from `scgo`).
 
+### Explicit system types
+
+SCGO supports exactly four explicit `system_type` values:
+
+- `gas_cluster`: gas-phase cluster (no slab, no extra adsorbate constraints)
+- `surface_cluster`: cluster supported on a slab (`surface_config` required)
+- `gas_cluster_adsorbate`: gas-phase cluster that includes adsorbate-like species (no slab)
+- `surface_cluster_adsorbate`: supported cluster + adsorbate species (`surface_config` required)
+
+`system_type` must be passed to each `run_*` API call. System-definition keys are intentionally rejected from preset dicts (`go_params` / `ts_params`) to keep one canonical source of truth at the API boundary.
+For adsorbate system types (`gas_cluster_adsorbate`, `surface_cluster_adsorbate`),
+high-level runners also require `adsorbate_definition`, e.g.:
+`{"adsorbate_symbols": ["O", "H"], "core_symbols": ["Pt"]}`.
+
 ---
 
 ## What to expect on disk (output)
@@ -114,7 +128,37 @@ Notes:
 
 ## Key options (short)
 
-- `params` come from presets: `get_default_params()`, `get_testing_params()`, `get_high_energy_params()`, `get_diversity_params()`.
+- **Global optimization (`params` for `run_go` / `run_go_campaign`)** is merged with `get_default_params()` via `initialize_params`: any preset that omits keys inherits defaults. Common entry points: `get_default_params()`, `get_minimal_ga_params()`, `get_testing_params()`, `get_high_energy_params()`, `get_diversity_params()`, `get_default_uma_params()` (fairchem UMA), and `get_torchsim_ga_params(seed, model_name=...)` (MACE + TorchSim GA benchmark stack; requires `scgo[mace]`).
+- **Transition-state search (`ts_params` for `run_ts_search` / `run_go_ts`)** is **not** merged with GO defaults. Build a flat dict with `get_ts_search_params(...)` or `get_ts_search_params_uma(...)` and pass it explicitly alongside `go_params` when using `run_go_ts` / `run_go_ts_campaign`.
+
+Preset-vs-runtime split in `runner_api`:
+
+- Put scientific/tuning knobs in preset dicts (`go_params`/`ts_params`): calculator choice, optimizer settings, NEB settings, pairing thresholds, etc.
+- Keep run-control knobs on the `run_*` call itself: `verbosity`, `output_dir`, `output_root`, `output_stem`, `seed`, `log_summary`, `write_timing_json`, `profile_ga`.
+- Keep system-definition inputs on the `run_*` call itself: `system_type`, and when required by system type, `surface_config` and `adsorbate_definition`.
+
+Inspect -> edit -> run pattern:
+
+```python
+from scgo import run_go_ts
+from scgo.param_presets import get_default_params, get_ts_search_params
+
+go_params = get_default_params()
+ts_params = get_ts_search_params(system_type="gas_cluster")
+
+print(go_params["optimizer_params"]["ga"]["niter"])
+go_params["optimizer_params"]["ga"]["niter"] = 8
+ts_params["max_pairs"] = 12
+
+summary = run_go_ts(
+    "Pt5",
+    go_params=go_params,
+    ts_params=ts_params,
+    system_type="gas_cluster",
+    seed=7,
+    verbosity=1,
+)
+```
 
 Tagging final minima in databases: ✅ After writing final XYZ files, SCGO can optionally tag the corresponding database records with metadata ("final_unique_minimum": true, "final_rank", and "final_written") so downstream tools can find final minima without re-scanning databases. This behaviour is enabled by default and can be disabled by setting `params['tag_final_minima'] = False` when calling `run_go(...)`.
 - `fitness_strategy`: `low_energy` (default), `high_energy`, `diversity`.
@@ -125,7 +169,7 @@ Important: `diversity` requires a `diversity_reference_db` glob (e.g. `"Pt*_sear
 
 ---
 
-## Adsorbate on a surface (supported-cluster GA)
+## Surface workflows (supported clusters)
 
 SCGO can run **genetic-algorithm** global optimization for a small **adsorbate cluster** on a periodic **slab**. The GA explores the adsorbate degrees of freedom (`composition`); the slab supplies the cell and controls which substrate atoms move during **local** relaxations via [`SurfaceSystemConfig`](scgo/surface/config.py) (`FixAtoms` under the hood, including on the TorchSim GA path).
 
@@ -151,7 +195,8 @@ params["optimizer_params"]["ga"]["surface_config"] = surface_config
 ```
 
 - **Direct API** (any adsorbate size): `from scgo import ga_go, SurfaceSystemConfig` and pass `surface_config=...`.
-- **`run_go`**: set `params["optimizer_params"]["ga"]["surface_config"]` to a `SurfaceSystemConfig` instance. The high-level runner only selects GA when `len(composition) >= 4`, so use **at least four adsorbate atoms** if you rely on automatic algorithm choice; for dimers/trimers, call `ga_go` directly.
+- **`run_go`**: pass `surface_config=...` directly to `run_go(...)`; it is copied into each **present** `optimizer_params` entry among `simple` / `bh` / `ga` so the active algorithm sees the slab. The high-level runner only selects GA when `len(composition) >= 4`, so use **at least four adsorbate atoms** if you rely on automatic algorithm choice; for dimers/trimers, call `ga_go` directly.
+- For slab workflows, choose `system_type="surface_cluster"` (supported cluster only) or `system_type="surface_cluster_adsorbate"` (supported cluster with explicit adsorbate-mode policies).
 Surface workflows use `from scgo.runner_surface import make_surface_config` with your ASE slab.
 
 ### Slab motion during local relaxation
@@ -225,33 +270,35 @@ For element or binary scans, build compositions explicitly and pass them to `run
 
 ### Transition state search
 
-`run_ts_search` and `run_ts_campaign` take a **flat `ts` dict** from [`get_ts_search_params`](scgo/param_presets.py) (or edit a copy). TorchSim use is resolved from the calculator; pass **`system_type` once** on the `run_*` call (it wins over any key in `ts`).
+`run_ts_search` and `run_ts_campaign` take a **flat `ts_params` dict** from [`get_ts_search_params`](scgo/param_presets.py) (or edit a copy). TorchSim use is resolved from the calculator; pass `system_type` on the `run_*` call.
 
 ```python
 from scgo import run_ts_search
 from scgo.param_presets import get_ts_search_params
 
-ts = get_ts_search_params(system_type="gas_cluster")
+ts_params = get_ts_search_params(system_type="gas_cluster")
 ts_results = run_ts_search(
     ["Pt", "Pt", "Pt"],
     output_dir="Pt3_searches",
     params={"calculator": "MACE"},
     seed=42,
-    ts=ts,
+    ts_params=ts_params,
     system_type="gas_cluster",
 )
 ```
 
-`run_ts_campaign` forwards the same `ts` to each composition.
+`run_ts_campaign` forwards the same `ts_params` to each composition.
 
 ### GO then TS
 
-`run_go_ts` / `run_go_ts_campaign` use **`go=`** (merged like other GO runs) and **`ts=`** (same flat shape as above). For MACE + TorchSim GA, start from [`get_torchsim_ga_params`](scgo/param_presets.py) with a `seed`, set `go["calculator"] = "MACE"` and `optimizer_params["ga"]` as needed; pair with `get_ts_search_params(...)` and set `ts["max_pairs"]`, etc. See `runners/run_pt5_gas.py` for a minimal end-to-end example. Default output if `output_dir` is omitted is under `scgo_runs/<stem>_<mace|uma>/` (set `output_root` / `output_stem` to change).
+`run_go_ts` / `run_go_ts_campaign` use **`go_params=`** (merged like other GO runs) and **`ts_params=`** (same flat shape as above; **not** deep-merged with `get_default_params()`). For **slab + adsorbate**, pass a `SurfaceSystemConfig` directly to `run_go_ts(..., surface_config=...)` / `run_go_ts_campaign(..., surface_config=...)`; the `composition` argument is **adsorbate symbols only** (the full system for loading minima is built as slab + adsorbate, matching GA). For MACE + TorchSim GA, start from [`get_torchsim_ga_params`](scgo/param_presets.py) with a `seed` (optional `model_name=` so the TorchSim relaxer matches the calculator), set `go_params["calculator"] = "MACE"` and `optimizer_params["ga"]` as needed; pair with `get_ts_search_params(...)` and set `ts_params["max_pairs"]`, etc. For UMA NEB defaults, you can use `get_ts_search_params_uma`. See `runners/run_pt5_gas.py` for a minimal end-to-end example. Default output if `output_dir` is omitted is under `scgo_runs/<stem>_<mace|uma>/` (set `output_root` / `output_stem` to change).
+
+Benchmarks comparing MACE vs UMA on the same GA structure can use [`get_uma_ga_benchmark_params`](scgo/param_presets.py) (re-exported from `scgo`).
 
 ### Advanced / internals
 
 - `from scgo.run_minima import run_scgo_trials`, `run_scgo_campaign_arbitrary_compositions`, …
-- `from scgo.ts_search.transition_state_run import run_transition_state_search` for a flat keyword API without the `ts` dict.
+- `from scgo.ts_search.transition_state_run import run_transition_state_search` for a flat keyword API without the `ts_params` dict.
 
 ---
 
@@ -259,7 +306,7 @@ ts_results = run_ts_search(
 
 - TorchSim is an optional tool that provides GPU-accelerated batched optimization when available; SCGO works with EMT (CPU) out of the box for quick tests.
 - For reproducible results, pass `seed=` to the workflow functions above.
-- Optional scripts in `runners/` are intentionally minimal, no-CLI examples that set composition/surface, build `go`/`ts` dicts, and call canonical `run_go_ts(...)` (see `benchmark/` for sweep-style entry points).
+- Optional scripts in `runners/` are intentionally minimal, no-CLI examples that set composition/surface, build `go_params` / `ts_params` dicts, and call canonical `run_go_ts(...)` for each system type (`run_pt5_gas.py`, `run_pt5_graphite.py`, `run_pt5_oh_gas.py`, `run_pt5_2oh_graphite.py`; see `benchmark/` for sweep-style entry points).
 - See `tests/` for concrete usage patterns.
 
 ---

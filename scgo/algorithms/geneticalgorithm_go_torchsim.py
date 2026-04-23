@@ -328,6 +328,7 @@ def ga_go_torchsim(
         mutation_probability=mutation_probability,
         offspring_fraction=offspring_fraction,
         vacuum=vacuum,
+        fmax=fmax,
     )
     if n_jobs_offspring not in (-1, -2) and n_jobs_offspring < 1:
         raise ValueError(

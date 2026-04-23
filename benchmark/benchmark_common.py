@@ -372,10 +372,8 @@ def get_benchmark_params(
     if backend == "uma":
         mn = model_name or "uma-s-1p2"
         return get_uma_ga_benchmark_params(seed, model_name=mn, uma_task=uma_task)
-    params = get_torchsim_ga_params(seed=seed)
+    params = get_torchsim_ga_params(seed=seed, model_name=model_name)
     params["calculator"] = "MACE"
-    if model_name is not None:
-        params["calculator_kwargs"]["model_name"] = model_name
     return params
 
 

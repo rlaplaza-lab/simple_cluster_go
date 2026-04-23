@@ -1,18 +1,13 @@
 """Tests for generic surface-runner helpers (scgo.runner_surface)."""
 
-from pathlib import Path
-
 import numpy as np
-import pytest
 from ase import Atoms
 from ase.build import fcc111, graphene
-from ase.io import write
 
-from scgo.runner_surface import (
-    make_surface_config,
-    read_full_composition_from_first_xyz,
-)
+from scgo.runner_surface import make_surface_config
+from scgo.surface.composition import full_adsorbate_slab_composition
 from scgo.surface.config import SurfaceSystemConfig
+from scgo.utils.helpers import get_cluster_formula
 
 # ---------------------------------------------------------------------------
 # make_surface_config
@@ -70,25 +65,16 @@ class TestMakeSurfaceConfig:
 
 
 # ---------------------------------------------------------------------------
-# read_full_composition_from_first_xyz
+# full_adsorbate_slab_composition
 # ---------------------------------------------------------------------------
 
 
-class TestReadFullComposition:
-    def test_missing_dir_raises(self, tmp_path: Path) -> None:
-        with pytest.raises(FileNotFoundError, match="not found"):
-            read_full_composition_from_first_xyz(tmp_path / "nope")
-
-    def test_empty_dir_raises(self, tmp_path: Path) -> None:
-        empty = tmp_path / "final_unique_minima"
-        empty.mkdir()
-        with pytest.raises(FileNotFoundError, match="No final_unique_minima"):
-            read_full_composition_from_first_xyz(empty)
-
-    def test_happy_path(self, tmp_path: Path) -> None:
-        d = tmp_path / "final_unique_minima"
-        d.mkdir()
-        atoms = Atoms("Cu4", positions=[[0, 0, 0], [1, 0, 0], [0, 1, 0], [0, 0, 1]])
-        write(str(d / "min_01.xyz"), atoms)
-        result = read_full_composition_from_first_xyz(d)
-        assert result == ["Cu", "Cu", "Cu", "Cu"]
+def test_full_adsorbate_slab_composition_matches_ga_template_order() -> None:
+    """Same ordering as ga_go surface Atoms: slab symbols then adsorbate."""
+    slab = _graphene_slab()
+    cfg = make_surface_config(slab)
+    adsorbate = ["Pt", "Pt", "Pt"]
+    full = full_adsorbate_slab_composition(adsorbate, cfg)
+    from_ga_style = list(slab.get_chemical_symbols()) + adsorbate
+    assert full == from_ga_style
+    assert get_cluster_formula(full) == get_cluster_formula(from_ga_style)

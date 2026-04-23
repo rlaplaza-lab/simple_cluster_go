@@ -137,14 +137,9 @@ _ALGORITHM_REGISTRY: dict[str, dict[str, Any]] = {
 }
 
 
-def _get_default_calculator() -> Calculator:
-    """Get default calculator instance."""
-    return EMT()
-
-
 def _ensure_calculator(calculator: Calculator | None) -> Calculator:
     """Return *calculator* or a default EMT instance when None."""
-    return calculator or _get_default_calculator()
+    return calculator or EMT()
 
 
 def _validate_calculator_compatibility(
@@ -405,9 +400,14 @@ def scgo(
     optimizer_kwargs = filter_dict_keys(
         global_optimizer_kwargs, {"n_trials", "run_id", "clean"}
     )
-    system_type = optimizer_kwargs.get("system_type", "gas_cluster")
+    system_type = optimizer_kwargs.get("system_type")
     if not isinstance(system_type, str):
-        raise ValueError("system_type must be a string literal.")
+        system_type = (
+            "surface_cluster"
+            if optimizer_kwargs.get("surface_config") is not None
+            else "gas_cluster"
+        )
+        optimizer_kwargs["system_type"] = system_type
     policy = get_system_policy(system_type)
 
     ensure_directory_exists(output_dir)

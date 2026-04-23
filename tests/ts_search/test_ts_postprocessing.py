@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 from ase import Atoms
 from ase.constraints import FixAtoms
+from ase.io import read as ase_read
 
 from scgo.surface.config import SurfaceSystemConfig
 from scgo.ts_search.transition_state_io import write_final_unique_ts
@@ -140,6 +141,35 @@ def test_write_final_unique_ts_ignores_fixed_slab_atom_differences(tmp_path):
     summary = write_final_unique_ts(ts_results, out, ["Pt", "Pt", "Pt", "Pt"])
     assert len(summary) == 1
     assert {edge["pair_id"] for edge in summary[0]["connected_edges"]} == {"0_1", "1_2"}
+
+
+def test_write_final_unique_ts_surface_aware_keeps_absolute_positions(tmp_path):
+    ts = Atoms(
+        "Pt3",
+        positions=[[5.0, 5.0, 0.0], [6.2, 5.0, 0.0], [5.6, 5.4, 1.8]],
+        cell=[12.0, 12.0, 16.0],
+        pbc=[True, True, False],
+    )
+    ts_results = [
+        {
+            "pair_id": "0_1",
+            "status": "success",
+            "neb_converged": True,
+            "transition_state": ts,
+            "ts_energy": 0.5,
+            "barrier_height": 0.2,
+        }
+    ]
+    out = str(tmp_path / "ts_results_surface")
+    os.makedirs(out, exist_ok=True)
+    write_final_unique_ts(
+        ts_results,
+        out,
+        ["Pt", "Pt", "Pt"],
+        surface_aware=True,
+    )
+    written = ase_read(Path(out) / "final_unique_ts" / "Pt3_ts_01_pair_0_1.xyz")
+    assert written.positions == pytest.approx(ts.positions)
 
 
 @pytest.mark.parametrize(

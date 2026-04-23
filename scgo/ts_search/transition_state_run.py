@@ -17,6 +17,7 @@ from scgo.constants import (
     DEFAULT_ENERGY_TOLERANCE,
     DEFAULT_NEB_TANGENT_METHOD,
 )
+from scgo.surface.composition import full_adsorbate_slab_composition
 from scgo.surface.config import SurfaceSystemConfig
 from scgo.surface.constraints import (
     attach_slab_constraints_from_surface_config,
@@ -337,8 +338,8 @@ def run_transition_state_search(
     geodesic interpolation for initial path generation.
 
     Args:
-        composition: List of atomic symbols specifying the cluster composition,
-            e.g., ["Pt", "Pt", "Pt"] for Pt₃.
+        composition: Atomic symbols: gas-phase cluster, or **adsorbate only** (same
+            ordering as GO) when ``system_type`` is a surface type and ``surface_config`` is set.
         output_dir: Base directory containing run_*/ subdirectories with
             previous optimization results. If None, uses ``{formula}_searches``.
         params: Dictionary of run parameters including:
@@ -377,14 +378,26 @@ def run_transition_state_search(
     cleanup_torch_cuda(logger=logger)
 
     validate_composition(composition, allow_empty=False)
-    resolved_system_type = (
-        system_type if isinstance(system_type, str) else "gas_cluster"
-    )
+    if isinstance(system_type, str):
+        resolved_system_type: SystemType = (
+            "surface_cluster"
+            if surface_config is not None and system_type == "gas_cluster"
+            else system_type
+        )
+    else:
+        resolved_system_type = (
+            "surface_cluster" if surface_config is not None else "gas_cluster"
+        )
     validate_system_type_settings(
         system_type=resolved_system_type,
         surface_config=surface_config,
     )
     system_policy = get_system_policy(resolved_system_type)
+    adsorbate_composition = list(composition)
+    if system_policy.uses_surface:
+        composition = full_adsorbate_slab_composition(
+            adsorbate_composition, surface_config
+        )
     if system_policy.neb_force_mic:
         neb_interpolation_mic = True
     if system_policy.neb_disable_alignment:
@@ -394,11 +407,16 @@ def run_transition_state_search(
     if use_parallel_neb and not use_torchsim:
         raise ValueError("use_parallel_neb requires use_torchsim=True")
 
+    path_key_formula = (
+        get_cluster_formula(adsorbate_composition)
+        if system_policy.uses_surface
+        else get_cluster_formula(composition)
+    )
     formula = get_cluster_formula(composition)
     ts_output_dir = (
         str(Path(output_dir))
         if output_dir is not None
-        else str(Path(f"{formula}_searches"))
+        else str(Path(f"{path_key_formula}_searches"))
     )
 
     if params is None:
@@ -611,6 +629,7 @@ def run_transition_state_search(
             minima=minima,
             minima_base_dir=ts_output_dir,
             run_context=run_context,
+            surface_aware=system_policy.uses_surface,
         )
 
         if tag_ts_in_db and unique_ts:

@@ -156,11 +156,14 @@ def ga_go(
     profile_counters: dict[str, int] = {"offspring_created": 0}
     per_generation: list[dict[str, Any]] | None = [] if detailed_timing else None
 
-    if system_type == "gas_cluster" and surface_config is not None:
-        system_type = "surface_cluster"
+    resolved_system_type: SystemType = (
+        "surface_cluster"
+        if system_type == "gas_cluster" and surface_config is not None
+        else system_type
+    )
     validate_composition(composition, allow_empty=False, allow_tuple=False)
     validate_system_type_settings(
-        system_type=system_type, surface_config=surface_config
+        system_type=resolved_system_type, surface_config=surface_config
     )
     validate_ga_common_params(
         niter=niter,
@@ -183,7 +186,7 @@ def ga_go(
 
     n_to_optimize = len(composition)
 
-    surface_mode = uses_surface(system_type)
+    surface_mode = uses_surface(resolved_system_type)
     if surface_mode:
         if not isinstance(surface_config, SurfaceSystemConfig):
             raise TypeError(
@@ -228,7 +231,7 @@ def ga_go(
         n_to_optimize,
         rng,
         slab_atoms=slab_for_pairing,
-        system_type=system_type,
+        system_type=resolved_system_type,
     )
 
     adaptive_config = get_adaptive_mutation_config(
@@ -257,7 +260,7 @@ def ga_go(
         blmin=blmin,
         rng=rng,
         use_adaptive=use_adaptive_mutations,
-        system_type=system_type,
+        system_type=resolved_system_type,
         n_slab=n_slab,
         surface_normal_axis=(surface_config.surface_normal_axis if surface_mode else 2),
     )
@@ -357,7 +360,7 @@ def ga_go(
         for cand in starting_population:
             validate_structure_for_system_type(
                 cand,
-                system_type=system_type,
+                system_type=resolved_system_type,
                 surface_config=surface_config,
                 n_slab=n_slab,
             )
@@ -394,7 +397,7 @@ def ga_go(
             )
             validate_structure_for_system_type(
                 cand,
-                system_type=system_type,
+                system_type=resolved_system_type,
                 surface_config=surface_config,
                 n_slab=n_slab if surface_mode else None,
             )
@@ -403,7 +406,7 @@ def ga_go(
                 cand,
                 generation=0,
                 run_id=run_id,
-                **slab_ga_metadata_extras(surface_config, n_slab, system_type),
+                **slab_ga_metadata_extras(surface_config, n_slab, resolved_system_type),
             )
 
             t_start = perf_counter()
@@ -523,7 +526,7 @@ def ga_go(
                 try:
                     validate_structure_for_system_type(
                         a3,
-                        system_type=system_type,
+                        system_type=resolved_system_type,
                         surface_config=surface_config,
                         n_slab=n_slab,
                     )
@@ -565,7 +568,7 @@ def ga_go(
                 )
                 validate_structure_for_system_type(
                     a3,
-                    system_type=system_type,
+                    system_type=resolved_system_type,
                     surface_config=surface_config,
                     n_slab=n_slab if surface_mode else None,
                 )
@@ -575,7 +578,9 @@ def ga_go(
                     a3,
                     generation=generation,
                     run_id=run_id,
-                    **slab_ga_metadata_extras(surface_config, n_slab, system_type),
+                    **slab_ga_metadata_extras(
+                        surface_config, n_slab, resolved_system_type
+                    ),
                 )
                 t_start = perf_counter()
                 retry_with_backoff(

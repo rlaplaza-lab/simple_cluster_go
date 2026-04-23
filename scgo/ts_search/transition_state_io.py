@@ -385,6 +385,8 @@ def _cluster_ts_candidates_globally(
     energy_tolerance: float,
     similarity_tolerance: float,
     similarity_pair_cor_max: float,
+    *,
+    use_mic: bool = False,
 ) -> list[list[tuple[float, Atoms, str, tuple[int, int], dict[str, Any]]]]:
     """Cluster TS candidates by energy + geometry in one deterministic pass."""
     if not candidates:
@@ -406,6 +408,7 @@ def _cluster_ts_candidates_globally(
                 atoms,
                 tolerance=similarity_tolerance,
                 pair_cor_max=similarity_pair_cor_max,
+                use_mic=use_mic,
             )
             if are_similar:
                 matched_idx = idx
@@ -430,6 +433,7 @@ def write_final_unique_ts(
     minima: list | None = None,
     minima_base_dir: str | None = None,
     run_context: dict[str, Any] | None = None,
+    surface_aware: bool = False,
 ) -> list[dict[str, Any]]:
     """Deduplicate successful TS geometries globally and write unique `.xyz` files.
 
@@ -495,6 +499,7 @@ def write_final_unique_ts(
         energy_tolerance,
         similarity_tolerance,
         similarity_pair_cor_max,
+        use_mic=surface_aware,
     )
 
     rank = 0
@@ -544,7 +549,8 @@ def write_final_unique_ts(
         rank += 1
         atoms_clean = atoms.copy()
         atoms_clean.calc = None
-        atoms_clean.center()
+        if not surface_aware:
+            atoms_clean.center()
         if "tags" in atoms_clean.arrays:
             del atoms_clean.arrays["tags"]
 

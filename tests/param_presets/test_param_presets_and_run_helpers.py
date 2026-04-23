@@ -12,14 +12,15 @@ from scgo.param_presets import (
     get_testing_params,
 )
 from scgo.utils.run_helpers import (
+    _get_calculators,
     _normalize_optimizer_class,
     _resolve_fitness_strategy,
+    get_calculator_class,
     initialize_params,
     log_configuration,
     resolve_auto_params,
     resolve_diversity_params,
     validate_algorithm_params,
-    validate_calculator,
 )
 
 
@@ -61,6 +62,8 @@ def test_get_minimal_ga_params_merged_with_defaults():
             assert merged_ga[key] == minimal["optimizer_params"]["ga"][key]
         else:
             assert merged_ga[key] == default_value
+
+    assert merged_ga["n_jobs_offspring"] == 1
 
 
 def test_initialize_params_deep_merge_user_overrides():
@@ -474,22 +477,24 @@ def test_cleanup_torch_cuda_runs_safely():
     cleanup_torch_cuda()
 
 
-class TestValidateCalculator:
-    """Tests for validate_calculator function."""
+class TestGetCalculatorClass:
+    """Tests for get_calculator_class function."""
 
-    def test_validate_calculator_valid(self):
-        """Test validate_calculator passes for valid calculator name."""
-        validate_calculator("EMT")
+    def test_get_calculator_class_valid(self):
+        """Test get_calculator_class returns class for valid calculator name."""
+        calc_cls = get_calculator_class("EMT")
+        assert calc_cls is not None
 
-    def test_validate_calculator_unknown_raises(self):
-        """Test validate_calculator raises error for unknown calculator."""
+    def test_get_calculator_class_unknown_raises(self):
+        """Test get_calculator_class raises error for unknown calculator."""
         with pytest.raises(ValueError, match="Unknown calculator"):
-            validate_calculator("UNKNOWN_CALC")
+            get_calculator_class("UNKNOWN_CALC")
 
-    def test_validate_calculator_unavailable_raises(self):
-        """Test validate_calculator raises error for unavailable calculator."""
-        # Use custom calculators dict with None value
-        calculators_dict = {"TEST": None}
-
+    def test_get_calculator_class_unavailable_raises(self, monkeypatch):
+        """Test get_calculator_class raises error for unavailable calculator."""
+        monkeypatch.setattr(
+            "scgo.utils.run_helpers._CALCULATORS_CACHE",
+            {"EMT": _get_calculators()["EMT"], "TEST": None},
+        )
         with pytest.raises(ValueError, match="not available"):
-            validate_calculator("TEST", calculators_dict=calculators_dict)
+            get_calculator_class("TEST")

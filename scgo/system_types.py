@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from collections import Counter
 from dataclasses import dataclass
-from typing import Literal
+from typing import Literal, TypedDict
 
 from ase import Atoms
 
@@ -20,6 +21,13 @@ SystemType = Literal[
     "gas_cluster_adsorbate",
     "surface_cluster_adsorbate",
 ]
+
+
+class AdsorbateDefinition(TypedDict, total=False):
+    """Optional explicit role definition for adsorbate workflows."""
+
+    adsorbate_symbols: list[str]
+    core_symbols: list[str]
 
 
 @dataclass(frozen=True)
@@ -106,8 +114,11 @@ def validate_system_type_settings(
         raise ValueError(
             f"system_type={system_type!r} requires surface_config to be provided."
         )
-    # For non-surface systems, tolerate an optional surface_config payload so
-    # mixed preset dictionaries can be reused; callers may ignore it.
+    if not surface_type and surface_config is not None:
+        raise ValueError(
+            f"system_type={system_type!r} does not allow surface_config. "
+            "Use surface_cluster or surface_cluster_adsorbate."
+        )
 
 
 def uses_surface(system_type: SystemType) -> bool:
@@ -144,3 +155,62 @@ def validate_structure_for_system_type(
         ok, msg = validate_combined_cluster_structure(atoms)
         if not ok:
             raise ValueError(msg)
+
+
+def validate_adsorbate_definition(
+    *,
+    system_type: SystemType,
+    composition: list[str],
+    adsorbate_definition: AdsorbateDefinition | None,
+    context: str,
+) -> None:
+    """Validate explicit adsorbate role definition for high-level runners."""
+    policy = get_system_policy(system_type)
+    if not policy.has_adsorbate:
+        if adsorbate_definition is not None:
+            raise ValueError(
+                f"{context} received adsorbate_definition for non-adsorbate "
+                f"system_type={system_type!r}."
+            )
+        return
+
+    if adsorbate_definition is None:
+        raise ValueError(
+            f"{context} requires adsorbate_definition when system_type={system_type!r}."
+        )
+
+    adsorbate_symbols_raw = adsorbate_definition.get("adsorbate_symbols")
+    if not isinstance(adsorbate_symbols_raw, list) or not adsorbate_symbols_raw:
+        raise ValueError(
+            "adsorbate_definition['adsorbate_symbols'] must be a non-empty list[str]."
+        )
+    adsorbate_symbols = [str(s) for s in adsorbate_symbols_raw]
+
+    composition_counts = Counter(composition)
+    adsorbate_counts = Counter(adsorbate_symbols)
+    missing = {
+        symbol: count
+        for symbol, count in adsorbate_counts.items()
+        if composition_counts.get(symbol, 0) < count
+    }
+    if missing:
+        raise ValueError(
+            "adsorbate_definition['adsorbate_symbols'] exceeds available composition "
+            f"counts. Missing requirements: {missing}. "
+            f"Composition={dict(composition_counts)}"
+        )
+
+    core_symbols_raw = adsorbate_definition.get("core_symbols")
+    if core_symbols_raw is None:
+        return
+    if not isinstance(core_symbols_raw, list) or not core_symbols_raw:
+        raise ValueError(
+            "adsorbate_definition['core_symbols'] must be a non-empty list[str] when set."
+        )
+    core_symbols = {str(s) for s in core_symbols_raw}
+    overlap = core_symbols.intersection(set(adsorbate_symbols))
+    if overlap:
+        raise ValueError(
+            "adsorbate_definition core_symbols and adsorbate_symbols must be disjoint; "
+            f"overlap={sorted(overlap)}"
+        )

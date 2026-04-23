@@ -17,6 +17,7 @@ from ase.optimize import LBFGS
 from ase.optimize.optimize import Optimizer
 from tqdm import tqdm
 
+from scgo.algorithms.ga_common import slab_ga_metadata_extras
 from scgo.constants import (
     BOLTZMANN_K_EV_PER_K,
     DEFAULT_COMPARATOR_TOL,
@@ -24,7 +25,7 @@ from scgo.constants import (
     DEFAULT_PAIR_COR_MAX,
 )
 from scgo.database import HPC_DATABASE_EXCEPTIONS, SCGODatabaseManager, setup_database
-from scgo.database.metadata import persist_provenance
+from scgo.database.metadata import add_metadata, persist_provenance
 from scgo.database.sync import retry_with_backoff
 from scgo.surface.config import SurfaceSystemConfig
 from scgo.surface.constraints import attach_slab_constraints_from_surface_config
@@ -345,6 +346,10 @@ def bh_go(
             surface_config=surface_config,
             n_slab=n_slab if surface_mode else None,
         )
+        add_metadata(
+            a_current,
+            **slab_ga_metadata_extras(surface_config, n_slab, system_type),
+        )
 
         if run_id is not None and a_current is not None:
             persist_provenance(a_current, run_id=run_id)
@@ -428,6 +433,10 @@ def bh_go(
                 system_type=system_type,
                 surface_config=surface_config,
                 n_slab=n_slab if surface_mode else None,
+            )
+            add_metadata(
+                a_trial,
+                **slab_ga_metadata_extras(surface_config, n_slab, system_type),
             )
             if run_id is not None:
                 persist_provenance(a_trial, run_id=run_id)

@@ -10,10 +10,19 @@ from scgo.calculators.torchsim_helpers import TorchSimBatchRelaxer
 from scgo.param_presets import _get_base_ga_benchmark_params
 
 
-def get_torchsim_ga_params_impl(seed: int) -> dict[str, Any]:
-    """Return GA params using TorchSim relaxer."""
-    params = _get_base_ga_benchmark_params(seed)
+def get_torchsim_ga_params_impl(
+    seed: int, *, model_name: str | None = None
+) -> dict[str, Any]:
+    """Return GA params using TorchSim relaxer.
 
+    The relaxer's MACE model matches ``calculator_kwargs['model_name']`` (set here
+    when ``model_name`` is passed, or left from defaults / user edits).
+    """
+    params = _get_base_ga_benchmark_params(seed)
+    if model_name is not None:
+        params["calculator_kwargs"]["model_name"] = model_name
+
+    mace_model = params["calculator_kwargs"].get("model_name", "mace_matpes_0")
     fmax_val = params["optimizer_params"]["ga"]["fmax"]
     niter_local = params["optimizer_params"]["ga"]["niter_local_relaxation"]
 
@@ -22,7 +31,7 @@ def get_torchsim_ga_params_impl(seed: int) -> dict[str, Any]:
             "relaxer": TorchSimBatchRelaxer(
                 force_tol=fmax_val,
                 optimizer_name="fire",
-                mace_model_name="mace_matpes_0",
+                mace_model_name=mace_model,
                 seed=seed,
                 max_steps=niter_local,
                 dtype=torch.float32,

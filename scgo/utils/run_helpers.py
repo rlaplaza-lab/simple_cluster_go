@@ -103,34 +103,6 @@ def get_calculator_class(calculator_name: str) -> type:
     return calculator_class
 
 
-def validate_calculator(
-    calculator_name: str, calculators_dict: dict[str, Any] | None = None
-) -> None:
-    """Validate calculator availability.
-
-    Args:
-        calculator_name: Name of the calculator to validate.
-        calculators_dict: Dictionary of available calculators. If None, uses
-            internal _CALCULATORS.
-
-    Raises:
-        ValueError: If calculator name is unknown or not available.
-    """
-    calculators_dict = calculators_dict or _get_calculators()
-
-    if calculator_name not in calculators_dict:
-        raise ValueError(
-            f"Unknown calculator: {calculator_name}. "
-            f"Available calculators: {list(calculators_dict.keys())}",
-        )
-
-    if calculators_dict[calculator_name] is None:
-        raise ValueError(
-            f"Calculator {calculator_name} is not available. "
-            f"Please install the required dependencies.",
-        )
-
-
 def validate_algorithm_params(
     algo_params: dict[str, Any],
     chosen_go: str,
@@ -174,7 +146,6 @@ def validate_algorithm_params(
             "surface_config",
             "n_slab",
             "write_timing_json",
-            "write_profile",
             "detailed_timing",
         },
         "ga": {
@@ -207,7 +178,6 @@ def validate_algorithm_params(
             "surface_config",
             "system_type",
             "write_timing_json",
-            "write_profile",
             "detailed_timing",
         },
     }
@@ -227,11 +197,8 @@ def _resolve_timing_params_into(
 ) -> None:
     if "write_timing_json" in algo_params:
         base_kwargs["write_timing_json"] = bool(algo_params["write_timing_json"])
-    elif "write_profile" in algo_params:
-        base_kwargs["write_timing_json"] = bool(algo_params["write_profile"])
     if "detailed_timing" in algo_params:
         base_kwargs["detailed_timing"] = bool(algo_params["detailed_timing"])
-    base_kwargs.pop("write_profile", None)
 
 
 def resolve_auto_params(
@@ -261,18 +228,6 @@ def resolve_auto_params(
         if niter_local_val in ("auto", None)
         else niter_local_val
     )
-    system_type_raw = algo_params.get("system_type")
-    system_type = system_type_raw if isinstance(system_type_raw, str) else None
-    if system_type is None and algo_params.get("surface_config") is not None:
-        system_type = "surface_cluster"
-    if (
-        chosen_go == "ga"
-        and system_type is not None
-        and get_system_policy(system_type).uses_surface
-    ):
-        nlr = int(resolved["niter_local_relaxation"])
-        resolved["niter_local_relaxation"] = max(SURFACE_GA_MIN_LOCAL_RELAX_STEPS, nlr)
-
     if chosen_go == "ga":
         pop_size_val = algo_params.get("population_size")
         resolved["population_size"] = (
@@ -280,6 +235,11 @@ def resolve_auto_params(
             if pop_size_val in ("auto", None)
             else pop_size_val
         )
+        if algo_params.get("surface_config") is not None:
+            resolved["niter_local_relaxation"] = max(
+                SURFACE_GA_MIN_LOCAL_RELAX_STEPS,
+                int(resolved["niter_local_relaxation"]),
+            )
 
     return resolved
 
@@ -389,15 +349,16 @@ def resolve_and_validate_system_type(
     *,
     algo_params: dict[str, Any],
 ) -> SystemType:
-    """Require explicit system_type and validate companion settings."""
+    """Resolve system_type and validate companion settings."""
     system_type_raw = algo_params.get("system_type")
-    if not isinstance(system_type_raw, str):
-        if algo_params.get("surface_config") is not None:
+    has_surface_config = algo_params.get("surface_config") is not None
+    if isinstance(system_type_raw, str):
+        if has_surface_config and system_type_raw == "gas_cluster":
             resolved_type: SystemType = "surface_cluster"
         else:
-            resolved_type = "gas_cluster"
+            resolved_type = system_type_raw
     else:
-        resolved_type = system_type_raw
+        resolved_type = "surface_cluster" if has_surface_config else "gas_cluster"
     validate_system_type_settings(
         system_type=resolved_type,
         surface_config=algo_params.get("surface_config"),
@@ -428,16 +389,15 @@ def prepare_algorithm_kwargs(
     """
     resolved = resolve_auto_params(algo_params, composition, chosen_go)
     system_type: SystemType | None = None
-    if chosen_go in {"simple", "bh", "ga"}:
-        system_type = resolve_and_validate_system_type(
-            algo_params=algo_params,
-        )
-        if chosen_go == "simple":
-            policy = get_system_policy(system_type)
-            if policy.uses_surface or policy.has_adsorbate:
-                raise ValueError(
-                    f"simple optimizer only supports system_type='gas_cluster', got {system_type!r}."
-                )
+    system_type = resolve_and_validate_system_type(
+        algo_params=algo_params,
+    )
+    if chosen_go == "simple":
+        policy = get_system_policy(system_type)
+        if policy.uses_surface or policy.has_adsorbate:
+            raise ValueError(
+                f"simple optimizer only supports system_type='gas_cluster', got {system_type!r}."
+            )
 
     base_kwargs = filter_dict_keys(
         algo_params, {"n_trials", "niter", "population_size"}
