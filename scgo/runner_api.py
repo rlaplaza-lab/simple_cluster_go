@@ -71,27 +71,6 @@ def _as_composition_list(items: Iterable[CompositionInput]) -> list[list[str]]:
     return out
 
 
-def _go_campaign(
-    compositions: list[list[str]],
-    *,
-    params: dict | None,
-    seed: int | None,
-    verbosity: int,
-    run_id: str | None,
-    clean: bool,
-    output_dir: str | Path | None,
-) -> dict[str, list[tuple[float, Atoms]]]:
-    return run_scgo_campaign_arbitrary_compositions(
-        compositions,
-        params=params,
-        seed=seed,
-        verbosity=verbosity,
-        run_id=run_id,
-        clean=clean,
-        output_dir=output_dir,
-    )
-
-
 def _resolved_path(path: str | Path | None) -> Path | None:
     if path is None:
         return None
@@ -466,7 +445,7 @@ def run_go_campaign(
         )
     out_path = _resolved_path(output_dir)
     t0 = perf_counter()
-    campaign = _go_campaign(
+    campaign = run_scgo_campaign_arbitrary_compositions(
         compositions_local,
         params=effective_params,
         seed=effective_seed,

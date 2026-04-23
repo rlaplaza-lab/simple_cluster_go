@@ -27,14 +27,13 @@ from scgo.database.discovery import list_discovered_db_paths_with_run_trial
 from scgo.database.exceptions import DatabaseSetupError
 from scgo.database.metadata import add_metadata, get_metadata
 from scgo.database.registry import get_registry
-from scgo.database.retry import PRESET_AGGRESSIVE, retry_on_lock
 from scgo.database.schema import (
     CURRENT_SCHEMA_VERSION,
     is_scgo_database,
     set_schema_version,
 )
 from scgo.database.streaming import _iter_relaxed_minima_from_da
-from scgo.database.sync import retry_with_backoff
+from scgo.database.sync import PRESET_AGGRESSIVE, retry_on_lock, retry_with_backoff
 from scgo.utils.helpers import (
     ensure_directory_exists,
     extract_energy_from_atoms,

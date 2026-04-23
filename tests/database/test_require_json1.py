@@ -24,10 +24,8 @@ def test_open_db_succeeds_when_json1_available(tmp_path):
     # Sanity check using a real connection; should not raise
     db_path = tmp_path / "test_ok.db"
     db_path.touch()
-    with conn_mod.open_db(db_path) as db:
-        # Should be able to run a simple metadata query
-        # DataConnection doesn't have .execute, but we can get it from .c.connection
-        cur = db.c.connection.execute("SELECT 1")
+    with conn_mod.open_db(db_path) as db, db.c.managed_connection() as conn:
+        cur = conn.execute("SELECT 1")
         assert cur.fetchone()[0] == 1
 
 

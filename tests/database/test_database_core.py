@@ -447,7 +447,7 @@ class TestTransactions:
             pass
 
         # Use retry_transaction for database transactions with lock retry
-        from scgo.database.retry import RetryConfig, retry_transaction
+        from scgo.database.sync import RetryConfig, retry_transaction
 
         config = RetryConfig(max_retries=3, initial_delay=0.1)
         with (

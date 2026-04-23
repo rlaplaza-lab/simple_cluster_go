@@ -120,7 +120,13 @@ from scgo.database.streaming import (
 )
 from scgo.database.sync import (
     HPC_DATABASE_EXCEPTIONS,
+    PRESET_AGGRESSIVE,
+    PRESET_CONSERVATIVE,
+    RetryConfig,
     database_retry,
+    is_retryable_error,
+    retry_on_lock,
+    retry_transaction,
     retry_with_backoff,
 )
 from scgo.database.transactions import (
@@ -165,7 +171,13 @@ __all__ = [
     "update_metadata",
     "filter_by_metadata",
     "HPC_DATABASE_EXCEPTIONS",
+    "RetryConfig",
+    "PRESET_AGGRESSIVE",
+    "PRESET_CONSERVATIVE",
     "database_retry",
+    "is_retryable_error",
+    "retry_on_lock",
+    "retry_transaction",
     "retry_with_backoff",
     "DatabaseRegistry",
     "get_registry",

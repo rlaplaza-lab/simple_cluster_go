@@ -293,7 +293,7 @@ def mark_final_minima_in_db(
     """
     from scgo.database.connection import open_db
     from scgo.database.discovery import DatabaseDiscovery
-    from scgo.database.retry import retry_transaction
+    from scgo.database.sync import retry_transaction
 
     # Discovery tries the JSON registry first, then falls back to a recursive glob
     # under base_dir (canonical run_*/trial_* layout still matches the glob).

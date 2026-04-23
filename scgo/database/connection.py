@@ -82,14 +82,7 @@ def get_connection(
     # with cryptic sqlite OperationalErrors.
     _ensure_sqlite_json1(db_path)
 
-    # Best-effort: ensure the underlying sqlite3.Connection object is available
-    # so callers that access `db.c.connection` (used in some tests) see a live
-    # connection. Use a small helper to avoid deep nesting and to narrow
-    # exception handling while logging original tracebacks at debug level.
-    _ensure_underlying_sqlite_connection(da, db_path, busy_timeout)
-
-    # Apply busy_timeout to whatever connection exists (ours or ASE's) so that
-    # concurrent writers retry on lock instead of failing immediately.
+    # Apply busy_timeout to ASE's active connection.
     _apply_busy_timeout(da, busy_timeout)
 
     conn = getattr(getattr(da, "c", None), "connection", None)
@@ -135,26 +128,8 @@ def close_data_connection(da: DataConnection | None, log_errors: bool = True) ->
 
     try:
         if hasattr(da, "c") and da.c is not None and hasattr(da.c, "__exit__"):
-            # Check if the internal SQLite connection is still valid
-            # ASE's SQLite3Database may have its 'connection' attribute set to None
-            # if it was already closed or invalidated
-            if hasattr(da.c, "connection"):
-                if da.c.connection is None:
-                    # Connection already closed, skip cleanup
-                    return
-                # When SCGO attaches a persistent sqlite3 connection (see
-                # _ensure_underlying_sqlite_connection), ASE's SQLite3Database keeps
-                # self.connection set and only commits from managed_connection every
-                # commit_frequency writes. Closing without an explicit commit drops
-                # the open transaction and rolls back uncommitted rows.
-                with contextlib.suppress(
-                    sqlite3.OperationalError, sqlite3.DatabaseError
-                ):
-                    da.c.connection.commit()
-                with contextlib.suppress(
-                    sqlite3.OperationalError, sqlite3.DatabaseError
-                ):
-                    da.c.connection.close()
+            if hasattr(da.c, "connection") and da.c.connection is None:
+                return
 
             # SQLite3Database doesn't have close(), but has __exit__ for cleanup
             da.c.__exit__(None, None, None)
@@ -195,39 +170,6 @@ def _apply_busy_timeout(da, busy_timeout: int) -> None:
     if conn is not None:
         with contextlib.suppress(sqlite3.OperationalError):
             conn.execute(f"PRAGMA busy_timeout={busy_timeout};")
-
-
-def _ensure_underlying_sqlite_connection(da, db_path, busy_timeout: int) -> None:
-    """Attach a sqlite3.Connection to ASE's wrapper when it does not provide one."""
-    if not hasattr(da, "c"):
-        return
-
-    if getattr(da.c, "connection", None) is not None:
-        return
-
-    db_file_attr = getattr(da, "db_file_name", None) or db_path
-    try:
-        da.c.connection = sqlite3.connect(
-            str(db_file_attr), timeout=busy_timeout / 1000.0
-        )
-    except (sqlite3.OperationalError, OSError) as e:
-        logger.debug(
-            "Could not initialize underlying sqlite3 connection for %s: %s",
-            db_file_attr,
-            e,
-            exc_info=True,
-        )
-        return
-
-    if not hasattr(da.c, "change_count"):
-        try:
-            da.c.change_count = 0
-        except (AttributeError, TypeError) as e:
-            logger.debug(
-                "Could not set change_count attribute on database wrapper: %s",
-                e,
-                exc_info=True,
-            )
 
 
 @contextmanager

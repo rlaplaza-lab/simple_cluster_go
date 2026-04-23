@@ -12,7 +12,6 @@ from pathlib import Path
 from ase import Atoms
 
 from scgo.database.cache import get_global_cache
-from scgo.database.discovery import DatabaseDiscovery
 from scgo.database.helpers import (
     load_previous_run_results,
     load_reference_structures,
@@ -50,9 +49,6 @@ class SCGODatabaseManager:
         self.base_dir = Path(base_dir)
         self.enable_caching = enable_caching
         self.cache_ttl_seconds = cache_ttl_seconds
-
-        # Initialize discovery service
-        self._discovery = DatabaseDiscovery(base_dir)
 
         # Initialize unified cache
         self._cache = get_global_cache()

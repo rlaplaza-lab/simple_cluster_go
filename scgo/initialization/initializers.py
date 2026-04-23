@@ -2183,9 +2183,6 @@ def create_initial_cluster_batch(
     failed_indices: list[int] = []
     fallback_info: dict[int, tuple[str, str | None]] = {}
 
-    # Create a mapping for assignments to support retries
-    assignments_by_index = {a[0]: a for a in structure_assignments}
-
     if max_workers == 1:
         # Sequential execution
         for assignment in structure_assignments:
@@ -2197,7 +2194,6 @@ def create_initial_cluster_batch(
                 failed_indices.append(idx)
     else:
         # Parallel execution using ThreadPoolExecutor
-        max_retries = 1  # low-hanging improvement: try one retry for transient failures
         try:
             with ThreadPoolExecutor(
                 max_workers=max_workers,
@@ -2237,28 +2233,6 @@ def create_initial_cluster_batch(
                 "Structure generation interrupted by user (KeyboardInterrupt)"
             )
             raise
-
-        # Retry failed indices sequentially (cheap and robust fallback)
-        if failed_indices and max_retries > 0:
-            logger.info(f"Retrying failed indices sequentially: {failed_indices}")
-            remaining = []
-            for idx in list(set(failed_indices)):
-                assignment = assignments_by_index[idx]
-                try:
-                    _, atoms, used_strategy, fallback_from = _generate_structure(
-                        assignment
-                    )
-                    if atoms is not None:
-                        results[idx] = atoms
-                        fallback_info[idx] = (used_strategy, fallback_from)
-                    else:
-                        remaining.append(idx)
-                except (RuntimeError, ValueError, IndexError, OSError) as e:
-                    logger.exception(
-                        "Retry failed for structure index %s: %s", idx, type(e).__name__
-                    )
-                    remaining.append(idx)
-            failed_indices = remaining
 
     # Log generation failures
     if failed_indices:

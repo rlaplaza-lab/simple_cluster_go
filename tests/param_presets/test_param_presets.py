@@ -3,6 +3,7 @@
 import pytest
 from ase.build import fcc111
 
+import scgo.param_presets as param_presets_module
 from scgo.constants import DEFAULT_ENERGY_TOLERANCE, DEFAULT_NEB_TANGENT_METHOD
 from scgo.param_presets import (
     get_default_params,
@@ -148,7 +149,7 @@ def _build_mace_go_ts_like_runner(
     system_type: str,
     surface_config: SurfaceSystemConfig | None = None,
 ) -> tuple[dict, dict]:
-    go_params = get_torchsim_ga_params(seed)
+    go_params = param_presets_module.get_torchsim_ga_params(seed)
     go_params["calculator"] = "MACE"
     ga = go_params["optimizer_params"]["ga"]
     ga["system_type"] = system_type
@@ -222,6 +223,7 @@ def test_production_style_mace_go_ts_surface_has_surface_config(monkeypatch):
 def test_get_torchsim_ga_params_relaxer_uses_calculator_mace_model_name():
     """TorchSim relaxer must use the same MACE name as ``calculator_kwargs``."""
     pytest.importorskip("torch")
+    pytest.importorskip("mace")
 
     p = get_torchsim_ga_params(11, model_name="mace_mp_small")
     assert p["calculator_kwargs"]["model_name"] == "mace_mp_small"
@@ -231,6 +233,7 @@ def test_get_torchsim_ga_params_relaxer_uses_calculator_mace_model_name():
 
 def test_get_torchsim_ga_params_default_relaxer_matches_default_model():
     pytest.importorskip("torch")
+    pytest.importorskip("mace")
 
     p = get_torchsim_ga_params(3)
     assert p["calculator_kwargs"].get("model_name") == "mace_matpes_0"
