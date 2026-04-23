@@ -173,6 +173,9 @@ def validate_algorithm_params(
             "system_type",
             "surface_config",
             "n_slab",
+            "write_timing_json",
+            "write_profile",
+            "detailed_timing",
         },
         "ga": {
             "optimizer",
@@ -203,7 +206,9 @@ def validate_algorithm_params(
             "diversity_update_interval",
             "surface_config",
             "system_type",
+            "write_timing_json",
             "write_profile",
+            "detailed_timing",
         },
     }
 
@@ -215,6 +220,18 @@ def validate_algorithm_params(
                 f"{sorted(unexpected_algo_keys)}. "
                 f"Allowed keys: {sorted(valid_algo_params[chosen_go])}"
             )
+
+
+def _resolve_timing_params_into(
+    base_kwargs: dict[str, Any], algo_params: dict[str, Any]
+) -> None:
+    if "write_timing_json" in algo_params:
+        base_kwargs["write_timing_json"] = bool(algo_params["write_timing_json"])
+    elif "write_profile" in algo_params:
+        base_kwargs["write_timing_json"] = bool(algo_params["write_profile"])
+    if "detailed_timing" in algo_params:
+        base_kwargs["detailed_timing"] = bool(algo_params["detailed_timing"])
+    base_kwargs.pop("write_profile", None)
 
 
 def resolve_auto_params(
@@ -443,6 +460,9 @@ def prepare_algorithm_kwargs(
     if base_kwargs["fitness_strategy"] == "diversity":
         diversity_params = resolve_diversity_params(algo_params, params, chosen_go)
         base_kwargs.update(diversity_params)
+
+    if chosen_go in {"ga", "bh"}:
+        _resolve_timing_params_into(base_kwargs, algo_params)
 
     return base_kwargs
 

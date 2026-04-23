@@ -7,6 +7,7 @@ import json
 import os
 import sys
 from copy import deepcopy
+from time import perf_counter
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
@@ -32,6 +33,7 @@ from scgo.system_types import SystemType, get_system_policy
 from scgo.utils.helpers import extract_energy_from_atoms
 from scgo.utils.logging import get_logger
 from scgo.utils.run_helpers import cleanup_torch_cuda
+from scgo.utils.timing_report import log_timing_summary, write_timing_file
 from scgo.utils.torchsim_policy import (
     _require_torchsim,
     _require_torchsim_fairchem,
@@ -519,6 +521,7 @@ def find_transition_state(
     neb_interpolation_mic: bool = False,
     neb_tangent_method: str = DEFAULT_NEB_TANGENT_METHOD,
     system_type: SystemType | None = None,
+    write_timing_json: bool = False,
 ) -> dict[str, Any]:
     """Run NEB to locate a transition state between two structures.
 
@@ -594,7 +597,10 @@ def find_transition_state(
         product_energy=product_energy,
     )
 
+    t_wall0: float | None = None
+    neb_opt = 0.0
     try:
+        t_wall0 = perf_counter()
         if np.allclose(atoms1.get_positions(), atoms2.get_positions(), atol=1e-8):
             raise ValueError(
                 f"Endpoints are identical for pair {pair_id}; no interior TS"
@@ -664,7 +670,9 @@ def find_transition_state(
         if verbosity >= 2:
             logger.info(f"Starting NEB optimization with {optimizer.__name__}")
 
+        t_neb0 = perf_counter()
         dyn.run(fmax=fmax, steps=neb_steps)
+        neb_opt = perf_counter() - t_neb0
 
         try:
             neb_forces = neb.get_forces()
@@ -729,6 +737,28 @@ def find_transition_state(
         if verbosity >= 1:
             logger.error(
                 f"Failed to find TS for pair {pair_id}: {type(e).__name__}: {e}"
+            )
+
+    if t_wall0 is not None:
+        total_s = perf_counter() - t_wall0
+        ts_timings: dict[str, float] = {
+            "total_wall_s": total_s,
+            "neb_optimization_s": neb_opt,
+            "cpu_non_relax_s": max(0.0, total_s - neb_opt),
+        }
+        result["timings_s"] = ts_timings
+        neb_backend = "neb_torchsim" if use_torchsim else "neb_ase"
+        if verbosity >= 2:
+            log_timing_summary(logger, neb_backend, ts_timings, verbosity=verbosity)
+        if write_timing_json:
+            write_timing_file(
+                output_dir,
+                {
+                    "backend": neb_backend,
+                    "pair_id": pair_id,
+                    "timings_s": ts_timings,
+                },
+                filename=f"timing_{pair_id}.json",
             )
 
     return result

@@ -4,26 +4,21 @@ import pytest
 from ase.build import fcc111
 
 from scgo.constants import DEFAULT_ENERGY_TOLERANCE, DEFAULT_NEB_TANGENT_METHOD
-from scgo.param_presets import (
-    build_one_element_go_ts_bundle,
-    get_ts_run_kwargs,
-    get_ts_search_params,
-)
+from scgo.param_presets import get_torchsim_ga_params, get_ts_search_params
 from scgo.surface.config import SurfaceSystemConfig
 from scgo.utils.run_helpers import resolve_auto_params
+from scgo.utils.ts_runner_kwargs import coerce_ts_params_to_runner_kwargs
 
 
 def test_ts_search_params_expose_dedupe_and_tolerance_defaults():
     ts = get_ts_search_params(system_type="gas_cluster")
 
-    # Defaults must exist and be coherent with project-wide defaults
     assert ts.get("dedupe_minima", None) is True
     assert ts.get("minima_energy_tolerance", None) == pytest.approx(
         DEFAULT_ENERGY_TOLERANCE
     )
 
-    # Ensure get_ts_run_kwargs maps those keys through to the TS runner kwargs
-    kwargs = get_ts_run_kwargs(ts)
+    kwargs = coerce_ts_params_to_runner_kwargs(ts)
     assert kwargs["dedupe_minima"] is True
     assert kwargs["minima_energy_tolerance"] == pytest.approx(DEFAULT_ENERGY_TOLERANCE)
     assert kwargs.get("neb_interpolation_mic") is False
@@ -36,7 +31,7 @@ def test_ts_search_params_allow_overrides():
     ts["dedupe_minima"] = False
     ts["minima_energy_tolerance"] = 0.05
 
-    kwargs = get_ts_run_kwargs(ts)
+    kwargs = coerce_ts_params_to_runner_kwargs(ts)
     assert kwargs["dedupe_minima"] is False
     assert kwargs["minima_energy_tolerance"] == pytest.approx(0.05)
 
@@ -47,13 +42,13 @@ def test_ts_search_params_surface_config_forwarded_to_run_kwargs():
     cfg = SurfaceSystemConfig(slab=slab, fix_all_slab_atoms=True)
     ts = get_ts_search_params(system_type="surface_cluster", surface_config=cfg)
     assert ts.get("surface_config") is cfg
-    kwargs = get_ts_run_kwargs(ts)
+    kwargs = coerce_ts_params_to_runner_kwargs(ts)
     assert kwargs.get("surface_config") is cfg
 
 
-def test_ts_run_kwargs_surface_config_defaults_to_none():
+def test_coerce_ts_surface_config_defaults_to_none():
     ts = get_ts_search_params(system_type="gas_cluster")
-    kwargs = get_ts_run_kwargs(ts)
+    kwargs = coerce_ts_params_to_runner_kwargs(ts)
     assert kwargs.get("surface_config") is None
 
 
@@ -68,7 +63,7 @@ def test_ts_search_surface_regime_mic_and_fmax():
     assert ts["neb_climb"] is False
     assert ts["neb_interpolation_method"] == "idpp"
     assert ts["neb_align_endpoints"] is False
-    kwargs = get_ts_run_kwargs(ts)
+    kwargs = coerce_ts_params_to_runner_kwargs(ts)
     assert kwargs["neb_interpolation_mic"] is True
     assert kwargs["neb_n_images"] == 5
     assert kwargs["neb_climb"] is False
@@ -81,14 +76,12 @@ def test_ts_search_surface_regime_mic_and_fmax():
 
 
 def test_ts_search_step_defaults_can_be_auto():
-    """TS presets should expose 'auto' for NEB/TorchSim max-steps and pass-through to run kwargs."""
     ts = get_ts_search_params(system_type="gas_cluster")
 
-    # Defaults changed to 'auto' so callers can request size-dependent steps
     assert ts.get("neb_steps") == "auto"
     assert ts.get("torchsim_max_steps") == "auto"
 
-    kwargs = get_ts_run_kwargs(ts)
+    kwargs = coerce_ts_params_to_runner_kwargs(ts)
     assert kwargs["neb_steps"] == "auto"
     assert kwargs["torchsim_params"]["max_steps"] == "auto"
 
@@ -111,50 +104,79 @@ def test_loaders_default_to_final_unique_minima():
     assert extract_transition_states_from_database_file.__defaults__[1] is True
 
 
-def test_build_one_element_go_ts_bundle_gas():
-    pytest.importorskip("mace")
-    bundle = build_one_element_go_ts_bundle(
-        backend="mace",
-        seed=7,
+def _fake_torchsim_go(seed: int) -> dict:
+    from scgo.param_presets import get_default_params
+
+    p = get_default_params()
+    p["seed"] = seed
+    return p
+
+
+def _build_mace_go_ts_like_runner(
+    seed: int,
+    *,
+    niter: int,
+    population_size: int,
+    max_pairs: int,
+    system_type: str,
+    surface_config: SurfaceSystemConfig | None = None,
+) -> tuple[dict, dict]:
+    """Same shape as ``runners/run_pt5_*.py`` (MACE + TorchSim base + TS preset)."""
+    go = get_torchsim_ga_params(seed)
+    go["calculator"] = "MACE"
+    ga = go["optimizer_params"]["ga"]
+    ga["system_type"] = system_type
+    ga["niter"] = niter
+    ga["population_size"] = population_size
+    if surface_config is not None:
+        ga["surface_config"] = surface_config
+    ts = get_ts_search_params(
+        system_type=system_type,
+        surface_config=surface_config,
+    )
+    ts["max_pairs"] = max_pairs
+    return go, ts
+
+
+def test_production_style_mace_go_ts_gas(monkeypatch):
+    monkeypatch.setattr(
+        "scgo.param_presets.get_torchsim_ga_params",
+        _fake_torchsim_go,
+    )
+    go, ts = _build_mace_go_ts_like_runner(
+        7,
         niter=8,
         population_size=18,
         max_pairs=12,
         system_type="gas_cluster",
     )
-    assert bundle["backend"] == "mace"
-    ga = bundle["ga_params"]["optimizer_params"]["ga"]
+    ga = go["optimizer_params"]["ga"]
     assert ga["niter"] == 8
     assert ga["population_size"] == 18
-    assert bundle["ts_kwargs"]["max_pairs"] == 12
-    assert bundle["ts_kwargs"]["surface_config"] is None
+    assert ts["max_pairs"] == 12
+    assert ts.get("surface_config") is None
+    kw = coerce_ts_params_to_runner_kwargs(ts)
+    assert kw["max_pairs"] == 12
 
 
-def test_build_one_element_go_ts_bundle_surface_has_surface_config():
-    pytest.importorskip("mace")
+def test_production_style_mace_go_ts_surface_has_surface_config(monkeypatch):
+    monkeypatch.setattr(
+        "scgo.param_presets.get_torchsim_ga_params",
+        _fake_torchsim_go,
+    )
     slab = fcc111("Pt", size=(2, 2, 1), vacuum=6.0, orthogonal=True)
     slab.pbc = [True, True, True]
     cfg = SurfaceSystemConfig(slab=slab, fix_all_slab_atoms=True)
-    bundle = build_one_element_go_ts_bundle(
-        backend="mace",
-        seed=7,
+    go, ts = _build_mace_go_ts_like_runner(
+        7,
         niter=8,
         population_size=18,
         max_pairs=12,
         system_type="surface_cluster",
         surface_config=cfg,
     )
-    ga = bundle["ga_params"]["optimizer_params"]["ga"]
+    ga = go["optimizer_params"]["ga"]
     assert ga["surface_config"] is cfg
     assert resolve_auto_params(ga, ["Pt"] * 5, "ga")["niter_local_relaxation"] >= 400
-    assert bundle["ts_kwargs"]["surface_config"] is cfg
-
-
-def test_build_one_element_go_ts_bundle_validates_backend():
-    with pytest.raises(ValueError, match="backend"):
-        build_one_element_go_ts_bundle(
-            backend="emt",
-            seed=7,
-            niter=8,
-            population_size=18,
-            max_pairs=12,
-        )
+    assert ts["surface_config"] is cfg
+    assert coerce_ts_params_to_runner_kwargs(ts).get("surface_config") is cfg

@@ -1,8 +1,7 @@
-"""High-level SCGO workflows (GO, TS, GO+TS, campaigns).
+"""High-level SCGO workflows: GO, TS, GO+TS, and campaigns.
 
-``CompositionInput`` is a formula string, ``list[str]`` of symbols, or ``Atoms``
-(only symbols are used for GO). TS options beyond ``params`` / ``output_dir`` go
-in ``ts_kwargs`` (same keys as ``scgo.ts_search.transition_state_run``).
+``go`` = global-optimization params; ``ts`` = flat TS preset
+(:func:`scgo.param_presets.get_ts_search_params`), coerced inside this module.
 """
 
 from __future__ import annotations
@@ -10,7 +9,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 from pathlib import Path
 from time import perf_counter
-from typing import Any, Literal, cast
+from typing import Any
 
 from ase import Atoms
 
@@ -28,6 +27,7 @@ from scgo.ts_search.transition_state_run import (
 )
 from scgo.utils.helpers import get_cluster_formula
 from scgo.utils.logging import get_logger
+from scgo.utils.ts_runner_kwargs import coerce_ts_params_to_runner_kwargs
 from scgo.utils.validation import validate_composition
 
 type CompositionInput = str | list[str] | Atoms
@@ -90,71 +90,70 @@ def _require_system_type(system_type: SystemType | None, fn_name: str) -> System
     return system_type
 
 
+def _effective_write_timing_json(
+    write_timing_json: bool, profile_ga: bool | None
+) -> bool:
+    if profile_ga is not None:
+        return bool(profile_ga)
+    return write_timing_json
+
+
 def _with_system_type_in_optimizer_params(
     params: dict[str, Any] | None,
     *,
     system_type: SystemType,
-    profile_ga: bool = True,
+    write_timing_json: bool = False,
+    profile_ga: bool | None = None,
 ) -> dict[str, Any]:
+    effective = _effective_write_timing_json(write_timing_json, profile_ga)
     effective_params = dict(params or {})
     optimizer_params = dict(effective_params.get("optimizer_params", {}))
     for algo in _ALGO_KEYS:
         algo_cfg = dict(optimizer_params.get(algo, {}))
         algo_cfg["system_type"] = system_type
-        if algo == "ga":
-            algo_cfg.setdefault("write_profile", profile_ga)
+        if algo in ("ga", "bh"):
+            algo_cfg.setdefault("write_timing_json", effective)
         optimizer_params[algo] = algo_cfg
     effective_params["optimizer_params"] = optimizer_params
     return effective_params
 
 
-def _require_ts_kwargs(
-    ts_kwargs: dict[str, Any] | None,
+def _coerce_ts_for_runner(
+    ts: dict[str, Any] | None,
     *,
     fn_name: str,
     system_type: SystemType,
 ) -> dict[str, Any]:
-    if not ts_kwargs:
+    if not ts:
         raise ValueError(
-            f"ts_kwargs is required for {fn_name}. Build it with "
-            "get_ts_run_kwargs(get_ts_search_params(...))."
+            f"ts is required for {fn_name}. Build with get_ts_search_params(...)."
         )
-    ts_kwargs_local = dict(ts_kwargs)
-    ts_system_type = ts_kwargs_local.get("system_type")
-    if not isinstance(ts_system_type, str):
-        raise ValueError(f"ts_kwargs['system_type'] is required for {fn_name}.")
-    if ts_system_type != system_type:
-        raise ValueError(
-            f"{fn_name} system_type mismatch: argument={system_type!r}, "
-            f"ts_kwargs['system_type']={ts_system_type!r}."
-        )
-    return ts_kwargs_local
+    flat = {**ts, "system_type": system_type}
+    return coerce_ts_params_to_runner_kwargs(flat)
+
+
+def _calculator_slug_from_go(go: dict[str, Any] | None) -> str:
+    c = str((go or {}).get("calculator", "MACE")).strip().upper()
+    if c in ("MACE", "UMA"):
+        return c.lower()
+    return c.lower() or "calc"
+
+
+def _default_go_ts_output_path(
+    composition: list[str],
+    *,
+    go: dict[str, Any],
+    output_stem: str | None,
+    output_root: str | Path | None,
+) -> Path:
+    root = output_root if output_root is not None else Path.cwd() / "scgo_runs"
+    p = Path(root).expanduser().resolve()
+    stem = output_stem or get_cluster_formula(composition)
+    return (p / f"{stem}_{_calculator_slug_from_go(go)}").resolve()
 
 
 def _log_completion(kind: str, *, elapsed_s: float, details: str) -> None:
     _LOGGER.info("%s completed in %.2f s (%s)", kind, elapsed_s, details)
-
-
-def normalize_backend(backend: str) -> Literal["mace", "uma"]:
-    b = str(backend).strip().lower()
-    if b not in ("mace", "uma"):
-        raise ValueError(f"backend must be 'mace' or 'uma', got {backend!r}")
-    return cast(Literal["mace", "uma"], b)
-
-
-def resolve_runner_output_dir(
-    *,
-    default_output_parent: Path,
-    default_output_subdir: str,
-    backend: str,
-    output_dir: str | Path | None,
-) -> Path:
-    backend_norm = normalize_backend(backend)
-    if output_dir is None:
-        return (
-            default_output_parent / f"{default_output_subdir}_{backend_norm}"
-        ).resolve()
-    return cast(Path, _resolved_path(output_dir))
 
 
 def run_go(
@@ -167,12 +166,16 @@ def run_go(
     output_dir: str | Path | None = None,
     calculator_for_global_optimization: Any | None = None,
     system_type: SystemType | None = None,
-    profile_ga: bool = True,
+    write_timing_json: bool = False,
+    profile_ga: bool | None = None,
     log_summary: bool = True,
 ) -> list[tuple[float, Atoms]]:
     system_type_local = _require_system_type(system_type, "run_go")
     effective_params = _with_system_type_in_optimizer_params(
-        params, system_type=system_type_local, profile_ga=profile_ga
+        params,
+        system_type=system_type_local,
+        write_timing_json=write_timing_json,
+        profile_ga=profile_ga,
     )
     out_path = _resolved_path(output_dir)
     t0 = perf_counter()
@@ -204,12 +207,16 @@ def run_go_campaign(
     clean: bool = False,
     output_dir: str | Path | None = None,
     system_type: SystemType | None = None,
-    profile_ga: bool = True,
+    write_timing_json: bool = False,
+    profile_ga: bool | None = None,
     log_summary: bool = True,
 ) -> dict[str, list[tuple[float, Atoms]]]:
     system_type_local = _require_system_type(system_type, "run_go_campaign")
     effective_params = _with_system_type_in_optimizer_params(
-        params, system_type=system_type_local, profile_ga=profile_ga
+        params,
+        system_type=system_type_local,
+        write_timing_json=write_timing_json,
+        profile_ga=profile_ga,
     )
     out_path = _resolved_path(output_dir)
     t0 = perf_counter()
@@ -234,29 +241,41 @@ def run_go_campaign(
 def run_go_ts(
     composition: CompositionInput,
     *,
-    ga_params: dict[str, Any],
-    ts_kwargs: dict[str, Any],
+    go: dict[str, Any],
+    ts: dict[str, Any],
     seed: int | None = None,
     verbosity: int = 1,
     output_dir: str | Path | None = None,
+    output_root: str | Path | None = None,
+    output_stem: str | None = None,
     ts_composition: list[str] | None = None,
     infer_ts_composition_from_minima: bool = False,
     system_type: SystemType | None = None,
-    profile_ga: bool = True,
+    write_timing_json: bool = False,
+    profile_ga: bool | None = None,
     log_summary: bool = True,
 ) -> dict[str, Any]:
     system_type_local = _require_system_type(system_type, "run_go_ts")
-    ga_params_local = _with_system_type_in_optimizer_params(
-        ga_params, system_type=system_type_local, profile_ga=profile_ga
+    go_local = _with_system_type_in_optimizer_params(
+        go,
+        system_type=system_type_local,
+        write_timing_json=write_timing_json,
+        profile_ga=profile_ga,
     )
-    ts_kwargs_local = _require_ts_kwargs(
-        ts_kwargs, fn_name="run_go_ts", system_type=system_type_local
+    ts_kwargs_local = _coerce_ts_for_runner(
+        ts, fn_name="run_go_ts", system_type=system_type_local
     )
-    out_path = _resolved_path(output_dir)
+    comp = _as_composition(composition)
+    if output_dir is None:
+        out_path = _default_go_ts_output_path(
+            comp, go=go, output_stem=output_stem, output_root=output_root
+        )
+    else:
+        out_path = _resolved_path(output_dir)
     t0 = perf_counter()
     summary = run_scgo_go_ts_pipeline(
-        _as_composition(composition),
-        ga_params=ga_params_local,
+        comp,
+        go=go_local,
         ts_kwargs=ts_kwargs_local,
         seed=seed,
         verbosity=verbosity,
@@ -272,33 +291,48 @@ def run_go_ts(
 def run_go_ts_campaign(
     compositions: Iterable[CompositionInput],
     *,
-    ga_params: dict[str, Any],
-    ts_kwargs: dict[str, Any],
+    go: dict[str, Any],
+    ts: dict[str, Any],
     seed: int | None = None,
     verbosity: int = 1,
     output_dir: str | Path | None = None,
+    output_root: str | Path | None = None,
+    output_stem: str | None = None,
     ts_composition: list[str] | None = None,
     infer_ts_composition_from_minima: bool = False,
     system_type: SystemType | None = None,
-    profile_ga: bool = True,
+    write_timing_json: bool = False,
+    profile_ga: bool | None = None,
     log_summary: bool = True,
 ) -> dict[str, dict[str, Any]]:
     system_type_local = _require_system_type(system_type, "run_go_ts_campaign")
-    ga_params_local = _with_system_type_in_optimizer_params(
-        ga_params, system_type=system_type_local, profile_ga=profile_ga
+    go_local = _with_system_type_in_optimizer_params(
+        go,
+        system_type=system_type_local,
+        write_timing_json=write_timing_json,
+        profile_ga=profile_ga,
     )
-    ts_kwargs_local = _require_ts_kwargs(
-        ts_kwargs, fn_name="run_go_ts_campaign", system_type=system_type_local
+    ts_kwargs_local = _coerce_ts_for_runner(
+        ts, fn_name="run_go_ts_campaign", system_type=system_type_local
     )
-    parent = _resolved_path(output_dir)
+    compositions_list = _as_composition_list(compositions)
+    if output_dir is None:
+        parent = _default_go_ts_output_path(
+            compositions_list[0],
+            go=go,
+            output_stem=output_stem or "go_ts_campaign",
+            output_root=output_root,
+        )
+    else:
+        parent = _resolved_path(output_dir)
     out: dict[str, dict[str, Any]] = {}
     t0 = perf_counter()
-    for composition in _as_composition_list(compositions):
+    for composition in compositions_list:
         formula = get_cluster_formula(composition)
-        root = parent / f"{formula}_campaign" if parent else None
+        root = parent / f"{formula}_campaign"
         out[formula] = run_scgo_go_ts_pipeline(
             composition,
-            ga_params=ga_params_local,
+            go=go_local,
             ts_kwargs=ts_kwargs_local,
             seed=seed,
             verbosity=verbosity,
@@ -320,7 +354,7 @@ def run_go_ts_campaign(
 def run_ts_search(
     composition: CompositionInput,
     *,
-    ts_kwargs: dict[str, Any] | None = None,
+    ts: dict[str, Any],
     output_dir: str | Path | None = None,
     params: dict | None = None,
     seed: int | None = None,
@@ -330,12 +364,12 @@ def run_ts_search(
     log_summary: bool = True,
 ) -> list[dict[str, Any]]:
     system_type_local = _require_system_type(system_type, "run_ts_search")
-    merged_kwargs = _require_ts_kwargs(
-        ts_kwargs, fn_name="run_ts_search", system_type=system_type_local
+    merged_kwargs = _coerce_ts_for_runner(
+        ts, fn_name="run_ts_search", system_type=system_type_local
     )
-    if params is not None and "params" not in merged_kwargs:
+    if params is not None:
         merged_kwargs["params"] = params
-    if surface_config is not None and "surface_config" not in merged_kwargs:
+    if surface_config is not None:
         merged_kwargs["surface_config"] = surface_config
     out_path = _resolved_path(output_dir)
     t0 = perf_counter()
@@ -359,7 +393,7 @@ def run_ts_search(
 def run_ts_campaign(
     compositions: Iterable[CompositionInput],
     *,
-    ts_kwargs: dict[str, Any] | None = None,
+    ts: dict[str, Any],
     output_dir: str | Path | None = None,
     params: dict | None = None,
     seed: int | None = None,
@@ -368,8 +402,8 @@ def run_ts_campaign(
     log_summary: bool = True,
 ) -> dict[str, list[dict[str, Any]]]:
     system_type_local = _require_system_type(system_type, "run_ts_campaign")
-    ts_kwargs_local = _require_ts_kwargs(
-        ts_kwargs, fn_name="run_ts_campaign", system_type=system_type_local
+    ts_kwargs_local = _coerce_ts_for_runner(
+        ts, fn_name="run_ts_campaign", system_type=system_type_local
     )
     out_path = _resolved_path(output_dir)
     t0 = perf_counter()
@@ -414,9 +448,7 @@ def log_go_ts_summary(
 __all__ = [
     "CompositionInput",
     "log_go_ts_summary",
-    "normalize_backend",
     "parse_composition_arg",
-    "resolve_runner_output_dir",
     "run_go",
     "run_go_campaign",
     "run_go_ts",

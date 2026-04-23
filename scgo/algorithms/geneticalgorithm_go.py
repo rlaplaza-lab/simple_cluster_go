@@ -7,7 +7,6 @@ adapted for atomic clusters.
 
 from __future__ import annotations
 
-import json
 import math
 import os
 from contextlib import suppress
@@ -57,6 +56,7 @@ from scgo.utils.helpers import (
 from scgo.utils.logging import get_logger, should_show_progress
 from scgo.utils.mutation_weights import get_adaptive_mutation_config
 from scgo.utils.rng_helpers import ensure_rng_or_create
+from scgo.utils.timing_report import log_timing_summary, write_timing_file
 from scgo.utils.validation import validate_composition
 
 
@@ -94,7 +94,8 @@ def ga_go(
     rng: np.random.Generator | None = None,
     surface_config: SurfaceSystemConfig | None = None,
     system_type: SystemType = "gas_cluster",
-    write_profile: bool = True,
+    write_timing_json: bool = False,
+    detailed_timing: bool = False,
 ) -> list[tuple[float, Atoms]]:
     """Genetic Algorithm global optimization with adaptive mutations.
 
@@ -137,6 +138,9 @@ def ga_go(
             for adsorbate-on-slab GA. When set, the slab defines the cell and the
             cluster is the trailing ``len(composition)`` atoms; ``vacuum`` is not
             used for the template cell.
+        write_timing_json: Optional ``timing.json`` under ``output_dir``.
+        detailed_timing: Per-generation split rows (more memory; included in JSON
+            when ``write_timing_json`` is set).
 
     Returns:
         List of (energy, Atoms) tuples for unique local minima, sorted by fitness
@@ -150,7 +154,7 @@ def ga_go(
     profile_t0 = perf_counter()
     profile_timings: dict[str, float] = {}
     profile_counters: dict[str, int] = {"offspring_created": 0}
-    per_generation: list[dict[str, Any]] = []
+    per_generation: list[dict[str, Any]] | None = [] if detailed_timing else None
 
     if system_type == "gas_cluster" and surface_config is not None:
         system_type = "surface_cluster"
@@ -516,12 +520,18 @@ def ga_go(
                     t_mutation_gen += perf_counter() - t0
                     if a3_mutated is not None:
                         a3 = a3_mutated
-                validate_structure_for_system_type(
-                    a3,
-                    system_type=system_type,
-                    surface_config=surface_config,
-                    n_slab=n_slab,
-                )
+                try:
+                    validate_structure_for_system_type(
+                        a3,
+                        system_type=system_type,
+                        surface_config=surface_config,
+                        n_slab=n_slab,
+                    )
+                except ValueError as exc:
+                    logger.debug(
+                        "Offspring rejected by system_type validation: %s", exc
+                    )
+                    continue
 
                 t_start = perf_counter()
                 retry_with_backoff(
@@ -618,24 +628,25 @@ def ga_go(
                 profile_timings.get("population_update_s", 0.0) + pop_update_s
             )
 
-            per_generation.append(
-                {
-                    "generation": int(generation),
-                    "n_offspring_target": int(n_offspring),
-                    "offspring_created": int(created),
-                    "attempts": int(attempts),
-                    "timings_s": {
-                        "parent_select_s": t_parent_select_gen,
-                        "crossover_s": t_crossover_gen,
-                        "mutation_s": t_mutation_gen,
-                        "db_unrelaxed_insert_s": t_db_unrelaxed_gen,
-                        "relax_s": t_relax_gen,
-                        "db_relaxed_write_s": t_db_relaxed_gen,
-                        "population_update_s": pop_update_s,
-                        "offspring_loop_wall_s": perf_counter() - t_loop,
-                    },
-                }
-            )
+            if per_generation is not None:
+                per_generation.append(
+                    {
+                        "generation": int(generation),
+                        "n_offspring_target": int(n_offspring),
+                        "offspring_created": int(created),
+                        "attempts": int(attempts),
+                        "timings_s": {
+                            "parent_select_s": t_parent_select_gen,
+                            "crossover_s": t_crossover_gen,
+                            "mutation_s": t_mutation_gen,
+                            "db_unrelaxed_insert_s": t_db_unrelaxed_gen,
+                            "relax_s": t_relax_gen,
+                            "db_relaxed_write_s": t_db_relaxed_gen,
+                            "population_update_s": pop_update_s,
+                            "offspring_loop_wall_s": perf_counter() - t_loop,
+                        },
+                    }
+                )
 
             if early_stopping_niter > 0:
                 best_value, generations_without_improvement, should_stop = (
@@ -690,19 +701,16 @@ def ga_go(
             - profile_timings.get("initial_local_relaxation_s", 0.0)
             - profile_timings.get("offspring_local_relaxation_s", 0.0),
         )
-        if write_profile:
-            profile_path = os.path.join(output_dir, "ga_profile.json")
-            with open(profile_path, "w") as f:
-                json.dump(
-                    {
-                        "backend": "ase_ga",
-                        "timings_s": profile_timings,
-                        "counters": profile_counters,
-                        "per_generation": per_generation,
-                    },
-                    f,
-                    indent=2,
-                )
+        log_timing_summary(logger, "ase_ga", profile_timings, verbosity=verbosity)
+        if write_timing_json:
+            out_payload: dict[str, Any] = {
+                "backend": "ase_ga",
+                "timings_s": profile_timings,
+                "counters": profile_counters,
+            }
+            if per_generation is not None:
+                out_payload["per_generation"] = per_generation
+            write_timing_file(output_dir, out_payload)
 
         return all_minima
 

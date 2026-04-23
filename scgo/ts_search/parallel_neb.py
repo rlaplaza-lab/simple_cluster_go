@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from time import perf_counter
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
@@ -232,13 +233,10 @@ def run_parallel_neb_search(
     neb_tangent_method: str,
     torchsim_params: dict[str, Any],
     system_type: SystemType,
-) -> list[dict[str, Any]]:
-    """Run all pairs through ParallelNEBBatch and return TS-result dicts.
-
-    Mirrors the per-pair output shape produced by the serial ``find_transition_state``
-    path so downstream summarization is uniform.
-    """
-    relaxer = _tsh.TorchSimBatchRelaxer(**torchsim_params)
+) -> tuple[list[dict[str, Any]], dict[str, float]]:
+    """Run all pairs through ParallelNEBBatch. Returns (results, timing meta)."""
+    t_parallel0 = perf_counter()
+    relaxer = _tsh.TorchSimBatchRelaxer(**(torchsim_params or {}))
 
     # Endpoint single-point energies in one batched call.
     endpoints: list[Atoms] = []
@@ -307,7 +305,13 @@ def run_parallel_neb_search(
 
     neb_steps_i = int(neb_steps)
     batch = ParallelNEBBatch(neb_instances, relaxer, max_total_steps=neb_steps_i)
+    t_batch0 = perf_counter()
     batch_results = batch.run_optimization(fmax=neb_fmax, max_steps=neb_steps_i)
+    neb_batch_s = perf_counter() - t_batch0
+    wall_total = perf_counter() - t_parallel0
+    n_p = max(1, len(pair_results))
+    neb_each = neb_batch_s / n_p
+    wall_each = wall_total / n_p
 
     for idx, neb in enumerate(neb_instances):
         summary = batch_results[idx]
@@ -334,5 +338,14 @@ def run_parallel_neb_search(
         i, j = pairs[idx]
         attach_minima_traceability(result, minima, i, j)
         save_neb_result(result, str(result_dir), result["pair_id"])
+        result["timings_s"] = {
+            "total_wall_s": wall_each,
+            "neb_optimization_s": neb_each,
+            "cpu_non_relax_s": max(0.0, wall_each - neb_each),
+        }
 
-    return pair_results
+    meta = {
+        "neb_batch_optimization_s": neb_batch_s,
+        "parallel_wall_s": wall_total,
+    }
+    return pair_results, meta

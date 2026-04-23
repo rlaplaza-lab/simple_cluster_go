@@ -8,6 +8,8 @@ local minimizations, with Metropolis acceptance criteria.
 from __future__ import annotations
 
 import logging
+from time import perf_counter
+from typing import Any
 
 import numpy as np
 from ase import Atoms
@@ -48,6 +50,7 @@ from scgo.utils.helpers import (
     perform_local_relaxation,
 )
 from scgo.utils.logging import get_logger, should_show_progress
+from scgo.utils.timing_report import log_timing_summary, write_timing_file
 from scgo.utils.validation import (
     validate_atoms,
     validate_calculator_attached,
@@ -152,6 +155,8 @@ def bh_go(
     surface_config: SurfaceSystemConfig | None = None,
     n_slab: int = 0,
     system_type: SystemType = "gas_cluster",
+    write_timing_json: bool = False,
+    detailed_timing: bool = False,
     *,
     rng: np.random.Generator,
 ) -> list[tuple[float, Atoms]]:
@@ -170,6 +175,8 @@ def bh_go(
         move_strategy: Strategy for selecting atoms to move ('random', 'highest_force', 'lowest_force').
         temperature: Temperature for Metropolis criterion (eV), governing acceptance
             of structures based on fitness differences.
+        write_timing_json: Optional ``timing.json`` under ``output_dir``.
+        detailed_timing: Per-iteration split rows in JSON when ``write_timing_json`` is set.
         deduplicate: If True (default), filter to structurally unique minima.
         energy_tolerance: Energy difference (eV) below which structures are considered duplicates.
         comparator_tol: Tolerance for interatomic distance comparator.
@@ -288,6 +295,32 @@ def bh_go(
     _HPC_RETRY_EXCEPTIONS = HPC_DATABASE_EXCEPTIONS + (IOError,)
 
     try:
+        profile_t0 = perf_counter()
+        profile_timings: dict[str, float] = {}
+        profile_counters: dict[str, int] = {"niter": int(niter), "accepted": 0}
+        per_iteration: list[dict[str, Any]] | None = [] if detailed_timing else None
+
+        def _finish_bh_timing() -> None:
+            total = perf_counter() - profile_t0
+            profile_timings["total_wall_s"] = total
+            relax_sum = float(
+                profile_timings.get("initial_local_relaxation_s", 0.0)
+            ) + float(profile_timings.get("offspring_local_relaxation_s", 0.0))
+            profile_timings["local_relaxation_s"] = relax_sum
+            profile_timings["cpu_non_relax_s"] = max(0.0, total - relax_sum)
+            log_timing_summary(
+                logger, "basin_hopping", profile_timings, verbosity=verbosity
+            )
+            if write_timing_json:
+                out: dict[str, Any] = {
+                    "backend": "basin_hopping",
+                    "timings_s": profile_timings,
+                    "counters": profile_counters,
+                }
+                if per_iteration is not None:
+                    out["per_iteration"] = per_iteration
+                write_timing_file(output_dir, out)
+
         a_current = retry_with_backoff(
             da.get_an_unrelaxed_candidate,
             max_retries=5,
@@ -297,6 +330,7 @@ def bh_go(
         )
         if surface_mode and surface_config is not None:
             attach_slab_constraints_from_surface_config(a_current, surface_config)
+        t_rel0 = perf_counter()
         e_current = perform_local_relaxation(
             a_current,
             calculator,
@@ -304,6 +338,7 @@ def bh_go(
             fmax,
             niter_local_relaxation,
         )
+        profile_timings["initial_local_relaxation_s"] = perf_counter() - t_rel0
         validate_structure_for_system_type(
             a_current,
             system_type=system_type,
@@ -314,6 +349,7 @@ def bh_go(
         if run_id is not None and a_current is not None:
             persist_provenance(a_current, run_id=run_id)
 
+        t_db0 = perf_counter()
         retry_with_backoff(
             lambda: da.add_relaxed_step(a_current),
             max_retries=5,
@@ -321,6 +357,7 @@ def bh_go(
             backoff_factor=2.0,
             exception_types=_HPC_RETRY_EXCEPTIONS,
         )
+        profile_timings["initial_relaxed_write_s"] = perf_counter() - t_db0
 
         # Calculate and store initial fitness
         fitness_current = calculate_fitness(
@@ -359,6 +396,7 @@ def bh_go(
             if run_id is not None:
                 persist_provenance(a_trial, run_id=run_id)
 
+            t_ins0 = perf_counter()
             retry_with_backoff(
                 lambda _t=a_trial, _d=desc: da.add_unrelaxed_candidate(
                     _t, description=_d
@@ -368,13 +406,22 @@ def bh_go(
                 backoff_factor=2.0,
                 exception_types=_HPC_RETRY_EXCEPTIONS,
             )
+            dt_ins = perf_counter() - t_ins0
+            profile_timings["offspring_unrelaxed_insert_s"] = (
+                profile_timings.get("offspring_unrelaxed_insert_s", 0.0) + dt_ins
+            )
 
+            t_rel0 = perf_counter()
             e_trial = perform_local_relaxation(
                 a_trial,
                 calculator,
                 optimizer,
                 fmax,
                 niter_local_relaxation,
+            )
+            dt_rel = perf_counter() - t_rel0
+            profile_timings["offspring_local_relaxation_s"] = (
+                profile_timings.get("offspring_local_relaxation_s", 0.0) + dt_rel
             )
             validate_structure_for_system_type(
                 a_trial,
@@ -385,12 +432,17 @@ def bh_go(
             if run_id is not None:
                 persist_provenance(a_trial, run_id=run_id)
 
+            t_w0 = perf_counter()
             retry_with_backoff(
                 lambda _t=a_trial: da.add_relaxed_step(_t),
                 max_retries=5,
                 initial_delay=0.2,
                 backoff_factor=2.0,
                 exception_types=_HPC_RETRY_EXCEPTIONS,
+            )
+            dt_w = perf_counter() - t_w0
+            profile_timings["offspring_relaxed_write_s"] = (
+                profile_timings.get("offspring_relaxed_write_s", 0.0) + dt_w
             )
 
             # Calculate fitness for trial structure
@@ -426,6 +478,7 @@ def bh_go(
                     )
 
             if accept:
+                profile_counters["accepted"] += 1
                 a_current = a_trial.copy()
                 e_current = e_trial
                 fitness_current = fitness_trial
@@ -442,6 +495,18 @@ def bh_go(
                             f"Updated reference structures (total: {len(diversity_scorer)})"
                         )
 
+            if per_iteration is not None:
+                per_iteration.append(
+                    {
+                        "iteration": int(iteration),
+                        "timings_s": {
+                            "unrelaxed_insert_s": dt_ins,
+                            "local_relaxation_s": dt_rel,
+                            "relaxed_write_s": dt_w,
+                        },
+                    }
+                )
+
         all_candidates = retry_with_backoff(
             da.get_all_relaxed_candidates,
             max_retries=5,
@@ -452,9 +517,11 @@ def bh_go(
         all_minima = extract_minima_from_database(all_candidates)
 
         if not all_minima:
+            _finish_bh_timing()
             return []
 
         if not deduplicate:
+            _finish_bh_timing()
             return all_minima
 
         # Filter out non-finite energies
@@ -463,6 +530,7 @@ def bh_go(
         ]
 
         if not valid_minima:
+            _finish_bh_timing()
             return []
 
         # Reuse the comparator created earlier (line 200) for deduplication
@@ -489,6 +557,7 @@ def bh_go(
                 f"Sorted {len(unique_minima)} unique minima by {fitness_strategy} fitness"
             )
 
+        _finish_bh_timing()
         return unique_minima
 
     finally:

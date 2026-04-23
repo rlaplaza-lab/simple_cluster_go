@@ -176,7 +176,7 @@ def load_latest_ga_profile(
     output_dir: str | Path,
     cluster_formula: str,
 ) -> dict | None:
-    """Load latest GA profile JSON from benchmark run outputs."""
+    """Load ``timing.json`` (or legacy ``ga_profile.json``) from the latest run."""
     root = Path(output_dir)
     run_dirs = sorted(
         (root / f"{cluster_formula}_searches").glob("run_*"),
@@ -185,13 +185,16 @@ def load_latest_ga_profile(
     if not run_dirs:
         return None
     latest = run_dirs[-1]
-    profile_path = latest / "trial_1" / "ga_profile.json"
-    if not profile_path.exists():
-        return None
-    try:
-        return json.loads(profile_path.read_text())
-    except (OSError, json.JSONDecodeError):
-        return None
+    trial_dir = latest / "trial_1"
+    for name in ("timing.json", "ga_profile.json"):
+        profile_path = trial_dir / name
+        if not profile_path.exists():
+            continue
+        try:
+            return json.loads(profile_path.read_text())
+        except (OSError, json.JSONDecodeError):
+            continue
+    return None
 
 
 def format_ga_profile_lines(
@@ -204,13 +207,14 @@ def format_ga_profile_lines(
     timings = profile.get("timings_s", {})
     backend = str(profile.get("backend", "ga"))
     total = float(timings.get("total_wall_s", 0.0))
-    relax = float(
-        timings.get(
-            "relax_batch_s",
-            timings.get("initial_local_relaxation_s", 0.0)
-            + timings.get("offspring_local_relaxation_s", 0.0),
+    if "local_relaxation_s" in timings:
+        relax = float(timings.get("local_relaxation_s", 0.0))
+    elif "relax_batch_s" in timings:
+        relax = float(timings.get("relax_batch_s", 0.0))
+    else:
+        relax = float(timings.get("initial_local_relaxation_s", 0.0)) + float(
+            timings.get("offspring_local_relaxation_s", 0.0)
         )
-    )
     cpu = float(timings.get("cpu_non_relax_s", max(0.0, total - relax)))
     db_io = float(
         timings.get("db_read_s", 0.0)
@@ -218,6 +222,8 @@ def format_ga_profile_lines(
         + timings.get("offspring_db_io_s", 0.0)
         + timings.get("initial_unrelaxed_insert_s", 0.0)
         + timings.get("initial_relaxed_write_s", 0.0)
+        + timings.get("offspring_unrelaxed_insert_s", 0.0)
+        + timings.get("offspring_relaxed_write_s", 0.0)
     )
     lines = [
         (

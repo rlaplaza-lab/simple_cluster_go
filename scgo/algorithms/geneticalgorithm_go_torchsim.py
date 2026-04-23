@@ -7,7 +7,6 @@ interaction remains single-threaded to protect against SQLite locking issues.
 
 from __future__ import annotations
 
-import json
 import math
 import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -64,6 +63,7 @@ from scgo.utils.logging import get_logger, should_show_progress
 from scgo.utils.mutation_weights import get_adaptive_mutation_config
 from scgo.utils.parallel_workers import resolve_n_jobs_to_workers
 from scgo.utils.rng_helpers import ensure_rng_or_create
+from scgo.utils.timing_report import log_timing_summary, write_timing_file
 from scgo.utils.validation import validate_composition
 
 
@@ -270,7 +270,8 @@ def ga_go_torchsim(
     diversity_update_interval: int = 5,
     surface_config: SurfaceSystemConfig | None = None,
     system_type: SystemType = "gas_cluster",
-    write_profile: bool = True,
+    write_timing_json: bool = False,
+    detailed_timing: bool = False,
 ) -> list[tuple[float, Atoms]]:
     """Run the GA using TorchSim for batched relaxations.
 
@@ -300,6 +301,8 @@ def ga_go_torchsim(
         diversity_max_references: Maximum number of reference structures to load (for performance).
         diversity_update_interval: Number of generations between reference updates (for diversity strategy).
         surface_config: Same as :func:`scgo.geneticalgorithm_go.ga_go` (adsorbate-on-slab GA).
+        write_timing_json: Optional ``timing.json`` (see :func:`scgo.geneticalgorithm_go.ga_go`).
+        detailed_timing: Per-generation splits (see :func:`scgo.geneticalgorithm_go.ga_go`).
     """
     logger = get_logger(__name__)
     profile_t0 = perf_counter()
@@ -309,7 +312,7 @@ def ga_go_torchsim(
         "offspring_relaxed": 0,
         "offspring_worker_failures": 0,
     }
-    per_generation: list[dict[str, Any]] = []
+    per_generation: list[dict[str, Any]] | None = [] if detailed_timing else None
 
     if system_type == "gas_cluster" and surface_config is not None:
         system_type = "surface_cluster"
@@ -787,12 +790,27 @@ def ga_go_torchsim(
                         mutation_s = perf_counter() - mutation_t0
                         if mutated is not None:
                             child = mutated
-                    validate_structure_for_system_type(
-                        child,
-                        system_type=system_type,
-                        surface_config=surface_config,
-                        n_slab=n_slab,
-                    )
+                    try:
+                        validate_structure_for_system_type(
+                            child,
+                            system_type=system_type,
+                            surface_config=surface_config,
+                            n_slab=n_slab,
+                        )
+                    except ValueError as exc:
+                        # Invalid geometry after crossover/mutation: same as ``child is None`` —
+                        # skip and let the generation loop retry (do not treat as a worker bug).
+                        logger.debug(
+                            "Offspring rejected by system_type validation: %s", exc
+                        )
+                        return {
+                            "index": job["index"],
+                            "child": None,
+                            "desc": desc,
+                            "operator_setup_s": operator_setup_s,
+                            "crossover_s": crossover_s,
+                            "mutation_s": mutation_s,
+                        }
                     return {
                         "index": job["index"],
                         "child": child,
@@ -826,11 +844,12 @@ def ga_go_torchsim(
                             )
                             continue
                         job_results[result["index"]] = result
-                if len(jobs) > 0 and len(job_results) == 0:
-                    first = worker_exceptions[0] if worker_exceptions else None
-                    raise RuntimeError(
-                        f"All {len(jobs)} parallel offspring workers failed"
-                    ) from first
+                if len(jobs) > 0 and len(job_results) == 0 and worker_exceptions:
+                    first = worker_exceptions[0]
+                    if not all(isinstance(e, ValueError) for e in worker_exceptions):
+                        raise RuntimeError(
+                            f"All {len(jobs)} parallel offspring workers failed"
+                        ) from first
                 t_offspring_parallel_wall_gen += perf_counter() - t_parallel
                 if worker_failures_gen:
                     profile_counters["offspring_worker_failures"] += worker_failures_gen
@@ -963,30 +982,31 @@ def ga_go_torchsim(
                         offspring_count,
                     )
 
-            per_generation.append(
-                {
-                    "generation": int(generation),
-                    "n_offspring_target": int(n_offspring),
-                    "offspring_created": int(created),
-                    "attempts": int(attempts),
-                    "offspring_relaxed_this_call": int(offspring_count),
-                    "timings_s": {
-                        "parent_select_s": t_parent_select_gen,
-                        "operator_setup_s": t_operator_setup_gen,
-                        "crossover_s": t_crossover_gen,
-                        "mutation_s": t_mutation_gen,
-                        "db_unrelaxed_insert_s": t_db_unrelaxed_gen,
-                        "offspring_parallel_wall_s": t_offspring_parallel_wall_gen,
-                        "torchsim_db_read_s": gen_db_read_s,
-                        "torchsim_relax_s": gen_relax_s,
-                        "torchsim_db_write_s": gen_db_write_s,
-                        "torchsim_relax_call_wall_s": relax_call_wall_s,
-                        "population_update_s": pop_update_s,
-                        "population_update_s_from_relax": gen_pop_update_s_from_relax,
-                        "offspring_loop_wall_s": perf_counter() - t_loop,
-                    },
-                }
-            )
+            if per_generation is not None:
+                per_generation.append(
+                    {
+                        "generation": int(generation),
+                        "n_offspring_target": int(n_offspring),
+                        "offspring_created": int(created),
+                        "attempts": int(attempts),
+                        "offspring_relaxed_this_call": int(offspring_count),
+                        "timings_s": {
+                            "parent_select_s": t_parent_select_gen,
+                            "operator_setup_s": t_operator_setup_gen,
+                            "crossover_s": t_crossover_gen,
+                            "mutation_s": t_mutation_gen,
+                            "db_unrelaxed_insert_s": t_db_unrelaxed_gen,
+                            "offspring_parallel_wall_s": t_offspring_parallel_wall_gen,
+                            "torchsim_db_read_s": gen_db_read_s,
+                            "torchsim_relax_s": gen_relax_s,
+                            "torchsim_db_write_s": gen_db_write_s,
+                            "torchsim_relax_call_wall_s": relax_call_wall_s,
+                            "population_update_s": pop_update_s,
+                            "population_update_s_from_relax": gen_pop_update_s_from_relax,
+                            "offspring_loop_wall_s": perf_counter() - t_loop,
+                        },
+                    }
+                )
 
             if early_stopping_niter > 0:
                 best_value, generations_without_improvement, should_stop = (
@@ -1024,24 +1044,6 @@ def ga_go_torchsim(
             system_type=system_type,
             profiling=profile_timings,
         )
-        profile_timings["total_wall_s"] = perf_counter() - profile_t0
-        profile_timings["cpu_non_relax_s"] = max(
-            0.0,
-            profile_timings["total_wall_s"] - profile_timings.get("relax_batch_s", 0.0),
-        )
-        if write_profile:
-            profile_path = os.path.join(output_dir, "ga_profile.json")
-            with open(profile_path, "w") as f:
-                json.dump(
-                    {
-                        "backend": "torchsim_ga",
-                        "timings_s": profile_timings,
-                        "counters": profile_counters,
-                        "per_generation": per_generation,
-                    },
-                    f,
-                    indent=2,
-                )
 
         all_candidates = database_retry(
             da.get_all_relaxed_candidates,
@@ -1063,6 +1065,21 @@ def ga_go_torchsim(
             fitness_strategy=fitness_strategy,
             logger=logger,
         )
+        profile_timings["total_wall_s"] = perf_counter() - profile_t0
+        profile_timings["cpu_non_relax_s"] = max(
+            0.0,
+            profile_timings["total_wall_s"] - profile_timings.get("relax_batch_s", 0.0),
+        )
+        log_timing_summary(logger, "torchsim_ga", profile_timings, verbosity=verbosity)
+        if write_timing_json:
+            out_payload: dict[str, Any] = {
+                "backend": "torchsim_ga",
+                "timings_s": profile_timings,
+                "counters": profile_counters,
+            }
+            if per_generation is not None:
+                out_payload["per_generation"] = per_generation
+            write_timing_file(output_dir, out_payload)
 
         return all_minima
 

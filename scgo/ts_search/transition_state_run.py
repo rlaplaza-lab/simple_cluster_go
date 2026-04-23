@@ -9,6 +9,7 @@ import contextlib
 import os
 import sqlite3
 from pathlib import Path
+from time import perf_counter
 from typing import Any
 
 from scgo.constants import (
@@ -37,6 +38,11 @@ from scgo.utils.helpers import (
 from scgo.utils.logging import configure_logging, get_logger
 from scgo.utils.rng_helpers import ensure_rng
 from scgo.utils.run_helpers import cleanup_torch_cuda, get_calculator_class
+from scgo.utils.timing_report import (
+    log_timing_summary,
+    sum_neb_seconds_from_ts_results,
+    write_timing_file,
+)
 from scgo.utils.torchsim_policy import resolve_ts_torchsim_flags
 from scgo.utils.ts_provenance import is_cuda_oom_error
 from scgo.utils.validation import validate_composition
@@ -91,6 +97,7 @@ def _run_serial_neb_search(
     neb_tangent_method: str,
     verbosity: int,
     system_type: SystemType | None = None,
+    write_timing_json: bool = False,
 ) -> list[dict[str, Any]]:
     """Run NEBs sequentially via :func:`find_transition_state` (one calc per pair)."""
     logger = get_logger(__name__)
@@ -160,6 +167,7 @@ def _run_serial_neb_search(
                 use_torchsim=use_torchsim,
                 torchsim_params=torchsim_params,
                 verbosity=verbosity,
+                write_timing_json=write_timing_json,
             )
         except (RuntimeError, ValueError) as e:
             logger.error(
@@ -320,6 +328,7 @@ def run_transition_state_search(
     ts_energy_tolerance: float = DEFAULT_ENERGY_TOLERANCE,
     surface_config: SurfaceSystemConfig | None = None,
     system_type: SystemType | None = None,
+    write_timing_json: bool = False,
 ) -> list[dict[str, Any]]:
     """Run transition state search for clusters of given composition.
 
@@ -490,8 +499,10 @@ def run_transition_state_search(
     result_dir = Path(ts_output_dir) / f"ts_results_{formula}"
     result_dir.mkdir(parents=True, exist_ok=True)
 
+    t_ts0 = perf_counter()
+    parallel_meta: dict[str, float] = {}
     if use_parallel_neb:
-        ts_results = run_parallel_neb_search(
+        ts_results, parallel_meta = run_parallel_neb_search(
             pairs,
             minima,
             result_dir=result_dir,
@@ -534,6 +545,38 @@ def run_transition_state_search(
             neb_tangent_method=neb_tangent_method,
             verbosity=verbosity,
             system_type=resolved_system_type,
+            write_timing_json=write_timing_json,
+        )
+
+    ts_phase_wall = perf_counter() - t_ts0
+    neb_sum = float(parallel_meta.get("neb_batch_optimization_s", 0.0))
+    if neb_sum <= 0.0:
+        neb_sum = sum_neb_seconds_from_ts_results(ts_results)
+    ts_rollup: dict[str, float] = {
+        "total_wall_s": ts_phase_wall,
+        "neb_optimization_s": neb_sum,
+        "cpu_non_relax_s": max(0.0, ts_phase_wall - neb_sum),
+    }
+    log_timing_summary(
+        logger,
+        "ts_search",
+        ts_rollup,
+        verbosity=verbosity,
+    )
+    if write_timing_json:
+        write_timing_file(
+            str(result_dir),
+            {
+                "backend": "ts_search",
+                "timings_s": ts_rollup,
+                "counters": {
+                    "n_results": len(ts_results),
+                    "n_success": sum(
+                        1 for r in ts_results if r.get("status") == "success"
+                    ),
+                },
+                "parallel_batch_s": parallel_meta,
+            },
         )
 
     _apply_surface_ts_geometry_gate(

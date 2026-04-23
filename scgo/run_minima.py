@@ -31,6 +31,7 @@ from scgo.utils.run_helpers import (
     validate_calculator,
 )
 from scgo.utils.run_tracking import ensure_run_id
+from scgo.utils.timing_report import log_timing_summary, sum_neb_seconds_from_ts_results
 from scgo.utils.validation import validate_composition
 
 
@@ -456,7 +457,7 @@ def run_scgo_campaign_arbitrary_compositions(
 def run_scgo_go_ts_pipeline(
     composition: list[str],
     *,
-    ga_params: dict[str, Any],
+    go: dict[str, Any],
     ts_kwargs: dict[str, Any],
     seed: int | None = None,
     verbosity: int = 1,
@@ -484,14 +485,15 @@ def run_scgo_go_ts_pipeline(
     output_path.mkdir(parents=True, exist_ok=True)
     ts_base_dir = output_path / f"{formula}_searches"
 
-    start = perf_counter()
-    merged_ga = initialize_params(None if ga_params is None else dict(ga_params))
+    pipeline_t0 = perf_counter()
+    merged_ga = initialize_params(None if go is None else dict(go))
     calculator_kwargs = merged_ga.get("calculator_kwargs", {})
     validate_calculator(merged_ga.get("calculator", "MACE"))
     calculator_for_global_optimization = get_calculator_class(merged_ga["calculator"])(
         **calculator_kwargs,
     )
     try:
+        go_t0 = perf_counter()
         minima_list = run_scgo_trials(
             composition,
             params=merged_ga,
@@ -501,6 +503,7 @@ def run_scgo_go_ts_pipeline(
             calculator_for_global_optimization=calculator_for_global_optimization,
         )
     finally:
+        go_wall_s = perf_counter() - go_t0
         del calculator_for_global_optimization
         cleanup_torch_cuda(logger=logger)
 
@@ -520,6 +523,7 @@ def run_scgo_go_ts_pipeline(
     ts_kwargs_local.pop("base_dir", None)
     ts_kwargs_local.pop("seed", None)
     ts_kwargs_local.pop("verbosity", None)
+    write_ts_json = bool(ts_kwargs_local.pop("write_timing_json", False))
 
     from scgo.ts_search import run_transition_state_search
 
@@ -528,11 +532,20 @@ def run_scgo_go_ts_pipeline(
         output_dir=ts_base_dir,
         seed=seed,
         verbosity=verbosity,
+        write_timing_json=write_ts_json,
         **ts_kwargs_local,
     )
     ts_success = sum(1 for result in ts_results if result.get("status") == "success")
 
-    elapsed_s = perf_counter() - start
+    ts_neb = sum_neb_seconds_from_ts_results(ts_results)
+    elapsed_s = perf_counter() - pipeline_t0
+    go_ts_timings: dict[str, float] = {
+        "total_wall_s": elapsed_s,
+        "go_phase_s": go_wall_s,
+        "ts_neb_sum_s": ts_neb,
+        "cpu_non_relax_s": max(0.0, elapsed_s - go_wall_s - ts_neb),
+    }
+    log_timing_summary(logger, "go_ts", go_ts_timings, verbosity=verbosity)
     logger.info(
         "Completed GO->TS pipeline for %s: successful NEBs=%d/%d, wall_time=%.2f s",
         formula,
@@ -549,6 +562,7 @@ def run_scgo_go_ts_pipeline(
         "ts_success_count": ts_success,
         "ts_total_count": len(ts_results),
         "wall_time_s": elapsed_s,
+        "timings_s": go_ts_timings,
     }
 
 
@@ -556,7 +570,7 @@ def run_scgo_one_element_go_ts_pipeline(
     element: str,
     n_atoms: int,
     *,
-    ga_params: dict[str, Any],
+    go: dict[str, Any],
     ts_kwargs: dict[str, Any],
     seed: int | None = None,
     verbosity: int = 1,
@@ -572,7 +586,7 @@ def run_scgo_one_element_go_ts_pipeline(
     composition = [element] * n_atoms
     return run_scgo_go_ts_pipeline(
         composition,
-        ga_params=ga_params,
+        go=go,
         ts_kwargs=ts_kwargs,
         seed=seed,
         verbosity=verbosity,

@@ -58,7 +58,7 @@ from scgo.param_presets import (
     get_high_energy_params,
     get_minimal_ga_params,
     get_testing_params,
-    get_ts_run_kwargs,
+    get_torchsim_ga_params,
     get_ts_search_params,
     get_ts_search_params_uma,
 )
@@ -155,10 +155,10 @@ __all__ = [
     "get_high_energy_params",
     "get_minimal_ga_params",
     "get_testing_params",
-    "get_ts_run_kwargs",
     "get_ts_search_params",
     "get_default_uma_params",
     "get_ts_search_params_uma",
+    "get_torchsim_ga_params",
     # Main run API (see scgo.runner_api)
     "CompositionInput",
     "run_go",

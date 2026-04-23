@@ -1,42 +1,41 @@
 #!/usr/bin/env python3
-"""Pt5 gas-phase GO then TS via canonical ``run_go_ts`` API."""
+"""Pt5 gas-phase GO then TS via ``run_go_ts``."""
 
 from __future__ import annotations
 
 from pathlib import Path
 
-from scgo.param_presets import build_one_element_go_ts_bundle, pt5_gas_go_ts_defaults
-from scgo.runner_api import resolve_runner_output_dir, run_go_ts
+from scgo.param_presets import get_torchsim_ga_params, get_ts_search_params
+from scgo.runner_api import run_go_ts
 
 N_ATOMS = 5
 ELEMENT = "Pt"
-BACKEND = "mace"
 SEED = 42
-DEFAULT_OUTPUT_PARENT = Path(__file__).resolve().parent / "results"
-DEFAULT_OUTPUT_SUBDIR = "pt5_gas"
+DEFAULT_OUTPUT_ROOT = Path(__file__).resolve().parent / "results"
+OUTPUT_STEM = "pt5_gas"
+
+# HPC / production GO+TS numbers (MACE + TorchSim GA, flat TS for NEB)
+NITER = 10
+POPULATION_SIZE = 50
+MAX_PAIRS = 15
 
 
 def main() -> None:
-    d0 = pt5_gas_go_ts_defaults()
-    bundle = build_one_element_go_ts_bundle(
-        backend=BACKEND,
-        seed=SEED,
-        niter=d0["niter"],
-        population_size=d0["population_size"],
-        max_pairs=d0["max_pairs"],
-        system_type="gas_cluster",
-    )
+    go = get_torchsim_ga_params(SEED)
+    go["calculator"] = "MACE"
+    ga = go["optimizer_params"]["ga"]
+    ga["niter"] = NITER
+    ga["population_size"] = POPULATION_SIZE
+    ts = get_ts_search_params(system_type="gas_cluster")
+    ts["max_pairs"] = MAX_PAIRS
     run_go_ts(
         [ELEMENT] * N_ATOMS,
-        ga_params=bundle["ga_params"],
-        ts_kwargs=bundle["ts_kwargs"],
+        go=go,
+        ts=ts,
         seed=SEED,
-        output_dir=resolve_runner_output_dir(
-            default_output_parent=DEFAULT_OUTPUT_PARENT,
-            default_output_subdir=DEFAULT_OUTPUT_SUBDIR,
-            backend=BACKEND,
-            output_dir=None,
-        ),
+        output_dir=None,
+        output_root=DEFAULT_OUTPUT_ROOT,
+        output_stem=OUTPUT_STEM,
         verbosity=1,
         system_type="gas_cluster",
     )

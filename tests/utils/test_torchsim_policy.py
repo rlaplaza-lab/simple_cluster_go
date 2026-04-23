@@ -6,13 +6,14 @@ import importlib.util
 
 import pytest
 
-from scgo.param_presets import get_ts_run_kwargs, get_ts_search_params
+from scgo.param_presets import get_ts_search_params
 from scgo.utils.torchsim_policy import (
     calculator_name_supports_torchsim_batched_neb,
     is_uma_like_calculator,
     mace_torchsim_stack_available,
     resolve_ts_torchsim_flags,
 )
+from scgo.utils.ts_runner_kwargs import coerce_ts_params_to_runner_kwargs
 
 
 def test_is_uma_like_calculator():
@@ -91,7 +92,7 @@ def test_get_ts_search_params_uma_has_torchsim_when_available(monkeypatch):
     assert ts["use_parallel_neb"] is False
 
 
-def test_get_ts_run_kwargs_uma_sets_fairchem_model_fields(monkeypatch):
+def test_coerce_ts_params_uma_sets_fairchem_model_fields(monkeypatch):
     real_find_spec = importlib.util.find_spec
 
     def fake_spec(name: str):
@@ -104,7 +105,7 @@ def test_get_ts_run_kwargs_uma_sets_fairchem_model_fields(monkeypatch):
     ts = get_ts_search_params(
         calculator="UMA", calculator_kwargs={}, system_type="gas_cluster"
     )
-    kw = get_ts_run_kwargs(ts)
+    kw = coerce_ts_params_to_runner_kwargs(ts)
     assert kw["use_torchsim"] is True
     assert kw["use_parallel_neb"] is False
     tsp = kw["torchsim_params"]

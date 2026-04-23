@@ -225,44 +225,33 @@ For element or binary scans, build compositions explicitly and pass them to `run
 
 ### Transition state search
 
-Package-level `run_ts_search` / `run_ts_campaign` take **NEB and pairing options in `ts_kwargs`**, merged into the implementation in [`scgo/ts_search/transition_state_run.py`](scgo/ts_search/transition_state_run.py) (which still exposes a flat keyword API for advanced use).
-
-`get_ts_run_kwargs(...)` is the recommended way to build `ts_kwargs`: it resolves effective `use_torchsim` / `use_parallel_neb` flags from the selected calculator and installed extras, and raises early if TorchSim was requested but unavailable.
+`run_ts_search` and `run_ts_campaign` take a **flat `ts` dict** from [`get_ts_search_params`](scgo/param_presets.py) (or edit a copy). TorchSim use is resolved from the calculator; pass **`system_type` once** on the `run_*` call (it wins over any key in `ts`).
 
 ```python
-from scgo import run_go, run_ts_search
-from scgo.param_presets import get_ts_run_kwargs, get_ts_search_params
+from scgo import run_ts_search
+from scgo.param_presets import get_ts_search_params
 
-run_go(["Pt", "Pt", "Pt"], params={"calculator": "MACE"}, seed=42)
-ts_kwargs = get_ts_run_kwargs(get_ts_search_params(system_type="gas_cluster"))
-
+ts = get_ts_search_params(system_type="gas_cluster")
 ts_results = run_ts_search(
     ["Pt", "Pt", "Pt"],
     output_dir="Pt3_searches",
     params={"calculator": "MACE"},
     seed=42,
-    ts_kwargs=ts_kwargs,
+    ts=ts,
     system_type="gas_cluster",
 )
 ```
 
-`ts_kwargs` is required in high-level TS APIs. Use `scgo.param_presets.get_ts_run_kwargs(...)` to build it from a preset dict.
-
-#### `run_ts_campaign(compositions, output_dir=None, ..., ts_kwargs, system_type=...)`
-
-Same pattern: pass `ts_kwargs={...}` for per-run options forwarded to each composition’s search.
+`run_ts_campaign` forwards the same `ts` to each composition.
 
 ### GO then TS
 
-- `run_go_ts(composition, *, ga_params, ts_kwargs, ...)`
-- `run_go_ts_campaign(compositions, *, ga_params, ts_kwargs, ..., system_type=...)`
-
-Preset MLIP (MACE/UMA) GO+TS jobs should build `ga_params` and `ts_kwargs` from `scgo.param_presets` (for example, `build_one_element_go_ts_bundle(...)`) and then call canonical `run_go_ts(...)`. High-level `run_*` APIs now emit consistent completion summaries (timing and key counts) internally.
+`run_go_ts` / `run_go_ts_campaign` use **`go=`** (merged like other GO runs) and **`ts=`** (same flat shape as above). For MACE + TorchSim GA, start from [`get_torchsim_ga_params`](scgo/param_presets.py) with a `seed`, set `go["calculator"] = "MACE"` and `optimizer_params["ga"]` as needed; pair with `get_ts_search_params(...)` and set `ts["max_pairs"]`, etc. See `runners/run_pt5_gas.py` for a minimal end-to-end example. Default output if `output_dir` is omitted is under `scgo_runs/<stem>_<mace|uma>/` (set `output_root` / `output_stem` to change).
 
 ### Advanced / internals
 
-- Implementation helpers: `from scgo.run_minima import run_scgo_trials`, `run_scgo_campaign_arbitrary_compositions`, etc.
-- Flat `run_transition_state_search` without `ts_kwargs`: `from scgo.ts_search.transition_state_run import run_transition_state_search`.
+- `from scgo.run_minima import run_scgo_trials`, `run_scgo_campaign_arbitrary_compositions`, …
+- `from scgo.ts_search.transition_state_run import run_transition_state_search` for a flat keyword API without the `ts` dict.
 
 ---
 
@@ -270,7 +259,7 @@ Preset MLIP (MACE/UMA) GO+TS jobs should build `ga_params` and `ts_kwargs` from 
 
 - TorchSim is an optional tool that provides GPU-accelerated batched optimization when available; SCGO works with EMT (CPU) out of the box for quick tests.
 - For reproducible results, pass `seed=` to the workflow functions above.
-- Optional scripts in `runners/` are intentionally minimal, no-CLI examples that set composition/surface + presets and call canonical `run_go_ts(...)` (see `benchmark/` for sweep-style entry points).
+- Optional scripts in `runners/` are intentionally minimal, no-CLI examples that set composition/surface, build `go`/`ts` dicts, and call canonical `run_go_ts(...)` (see `benchmark/` for sweep-style entry points).
 - See `tests/` for concrete usage patterns.
 
 ---
