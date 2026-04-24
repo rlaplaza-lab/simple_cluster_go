@@ -1,19 +1,20 @@
 #!/usr/bin/env python3
 """Pt5+OH gas-phase: GO + TS via ``run_go_ts``.
 
-``system_type= gas_cluster_adsorbate`` with ``deposition_layout=monolithic`` — one
-initial cluster for the full mobile composition; no ``adsorbate_fragment_template`` is
-required (fragment placement is only used for ``core_then_fragment``).
+``system_type= gas_cluster_adsorbate`` with hierarchical-only adsorbate inputs:
+core-only ``COMPOSITION`` plus one adsorbate fragment as an ASE ``Atoms`` object.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
 
+from ase import Atoms
+
 from scgo.param_presets import get_torchsim_ga_params, get_ts_search_params
 from scgo.runner_api import run_go_ts
 
-COMPOSITION = ["Pt", "Pt", "Pt", "Pt", "Pt", "O", "H"]
+COMPOSITION = ["Pt", "Pt", "Pt", "Pt", "Pt"]
 SEED = 42
 SYSTEM_TYPE = "gas_cluster_adsorbate"
 DEFAULT_OUTPUT_ROOT = Path(__file__).resolve().parent / "results"
@@ -22,12 +23,7 @@ OUTPUT_STEM = "pt5_oh_gas"
 NITER = 8
 POPULATION_SIZE = 40
 MAX_PAIRS = 12
-# Monolithic: single gas-phase cluster for Pt5+OH; hierarchical fragment template N/A.
-ADSORBATE_DEFINITION = {
-    "adsorbate_symbols": ["O", "H"],
-    "core_symbols": ["Pt", "Pt", "Pt", "Pt", "Pt"],
-    "deposition_layout": "monolithic",
-}
+ADSORBATES = [Atoms(symbols=["O", "H"], positions=[[0.0, 0.0, 0.0], [0.0, 0.0, 0.96]])]
 
 
 def main() -> None:
@@ -46,7 +42,7 @@ def main() -> None:
         output_root=DEFAULT_OUTPUT_ROOT,
         output_stem=OUTPUT_STEM,
         system_type=SYSTEM_TYPE,
-        adsorbate_definition=ADSORBATE_DEFINITION,
+        adsorbates=ADSORBATES,
     )
 
 

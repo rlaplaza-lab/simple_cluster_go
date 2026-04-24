@@ -22,7 +22,7 @@ SystemType = Literal[
     "surface_cluster_adsorbate",
 ]
 
-DepositionLayout = Literal["monolithic", "core_then_fragment"]
+DepositionLayout = Literal["core_then_fragment"]
 
 
 class AdsorbateDefinition(TypedDict, total=False):
@@ -36,8 +36,7 @@ class AdsorbateDefinition(TypedDict, total=False):
     ``composition``.
 
     **Empty core** (``core_symbols=[]``): all mobile atoms are in
-    ``adsorbate_symbols``. **Hierarchical** (``deposition_layout=core_then_fragment``)
-    requires a non-empty core; use monolithic for pure-molecular seeds.
+    ``adsorbate_symbols``.
 
     **Monolithic (default)**: one gas-phase cluster for the full mobile
     ``composition`` (or hierarchical rules do not apply). On surfaces, the
@@ -56,6 +55,9 @@ class AdsorbateDefinition(TypedDict, total=False):
     deposition_layout: DepositionLayout
     fragment_anchor_index: NotRequired[int]
     fragment_bond_axis: NotRequired[list[int]]
+
+
+AdsorbatesInput = Atoms | list[Atoms]
 
 
 @dataclass(frozen=True)
@@ -343,25 +345,15 @@ def validate_adsorbate_definition(
             f"{context} requires adsorbate_definition when system_type={system_type!r}."
         )
 
-    layout_raw = adsorbate_definition.get("deposition_layout", "monolithic")
-    if layout_raw not in ("monolithic", "core_then_fragment"):
+    layout_raw = adsorbate_definition.get("deposition_layout", "core_then_fragment")
+    if layout_raw != "core_then_fragment":
         raise ValueError(
-            "adsorbate_definition['deposition_layout'] must be 'monolithic' or "
-            f"'core_then_fragment', got {layout_raw!r}"
+            "SCGO now supports hierarchical adsorbate initialization only. "
+            "Set deposition_layout='core_then_fragment'."
         )
-    layout: DepositionLayout = layout_raw  # type: ignore[assignment]
-
     core_list, _ads_list = validate_composition_against_adsorbate(
         composition, adsorbate_definition, context=context
     )
-
-    if layout == "core_then_fragment" and len(core_list) == 0:
-        raise ValueError(
-            f"{context}: deposition_layout='core_then_fragment' requires a non-empty "
-            "adsorbate_definition['core_symbols'] (fragment placement needs a core). "
-            "Use deposition_layout='monolithic' for molecular-only mobile (empty core) "
-            "or pick system_type without adsorbate roles."
-        )
 
     fba = adsorbate_definition.get("fragment_bond_axis")
     if fba is not None:
@@ -378,3 +370,75 @@ def validate_adsorbate_definition(
             "adsorbate_definition['fragment_anchor_index'] must be int or omitted, "
             f"got {ai!r}"
         )
+
+
+def normalize_adsorbates_input(
+    adsorbates: AdsorbatesInput | None, *, context: str
+) -> list[Atoms]:
+    prefix = f"{context}: " if context else ""
+    if adsorbates is None:
+        raise ValueError(
+            f"{prefix}adsorbates is required for adsorbate system types."
+        )
+    items = adsorbates if isinstance(adsorbates, list) else [adsorbates]
+    out: list[Atoms] = []
+    for idx, item in enumerate(items):
+        if not isinstance(item, Atoms):
+            raise TypeError(
+                f"{prefix}adsorbates[{idx}] must be ase.Atoms, got {type(item).__name__}."
+            )
+        if len(item) == 0:
+            raise ValueError(f"{prefix}adsorbates[{idx}] must not be empty.")
+        out.append(item.copy())
+    if not out:
+        raise ValueError(f"{prefix}adsorbates must contain at least one fragment.")
+    return out
+
+
+def flatten_adsorbate_symbols(adsorbates: list[Atoms]) -> list[str]:
+    symbols: list[str] = []
+    for frag in adsorbates:
+        symbols.extend([str(s) for s in frag.get_chemical_symbols()])
+    return symbols
+
+
+def combine_adsorbates_to_template(adsorbates: list[Atoms]) -> Atoms:
+    if not adsorbates:
+        raise ValueError("adsorbates must contain at least one fragment")
+    combined = adsorbates[0].copy()
+    for frag in adsorbates[1:]:
+        combined += frag.copy()
+    return combined
+
+
+def build_adsorbate_definition_from_inputs(
+    *,
+    system_type: SystemType,
+    composition: list[str],
+    adsorbates: AdsorbatesInput | None,
+    context: str,
+) -> tuple[AdsorbateDefinition | None, Atoms | None, list[str]]:
+    policy = get_system_policy(system_type)
+    if not policy.has_adsorbate:
+        if adsorbates is not None:
+            raise ValueError(
+                f"{context} does not accept adsorbates for "
+                f"system_type={system_type!r}."
+            )
+        return None, None, list(composition)
+    core_list = [str(s) for s in composition]
+    fragments = normalize_adsorbates_input(adsorbates, context=context)
+    ads_list = flatten_adsorbate_symbols(fragments)
+    full_mobile_composition = list(core_list) + list(ads_list)
+    ads_def: AdsorbateDefinition = {
+        "core_symbols": core_list,
+        "adsorbate_symbols": ads_list,
+        "deposition_layout": "core_then_fragment",
+    }
+    validate_adsorbate_definition(
+        system_type=system_type,
+        composition=full_mobile_composition,
+        adsorbate_definition=ads_def,
+        context=context,
+    )
+    return ads_def, combine_adsorbates_to_template(fragments), full_mobile_composition

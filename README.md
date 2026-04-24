@@ -84,13 +84,11 @@ SCGO supports exactly four explicit `system_type` values:
 
 `system_type` must be passed to each `run_*` API call. System-definition keys are intentionally rejected from preset dicts (`go_params` / `ts_params`) to keep one canonical source of truth at the API boundary.
 For adsorbate system types (`gas_cluster_adsorbate`, `surface_cluster_adsorbate`),
-high-level runners require `adsorbate_definition` with **both** `core_symbols` and
-`adsorbate_symbols` (use `[]` for an empty side). The run `composition` must match
-`core_symbols + adsorbate_symbols` **in list order** (the mobile region after any slab).
-Hierarchical `deposition_layout="core_then_fragment"` needs a non-empty core; use
-monolithic for a molecular-only mobile region (`core_symbols=[]`).
-Example:
-`{"core_symbols": ["Pt", "Pt", "Pt", "Pt", "Pt"], "adsorbate_symbols": ["O", "H"]}`.
+high-level runners require core-only `composition` and `adsorbates` (one ASE `Atoms`
+fragment or a list of fragments). SCGO flattens adsorbate symbols in provided fragment
+order and constructs the full mobile composition as
+`core_composition + flattened_adsorbate_symbols` (mobile region after any slab).
+Hierarchical initialization is the only supported adsorbate layout.
 
 ---
 
@@ -140,7 +138,7 @@ Preset-vs-runtime split in `runner_api`:
 
 - Put scientific/tuning knobs in preset dicts (`go_params`/`ts_params`): calculator choice, optimizer settings, NEB settings, pairing thresholds, etc.
 - Keep run-control knobs on the `run_*` call itself: `verbosity`, `output_dir`, `output_root`, `output_stem`, `seed`, `log_summary`, `write_timing_json`, `profile_ga`.
-- Keep system-definition inputs on the `run_*` call itself: `system_type`, and when required by system type, `surface_config` and `adsorbate_definition`.
+- Keep system-definition inputs on the `run_*` call itself: `system_type`, and when required by system type, `surface_config`, core-only `composition`, and `adsorbates`.
 
 Inspect -> edit -> run pattern:
 
@@ -205,7 +203,7 @@ params["optimizer_params"]["ga"]["surface_config"] = surface_config
 - **`run_go`**: pass `surface_config=...` directly to `run_go(...)`; it is copied into each **present** `optimizer_params` entry among `simple` / `bh` / `ga` so the active algorithm sees the slab. The high-level runner only selects GA when `len(composition) >= 4`, so use **at least four adsorbate atoms** if you rely on automatic algorithm choice; for dimers/trimers, call `ga_go` directly.
 - For slab workflows, choose `system_type="surface_cluster"` (supported cluster only) or `system_type="surface_cluster_adsorbate"` (supported cluster with explicit adsorbate-mode policies). Use `scgo.runner_surface.make_surface_config` for a custom ASE slab; use `scgo.surface.make_graphite_surface_config` for the bundled graphite template.
 
-**`adsorbate_definition` and initial structures:** For both `gas_cluster_adsorbate` and `surface_cluster_adsorbate`, set explicit `core_symbols` and `adsorbate_symbols` that partition the mobile `composition` in order (slab atoms are not in `composition`). With `deposition_layout="monolithic"` (default), seeds are one gas-phase cluster for the full mobile composition, then (for surface) deposited on the slab. With `deposition_layout="core_then_fragment"`, the code builds the core, places a rigid fragment (from `adsorbate_fragment_template` or a built-in default), then (for surface) deposits the combined cluster; the same hierarchical path is used for **gas** GA when you choose this layout. Optional: `run_go(..., cluster_adsorbate_config=ClusterAdsorbateConfig(...))` for fragment height and validation. Use `scgo.surface.describe_surface_config` to log effective slab and height settings. GA and basin-hopping attach `n_core_atoms` and per-role symbol JSON in metadata for round-trip checks. When an `adsorbate_definition` is in scope, [`validate_structure_for_system_type`](scgo/system_types.py) also asserts that the mobile region’s chemical symbols match `core_symbols + adsorbate_symbols` in order (in addition to geometry checks). The helper [`validate_mobile_symbols_match_adsorbate_definition`](scgo/system_types.py) is available for the same symbol order check alone.
+**Adsorbate inputs and initial structures:** For both `gas_cluster_adsorbate` and `surface_cluster_adsorbate`, pass core-only `composition` plus `adsorbates` (one `Atoms` or list of `Atoms`). SCGO derives a strict mobile partition in order (`core_symbols == composition`, then flattened adsorbate symbols); slab atoms are not part of `composition`. SCGO uses hierarchical initialization only: build the core, place the rigid fragment(s), then (for surface) deposit the combined cluster on the slab. Optional: `run_go(..., cluster_adsorbate_config=ClusterAdsorbateConfig(...))` for fragment height and validation. Use `scgo.surface.describe_surface_config` to log effective slab and height settings. GA and basin-hopping attach `n_core_atoms` and per-role symbol JSON in metadata for round-trip checks. When adsorbate metadata is present, [`validate_structure_for_system_type`](scgo/system_types.py) also asserts that the mobile region’s chemical symbols match `core_symbols + adsorbate_symbols` in order (in addition to geometry checks). The helper [`validate_mobile_symbols_match_adsorbate_definition`](scgo/system_types.py) is available for the same symbol order check alone.
 
 ### Slab motion during local relaxation
 
@@ -322,8 +320,8 @@ Benchmarks comparing MACE vs UMA on the same GA structure can use [`get_uma_ga_b
 |--------|----------------|-------|
 | [`runners/run_pt5_gas.py`](runners/run_pt5_gas.py) | `gas_cluster` | Gas-phase `Pt5` only |
 | [`runners/run_pt5_graphite.py`](runners/run_pt5_graphite.py) | `surface_cluster` | `Pt5` on preset graphite |
-| [`runners/run_pt5_oh_gas.py`](runners/run_pt5_oh_gas.py) | `gas_cluster_adsorbate` | `Pt5`+OH; `deposition_layout=monolithic` (no fragment template) |
-| [`runners/run_pt5_2oh_graphite.py`](runners/run_pt5_2oh_graphite.py) | `surface_cluster_adsorbate` | `Pt5`+2OH; `deposition_layout=core_then_fragment` with default fragment template |
+| [`runners/run_pt5_oh_gas.py`](runners/run_pt5_oh_gas.py) | `gas_cluster_adsorbate` | core-only `Pt5` composition + one `adsorbates` OH fragment |
+| [`runners/run_pt5_2oh_graphite.py`](runners/run_pt5_2oh_graphite.py) | `surface_cluster_adsorbate` | core-only `Pt5` composition + two `adsorbates` OH fragments |
 
   For multi-size MLIP sweeps, see [`benchmark/`](benchmark/) (e.g. [`benchmark_Pt.py`](benchmark/benchmark_Pt.py), [`benchmark_Pt_surface_graphite.py`](benchmark/benchmark_Pt_surface_graphite.py)), not `tests/benchmarks/`.
 - See `tests/` for concrete usage patterns.

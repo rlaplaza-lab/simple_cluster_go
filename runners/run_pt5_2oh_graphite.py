@@ -1,19 +1,21 @@
 #!/usr/bin/env python3
 """Pt5+2OH on graphite: GO + TS via ``run_go_ts``.
 
-``system_type= surface_cluster_adsorbate`` with ``deposition_layout=core_then_fragment``:
-hierarchical core + rigid OH dimer fragment, then deposition on the preset graphite slab.
+``system_type= surface_cluster_adsorbate`` with hierarchical-only adsorbate inputs:
+core-only ``COMPOSITION`` plus one-or-more adsorbate ASE ``Atoms`` fragments.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
 
+from ase import Atoms
+
 from scgo.param_presets import get_torchsim_ga_params, get_ts_search_params
 from scgo.runner_api import run_go_ts
-from scgo.surface import build_default_fragment_template, make_graphite_surface_config
+from scgo.surface import make_graphite_surface_config
 
-COMPOSITION = ["Pt", "Pt", "Pt", "Pt", "Pt", "O", "H", "O", "H"]
+COMPOSITION = ["Pt", "Pt", "Pt", "Pt", "Pt"]
 SEED = 42
 SYSTEM_TYPE = "surface_cluster_adsorbate"
 DEFAULT_OUTPUT_ROOT = Path(__file__).resolve().parent / "results"
@@ -23,11 +25,10 @@ NITER = 6
 POPULATION_SIZE = 24
 MAX_PAIRS = 10
 GA_BATCH_SIZE = 4
-ADSORBATE_DEFINITION = {
-    "adsorbate_symbols": ["O", "H", "O", "H"],
-    "core_symbols": ["Pt", "Pt", "Pt", "Pt", "Pt"],
-    "deposition_layout": "core_then_fragment",
-}
+ADSORBATES = [
+    Atoms(symbols=["O", "H"], positions=[[0.0, 0.0, 0.0], [0.0, 0.0, 0.96]]),
+    Atoms(symbols=["O", "H"], positions=[[2.2, 0.0, 0.0], [2.2, 0.0, 0.96]]),
+]
 
 
 def _build_go_params(surface_config) -> dict:
@@ -64,10 +65,7 @@ def main() -> None:
         output_stem=OUTPUT_STEM,
         surface_config=surface_config,
         system_type=SYSTEM_TYPE,
-        adsorbate_definition=ADSORBATE_DEFINITION,
-        adsorbate_fragment_template=build_default_fragment_template(
-            ADSORBATE_DEFINITION["adsorbate_symbols"]
-        ),
+        adsorbates=ADSORBATES,
     )
 
 

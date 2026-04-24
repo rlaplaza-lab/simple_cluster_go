@@ -55,8 +55,17 @@ def _emt_ts_surf_ads() -> dict:
     }
 
 
-def _ads_def(*, n_pt: int = 3) -> dict:
-    return {"adsorbate_symbols": ["O", "H"], "core_symbols": ["Pt"] * n_pt}
+def _adsorbates_oh(*, n: int = 1) -> list[Atoms]:
+    out: list[Atoms] = []
+    for i in range(n):
+        shift = float(2.2 * i)
+        out.append(
+            Atoms(
+                symbols=["O", "H"],
+                positions=[[shift, 0.0, 0.0], [shift, 0.0, 0.96]],
+            )
+        )
+    return out
 
 
 def _surface_cfg() -> SurfaceSystemConfig:
@@ -285,15 +294,12 @@ def test_run_go_system_type_wires_optimizer_params(monkeypatch):
 
     monkeypatch.setattr("scgo.runner_api.run_scgo_trials", _fake_trials)
     run_go(
-        "Pt5O2H2",
+        ["Pt", "Pt", "Pt", "Pt", "Pt"],
         params={"optimizer_params": {"ga": {}, "bh": {}}},
         verbosity=0,
         surface_config=_surface_cfg(),
         system_type="surface_cluster_adsorbate",
-        adsorbate_definition={
-            "core_symbols": ["Pt", "Pt", "Pt", "Pt", "Pt"],
-            "adsorbate_symbols": ["O", "O", "H", "H"],
-        },
+        adsorbates=_adsorbates_oh(n=2),
     )
     params = captured["params"]
     assert (
@@ -346,7 +352,7 @@ def test_run_go_system_type_matrix(monkeypatch, system_type):
         return []
 
     monkeypatch.setattr("scgo.runner_api.run_scgo_trials", _fake_trials)
-    composition = ["Pt", "Pt", "Pt", "O", "H"] if "adsorbate" in system_type else "Pt3"
+    composition = ["Pt", "Pt", "Pt"] if "adsorbate" in system_type else "Pt3"
     kwargs = {}
     if "surface" in system_type:
         kwargs["surface_config"] = _surface_cfg()
@@ -355,14 +361,7 @@ def test_run_go_system_type_matrix(monkeypatch, system_type):
         params={"optimizer_params": {"simple": {}, "ga": {}, "bh": {}}},
         verbosity=0,
         system_type=system_type,
-        adsorbate_definition=(
-            {
-                "core_symbols": ["Pt", "Pt", "Pt"],
-                "adsorbate_symbols": ["O", "H"],
-            }
-            if "adsorbate" in system_type
-            else None
-        ),
+        adsorbates=(_adsorbates_oh(n=1) if "adsorbate" in system_type else None),
         **kwargs,
     )
     params = captured["params"]
@@ -385,30 +384,17 @@ def test_run_go_requires_system_type():
         run_go("Pt3", params=None, verbosity=0)
 
 
-def test_run_go_requires_adsorbate_definition_for_adsorbate_system_types():
-    with pytest.raises(ValueError, match="requires adsorbate_definition"):
+def test_run_go_requires_adsorbates_for_adsorbate_system_types():
+    with pytest.raises(ValueError, match="adsorbates is required"):
         run_go(
-            "Pt5OH",
+            "Pt5",
             params=None,
             verbosity=0,
             system_type="gas_cluster_adsorbate",
         )
 
 
-def test_run_go_rejects_adsorbate_definition_for_non_adsorbate_system_types():
-    with pytest.raises(
-        ValueError, match="received adsorbate_definition for non-adsorbate"
-    ):
-        run_go(
-            "Pt3",
-            params=None,
-            verbosity=0,
-            system_type="gas_cluster",
-            adsorbate_definition={"adsorbate_symbols": ["O", "H"]},
-        )
-
-
-def test_run_go_accepts_valid_adsorbate_definition(monkeypatch):
+def test_run_go_accepts_valid_adsorbates_input(monkeypatch):
     captured: dict[str, object] = {}
 
     def _fake_trials(composition, *args, **kwargs):
@@ -417,11 +403,11 @@ def test_run_go_accepts_valid_adsorbate_definition(monkeypatch):
 
     monkeypatch.setattr("scgo.runner_api.run_scgo_trials", _fake_trials)
     run_go(
-        ["Pt", "Pt", "Pt", "Pt", "Pt", "O", "H"],
+        ["Pt", "Pt", "Pt", "Pt", "Pt"],
         params=None,
         verbosity=0,
         system_type="gas_cluster_adsorbate",
-        adsorbate_definition=_ads_def(n_pt=5),
+        adsorbates=_adsorbates_oh(n=1),
     )
     assert captured["composition"] == ["Pt", "Pt", "Pt", "Pt", "Pt", "O", "H"]
 
@@ -506,16 +492,13 @@ def test_run_ts_search_passes_system_type(monkeypatch):
 
     monkeypatch.setattr("scgo.runner_api._ts_search", _fake)
     run_ts_search(
-        "Pt5O2H2",
+        ["Pt", "Pt", "Pt", "Pt", "Pt"],
         params={"calculator": "EMT"},
         ts_params=_emt_ts_surf_ads(),
         verbosity=0,
         surface_config=_surface_cfg(),
         system_type="surface_cluster_adsorbate",
-        adsorbate_definition={
-            "core_symbols": ["Pt", "Pt", "Pt", "Pt", "Pt"],
-            "adsorbate_symbols": ["O", "O", "H", "H"],
-        },
+        adsorbates=_adsorbates_oh(n=2),
     )
     assert captured["kwargs"]["system_type"] == "surface_cluster_adsorbate"
 
@@ -527,14 +510,13 @@ def test_run_ts_search_requires_system_type():
         )
 
 
-def test_run_ts_search_requires_adsorbate_definition_for_adsorbate_system_types():
-    with pytest.raises(ValueError, match="requires adsorbate_definition"):
+def test_run_ts_search_requires_adsorbates_for_adsorbate_system_types():
+    with pytest.raises(ValueError, match="adsorbates is required"):
         run_ts_search(
-            "Pt5OH",
+            "Pt5",
             params={"calculator": "EMT"},
             ts_params={
                 **_emt_ts_gasc(),
-                "system_type": "gas_cluster_adsorbate",
             },
             verbosity=0,
             system_type="gas_cluster_adsorbate",
