@@ -142,9 +142,7 @@ def add_ts_to_database(
         )
 
         run_id_src = get_metadata(ts_atoms, "run_id")
-        trial_src = get_metadata(ts_atoms, "trial") or get_metadata(
-            ts_atoms, "trial_id"
-        )
+        trial_src = get_metadata(ts_atoms, "trial_id")
         if run_id_src is not None or trial_src is not None:
             persist_provenance(ts_atoms, run_id=run_id_src, trial_id=trial_src)
 
@@ -252,11 +250,8 @@ def tag_unique_ts_in_databases(
 
                 if atoms_for_db is not None:
                     run_id_src = _get_min_id(i, "run_id") or _get_min_id(j, "run_id")
-                    trial_src = (
-                        _get_min_id(i, "trial")
-                        or _get_min_id(i, "trial_id")
-                        or _get_min_id(j, "trial")
-                        or _get_min_id(j, "trial_id")
+                    trial_src = _get_min_id(i, "trial_id") or _get_min_id(
+                        j, "trial_id"
                     )
                     if run_id_src is not None or trial_src is not None:
                         add_metadata(

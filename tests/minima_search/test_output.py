@@ -25,7 +25,7 @@ def test_xyz_file_format_validation(tmp_path, pt2_with_calc):
     from scgo.database.metadata import add_metadata
 
     add_metadata(atoms, raw_score=-10.0)
-    atoms.info["provenance"] = {"trial": 1}
+    atoms.info["provenance"] = {"trial_id": 1}
 
     # Write XYZ file
     xyz_path = tmp_path / "test.xyz"
@@ -74,7 +74,7 @@ def test_xyz_file_provenance_tracking(tmp_path, pt2_with_calc):
     """Test that XYZ files include provenance information."""
     atoms = pt2_with_calc.copy()
     atoms.info["key_value_pairs"] = {"raw_score": -10.0}
-    atoms.info["provenance"] = {"trial": 2, "optimizer": "bh"}
+    atoms.info["provenance"] = {"trial_id": 2, "optimizer": "bh"}
 
     xyz_path = tmp_path / "test_provenance.xyz"
     write(str(xyz_path), atoms, format="xyz")
@@ -458,7 +458,7 @@ def test_final_xyz_is_canonicalized_before_write(tmp_path, rng, monkeypatch):
         cell=[10.0, 10.0, 10.0],
         pbc=False,
     )
-    add_metadata(atoms, raw_score=-1.0, run_id="run_test", trial=1)
+    add_metadata(atoms, raw_score=-1.0, run_id="run_test", trial_id=1)
 
     def fake_scgo(**kwargs):
         return [(-1.0, atoms.copy())]

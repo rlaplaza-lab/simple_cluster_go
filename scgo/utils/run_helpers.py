@@ -388,7 +388,6 @@ def prepare_algorithm_kwargs(
         Dictionary ready for direct algorithm execution.
     """
     resolved = resolve_auto_params(algo_params, composition, chosen_go)
-    system_type: SystemType | None = None
     system_type = resolve_and_validate_system_type(
         algo_params=algo_params,
     )
@@ -403,14 +402,13 @@ def prepare_algorithm_kwargs(
         algo_params, {"n_trials", "niter", "population_size"}
     )
     base_kwargs.update(resolved)
-    if system_type is not None:
-        base_kwargs["system_type"] = system_type
-        policy = get_system_policy(system_type)
-        if chosen_go == "ga" and policy.uses_surface:
-            nlr = int(base_kwargs["niter_local_relaxation"])
-            base_kwargs["niter_local_relaxation"] = max(
-                SURFACE_GA_MIN_LOCAL_RELAX_STEPS, nlr
-            )
+    base_kwargs["system_type"] = system_type
+    policy = get_system_policy(system_type)
+    if chosen_go == "ga" and policy.uses_surface:
+        nlr = int(base_kwargs["niter_local_relaxation"])
+        base_kwargs["niter_local_relaxation"] = max(
+            SURFACE_GA_MIN_LOCAL_RELAX_STEPS, nlr
+        )
 
     if "optimizer" in base_kwargs:
         base_kwargs["optimizer"] = _normalize_optimizer_class(base_kwargs["optimizer"])
@@ -423,6 +421,15 @@ def prepare_algorithm_kwargs(
 
     if chosen_go in {"ga", "bh"}:
         _resolve_timing_params_into(base_kwargs, algo_params)
+
+    for key in (
+        "adsorbate_definition",
+        "adsorbate_fragment_template",
+        "cluster_adsorbate_config",
+    ):
+        v = params.get(key)
+        if v is not None:
+            base_kwargs[key] = v
 
     return base_kwargs
 

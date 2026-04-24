@@ -214,12 +214,12 @@ class TestDatabaseSetupAndFlow:
 
     def test_add_relaxed_step_missing_raw_score_assigns_penalty(self, tmp_path):
         """If raw_score is missing and energy can't be computed, add_relaxed_step should
-        assign PENALTY_ENERGY and legacy raw_score so GA runs continue instead of failing."""
+        assign PENALTY_ENERGY and set raw_score so GA runs continue instead of failing."""
         with _setup_test_db(
             tmp_path, "test.db", Atoms("Pt2"), initial_candidate=None
         ) as (da, _):
             a = Atoms("Pt2", positions=[[0, 0, 0], [2.5, 0, 0]])
-            # Ensure no legacy raw_score present
+            # Ensure no raw_score present
             a.info.pop("key_value_pairs", None)
 
             # Force get_potential_energy to raise to mimic a calculator failure

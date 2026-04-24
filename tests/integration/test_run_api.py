@@ -55,8 +55,8 @@ def _emt_ts_surf_ads() -> dict:
     }
 
 
-def _ads_def() -> dict:
-    return {"adsorbate_symbols": ["O", "H"], "core_symbols": ["Pt"]}
+def _ads_def(*, n_pt: int = 3) -> dict:
+    return {"adsorbate_symbols": ["O", "H"], "core_symbols": ["Pt"] * n_pt}
 
 
 def _surface_cfg() -> SurfaceSystemConfig:
@@ -290,7 +290,10 @@ def test_run_go_system_type_wires_optimizer_params(monkeypatch):
         verbosity=0,
         surface_config=_surface_cfg(),
         system_type="surface_cluster_adsorbate",
-        adsorbate_definition={"adsorbate_symbols": ["O", "O", "H", "H"]},
+        adsorbate_definition={
+            "core_symbols": ["Pt", "Pt", "Pt", "Pt", "Pt"],
+            "adsorbate_symbols": ["O", "O", "H", "H"],
+        },
     )
     params = captured["params"]
     assert (
@@ -352,7 +355,14 @@ def test_run_go_system_type_matrix(monkeypatch, system_type):
         params={"optimizer_params": {"simple": {}, "ga": {}, "bh": {}}},
         verbosity=0,
         system_type=system_type,
-        adsorbate_definition=_ads_def() if "adsorbate" in system_type else None,
+        adsorbate_definition=(
+            {
+                "core_symbols": ["Pt", "Pt", "Pt"],
+                "adsorbate_symbols": ["O", "H"],
+            }
+            if "adsorbate" in system_type
+            else None
+        ),
         **kwargs,
     )
     params = captured["params"]
@@ -411,7 +421,7 @@ def test_run_go_accepts_valid_adsorbate_definition(monkeypatch):
         params=None,
         verbosity=0,
         system_type="gas_cluster_adsorbate",
-        adsorbate_definition=_ads_def(),
+        adsorbate_definition=_ads_def(n_pt=5),
     )
     assert captured["composition"] == ["Pt", "Pt", "Pt", "Pt", "Pt", "O", "H"]
 
@@ -502,7 +512,10 @@ def test_run_ts_search_passes_system_type(monkeypatch):
         verbosity=0,
         surface_config=_surface_cfg(),
         system_type="surface_cluster_adsorbate",
-        adsorbate_definition={"adsorbate_symbols": ["O", "O", "H", "H"]},
+        adsorbate_definition={
+            "core_symbols": ["Pt", "Pt", "Pt", "Pt", "Pt"],
+            "adsorbate_symbols": ["O", "O", "H", "H"],
+        },
     )
     assert captured["kwargs"]["system_type"] == "surface_cluster_adsorbate"
 

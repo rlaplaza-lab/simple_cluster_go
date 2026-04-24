@@ -65,14 +65,14 @@ def test_ts_search_uses_only_tagged_final_minima(tmp_path):
     atoms_c1 = Atoms("Pt", positions=[[0, 0, 0]])
     atoms_c1.info.setdefault("provenance", {})
     atoms_c1.info["provenance"]["run_id"] = "run_test"
-    atoms_c1.info["provenance"]["trial"] = 1
+    atoms_c1.info["provenance"]["trial_id"] = 1
     atoms_c1.info.setdefault("metadata", {})
     atoms_c1.info["metadata"]["confid"] = "c1"
 
     atoms_c2 = Atoms("Pt", positions=[[0, 0, 0]])
     atoms_c2.info.setdefault("provenance", {})
     atoms_c2.info["provenance"]["run_id"] = "run_test"
-    atoms_c2.info["provenance"]["trial"] = 1
+    atoms_c2.info["provenance"]["trial_id"] = 1
     atoms_c2.info.setdefault("metadata", {})
     atoms_c2.info["metadata"]["confid"] = "c2"
 

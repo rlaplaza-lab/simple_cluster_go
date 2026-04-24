@@ -84,6 +84,46 @@ def validate_stored_slab_adsorbate_metadata(atoms: Atoms) -> None:
         )
 
 
+def validate_stored_mobile_partition_metadata(atoms: Atoms) -> None:
+    """If GA core/adsorbate metadata is present, verify the mobile region matches it.
+
+    For ``surface_cluster_adsorbate``, the mobile region follows the slab prefix.
+    For ``gas_cluster_adsorbate``, the full structure is mobile.
+    """
+    st = get_metadata(atoms, "system_type")
+    if st not in {"gas_cluster_adsorbate", "surface_cluster_adsorbate"}:
+        return
+    n_core = int(get_metadata(atoms, "n_core_atoms", 0) or 0)
+    n_ads = int(get_metadata(atoms, "n_adsorbate_fragment_atoms", 0) or 0)
+    if n_core == 0 and n_ads == 0:
+        return
+    n_slab = int(get_metadata(atoms, "n_slab_atoms", 0) or 0) if st == "surface_cluster_adsorbate" else 0
+    mobile = atoms.get_chemical_symbols()[n_slab:]
+    if len(mobile) < n_core + n_ads:
+        raise ValueError(
+            "Mobile region shorter than n_core_atoms + n_adsorbate_fragment_atoms: "
+            f"len(mobile)={len(mobile)}, n_core={n_core}, n_ads={n_ads}"
+        )
+    core_js = get_metadata(atoms, "core_chemical_symbols_json", None)
+    ads_js = get_metadata(atoms, "adsorbate_fragment_chemical_symbols_json", None)
+    if core_js is None or ads_js is None:
+        return
+    core_exp = json.loads(core_js)
+    ads_exp = json.loads(ads_js)
+    if mobile[:n_core] != list(core_exp):
+        raise ValueError(
+            "Loaded structure disagrees with stored core_chemical_symbols_json for the "
+            f"mobile region (after slab). Expected core prefix (len {n_core}): "
+            f"{core_exp[:12]}{'...' if len(core_exp) > 12 else ''}; "
+            f"got: {mobile[: min(12, n_core)]!r}."
+        )
+    if mobile[n_core : n_core + n_ads] != list(ads_exp):
+        raise ValueError(
+            "Loaded structure disagrees with stored "
+            "adsorbate_fragment_chemical_symbols_json for the mobile region."
+        )
+
+
 def _slab_top_coordinate(slab: Atoms, axis: int) -> float:
     """Max Cartesian coordinate of slab atoms along ``axis`` (vacuum side)."""
     pos = slab.get_positions()
@@ -102,23 +142,27 @@ def validate_supported_cluster_deposit(
     connectivity_factor: float = CONNECTIVITY_FACTOR,
     penetration_tolerance: float = _BINDING_PENETRATION_TOLERANCE_A,
 ) -> tuple[bool, str]:
-    """Validate a combined slab+adsorbate structure after placement.
+    """Validate a combined slab + supported mobile cluster (full cluster, not the fragment only).
+
+    The slice ``combined[n_slab:]`` is the **entire** supported cluster: nanoparticle
+    core plus any chemisorbed species in **one** contiguous block. (This is not the
+    same as ``adsorbate_definition['adsorbate_symbols']`` alone.)
 
     Uses the same clash/connectivity semantics as gas-phase
     :func:`~scgo.initialization.geometry_helpers.validate_cluster_structure` on
-    the adsorbate slice, and requires at least one adsorbate–slab pair within
+    that mobile slice, and requires at least one mobile–slab pair within
     the covalent-radius connectivity threshold (aligned with
     ``connectivity_factor``). Optionally uses MIC for cross-set distances when
     ``use_mic`` is True (match :attr:`SurfaceSystemConfig.comparator_use_mic`).
 
     Args:
-        combined: Full system with slab atoms first, then adsorbate.
+        combined: Full system with slab atoms first, then the supported mobile cluster.
         n_slab: Number of slab atoms (prefix length).
         surface_normal_axis: Cartesian axis index for the surface normal.
-        use_mic: Pass through to ``Atoms.get_distance`` for adsorbate–slab pairs.
-        min_distance_factor: Adsorbate self clash scale (initialization default).
+        use_mic: Pass through to ``Atoms.get_distance`` for mobile–slab pairs.
+        min_distance_factor: Mobile cluster self clash scale (initialization default).
         connectivity_factor: Bonding connectivity scale (initialization default).
-        penetration_tolerance: Allow adsorbate atoms this far (Å) below the
+        penetration_tolerance: Allow mobile cluster atoms this far (Å) below the
             nominal slab top along ``surface_normal_axis``.
 
     Returns:

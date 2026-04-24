@@ -93,15 +93,13 @@ def simple_go(
 
     logger.info(f"Performing simple optimization for {n_atoms}-atom cluster")
 
-    _HPC_RETRY_EXCEPTIONS = HPC_DATABASE_EXCEPTIONS + (IOError,)
-
     try:
         a_optimized = retry_with_backoff(
             da.get_an_unrelaxed_candidate,
             max_retries=5,
             initial_delay=0.2,
             backoff_factor=2.0,
-            exception_types=_HPC_RETRY_EXCEPTIONS,
+            exception_types=HPC_DATABASE_EXCEPTIONS,
         )
         perform_local_relaxation(
             a_optimized,
@@ -119,7 +117,7 @@ def simple_go(
             max_retries=5,
             initial_delay=0.2,
             backoff_factor=2.0,
-            exception_types=_HPC_RETRY_EXCEPTIONS,
+            exception_types=HPC_DATABASE_EXCEPTIONS,
         )
 
         all_candidates = retry_with_backoff(
@@ -127,7 +125,7 @@ def simple_go(
             max_retries=5,
             initial_delay=0.2,
             backoff_factor=2.0,
-            exception_types=_HPC_RETRY_EXCEPTIONS,
+            exception_types=HPC_DATABASE_EXCEPTIONS,
         )
         all_minima = extract_minima_from_database(all_candidates)
 

@@ -13,6 +13,7 @@ import sqlite3
 from pathlib import Path
 
 from scgo.database.connection import open_db
+from scgo.database.constants import SYSTEMS_JSON_COLUMN
 from scgo.database.registry import DatabaseRegistry
 from scgo.database.schema import is_scgo_database
 from scgo.utils.helpers import get_composition_counts
@@ -45,26 +46,19 @@ class DatabaseDiscovery:
         >>> discovery.clear_cache()
     """
 
-    def __init__(self, base_dir: str | Path, use_registry: bool = True):
+    def __init__(self, base_dir: str | Path):
         """Initialize database discovery.
 
         Args:
             base_dir: Base directory to search (usually output directory)
-            use_registry: Whether to use persistent registry for faster lookups (default True)
         """
         self.base_dir = Path(base_dir)
-        self.use_registry = use_registry
         self._cache: dict[str, list[Path]] = {}
         self._metadata_cache: dict[Path, dict] = {}
 
-        # Initialize registry if enabled (fail-fast on errors — strict mode)
-        self._registry: DatabaseRegistry | None = None
-        if use_registry:
-            # Let DatabaseRegistry raise for invalid/unclean registries so
-            # callers are aware and can take corrective action.
-            self._registry = DatabaseRegistry(self.base_dir)
-            logger.debug("Using registry for fast database discovery")
-
+        # Persistent registry for fast lookups (fail-fast on invalid registries)
+        self._registry = DatabaseRegistry(self.base_dir)
+        logger.debug("Using registry for fast database discovery")
         logger.debug(f"Initialized DatabaseDiscovery for {self.base_dir}")
 
     def find_databases(
@@ -106,8 +100,7 @@ class DatabaseDiscovery:
             logger.debug("Using cached results for: %s", cache_key)
             return self._cache[cache_key]
 
-        # Try registry first if enabled
-        if self._registry and db_filename == "*.db":
+        if db_filename == "*.db":
             db_files = self._registry.find_databases(
                 composition=composition,
                 run_id=run_id,
@@ -274,19 +267,15 @@ class DatabaseDiscovery:
             return f"{run_id}/trial_{trial_id}/{db_filename}"
         if run_id:
             return f"{run_id}/**/{db_filename}"
-        else:
-            return f"run_*/**/{db_filename}"
+        return f"run_*/**/{db_filename}"
 
     def _get_first_relaxed_candidate(self, db) -> object | None:
-        """Get one relaxed candidate via SQL row-id probe."""
+        """Get one relaxed candidate via SQL (``json_extract`` on the systems JSON column)."""
         try:
             with db.c.managed_connection() as conn:
-                cols = [
-                    r[1] for r in conn.execute("PRAGMA table_info(systems)").fetchall()
-                ]
-                relaxed_col = "metadata" if "metadata" in cols else "key_value_pairs"
                 cur = conn.execute(
-                    f"SELECT id FROM systems WHERE json_extract({relaxed_col}, '$.relaxed') = 1 ORDER BY id ASC LIMIT 1"
+                    f"SELECT id FROM systems WHERE json_extract({SYSTEMS_JSON_COLUMN}, '$.relaxed') = 1 "
+                    "ORDER BY id ASC LIMIT 1"
                 )
                 row = cur.fetchone()
             rowid = row[0] if row else None
@@ -349,13 +338,15 @@ def find_databases_simple(
     db_pattern: str = "**/*.db",
     composition: list[str] | None = None,
 ) -> list[Path]:
-    """Simple database finding without caching.
+    """Database discovery with cache disabled (``use_cache=False``).
 
-    Convenience function for one-off database searches.
+    Only the last path segment of ``db_pattern`` is used as ``db_filename`` (e.g.
+    ``*.db`` from ``"**/*.db"``). The search follows :meth:`DatabaseDiscovery.find_databases`
+    layout rules from ``base_dir``, not a raw recursive ``**`` glob from ``db_pattern``.
 
     Args:
         base_dir: Directory to search
-        db_pattern: Glob pattern for databases (default "**/*.db")
+        db_pattern: Whose last component is the filename pattern (default ``"**/*.db"``)
         composition: Optional composition filter
 
     Returns:
@@ -385,7 +376,7 @@ def list_discovered_db_paths_with_run_trial(
     the path is not under ``run_*``; ``trial_id`` is None if not under ``trial_*``.
     """
     base_s = os.path.abspath(str(base_dir))
-    discovery = DatabaseDiscovery(base_s, use_registry=True)
+    discovery = DatabaseDiscovery(base_s)
     out: list[tuple[str, str, int | None]] = []
     for db_path in discovery.find_databases(
         composition=composition, use_cache=use_cache

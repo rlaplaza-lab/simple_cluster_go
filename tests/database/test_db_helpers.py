@@ -6,43 +6,40 @@ import pytest
 from tests.test_utils import assert_db_final_row
 
 
-def _create_db(path, *, with_metadata: bool):
+def _create_db(path) -> None:
     with sqlite3.connect(str(path)) as conn:
         cur = conn.cursor()
-        if with_metadata:
-            cur.execute(
-                "CREATE TABLE systems (id INTEGER PRIMARY KEY AUTOINCREMENT, key_value_pairs TEXT, metadata TEXT, energy REAL)"
-            )
-        else:
-            cur.execute(
-                "CREATE TABLE systems (id INTEGER PRIMARY KEY AUTOINCREMENT, key_value_pairs TEXT, energy REAL)"
-            )
+        cur.execute(
+            "CREATE TABLE systems (id INTEGER PRIMARY KEY AUTOINCREMENT, key_value_pairs TEXT, energy REAL)"
+        )
         conn.commit()
 
 
-def test_assert_db_final_row_metadata_and_final_id(tmp_path):
-    dbp = tmp_path / "meta.db"
-    _create_db(dbp, with_metadata=True)
+def test_assert_db_final_row_includes_final_id_in_key_value_pairs(tmp_path):
+    dbp = tmp_path / "finals.db"
+    _create_db(dbp)
 
     with sqlite3.connect(str(dbp)) as conn:
         cur = conn.cursor()
-        kv = json.dumps({"run_id": "r1"})
-        meta = json.dumps(
-            {"final_unique_minimum": True, "final_id": "fid", "run_id": "r1"}
+        kv = json.dumps(
+            {
+                "run_id": "r1",
+                "final_unique_minimum": True,
+                "final_id": "fid",
+            }
         )
         cur.execute(
-            "INSERT INTO systems (key_value_pairs, metadata, energy) VALUES (?, ?, ?)",
-            (kv, meta, -1.0),
+            "INSERT INTO systems (key_value_pairs, energy) VALUES (?, ?)",
+            (kv, -1.0),
         )
         conn.commit()
 
-    # should not raise
     assert_db_final_row(str(dbp), "r1", expect_final_id=True)
 
 
 def test_assert_db_final_row_kvp_only(tmp_path):
     dbp = tmp_path / "kvp.db"
-    _create_db(dbp, with_metadata=False)
+    _create_db(dbp)
 
     with sqlite3.connect(str(dbp)) as conn:
         cur = conn.cursor()
@@ -58,7 +55,7 @@ def test_assert_db_final_row_kvp_only(tmp_path):
 
 def test_assert_db_final_row_requires_final_id_when_requested(tmp_path):
     dbp = tmp_path / "nofid.db"
-    _create_db(dbp, with_metadata=False)
+    _create_db(dbp)
 
     with sqlite3.connect(str(dbp)) as conn:
         cur = conn.cursor()
@@ -75,7 +72,7 @@ def test_assert_db_final_row_requires_final_id_when_requested(tmp_path):
 
 def test_assert_db_final_row_allows_none_run_id(tmp_path):
     dbp = tmp_path / "anyrun.db"
-    _create_db(dbp, with_metadata=False)
+    _create_db(dbp)
 
     with sqlite3.connect(str(dbp)) as conn:
         cur = conn.cursor()

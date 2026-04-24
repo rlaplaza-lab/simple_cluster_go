@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from scgo.surface.composition import full_adsorbate_slab_composition
-from scgo.surface.config import SurfaceSystemConfig
+from scgo.surface.config import SurfaceSystemConfig, describe_surface_config
 from scgo.surface.constraints import (
     attach_slab_constraints,
     attach_slab_constraints_from_surface_config,
@@ -16,6 +16,7 @@ from scgo.surface.deposition import (
     slab_surface_extreme,
 )
 from scgo.surface.objectives import adsorption_energy
+from scgo.surface.fragment_templates import build_default_fragment_template
 from scgo.surface.presets import (
     DEFAULT_GRAPHITE_SLAB_LAYERS,
     DEFAULT_GRAPHITE_SLAB_REPEAT_XY,
@@ -24,6 +25,7 @@ from scgo.surface.presets import (
     make_graphite_surface_config,
 )
 from scgo.surface.validation import (
+    validate_stored_mobile_partition_metadata,
     validate_stored_slab_adsorbate_metadata,
     validate_supported_cluster_deposit,
     validate_surface_config_slab_prefix,
@@ -31,6 +33,8 @@ from scgo.surface.validation import (
 
 __all__ = [
     "SurfaceSystemConfig",
+    "describe_surface_config",
+    "build_default_fragment_template",
     "full_adsorbate_slab_composition",
     "adsorption_energy",
     "attach_slab_constraints",
@@ -40,6 +44,7 @@ __all__ = [
     "create_deposited_cluster",
     "create_deposited_cluster_batch",
     "slab_surface_extreme",
+    "validate_stored_mobile_partition_metadata",
     "validate_stored_slab_adsorbate_metadata",
     "validate_supported_cluster_deposit",
     "validate_surface_config_slab_prefix",

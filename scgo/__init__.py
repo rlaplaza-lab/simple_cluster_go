@@ -99,14 +99,9 @@ __version__ = "0.1.0"
 
 def __getattr__(name: str) -> Any:
     if name == "ga_go_torchsim":
-        try:
-            from scgo.algorithms.geneticalgorithm_go_torchsim import ga_go_torchsim
-        except ImportError as e:
-            raise ImportError(
-                "TorchSim GA requires TorchSim. Install with: pip install 'scgo[mace]' "
-                "(MACE) or 'scgo[uma]' (UMA) depending on the model family."
-            ) from e
-        return ga_go_torchsim
+        from scgo.algorithms import _lazy_torchsim_ga
+
+        return _lazy_torchsim_ga.get_ga_go_torchsim()
     msg = f"module {__name__!r} has no attribute {name!r}"
     raise AttributeError(msg)
 

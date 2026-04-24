@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from scgo.database.connection import open_db
+from scgo.database.constants import SYSTEMS_JSON_COLUMN
 from scgo.utils.helpers import get_composition_counts
 from scgo.utils.logging import get_logger
 
@@ -397,9 +398,9 @@ class DatabaseRegistry:
 
                 def _fetch_rowid_from_conn(_conn, relaxed_first: bool = True):
                     if relaxed_first:
-                        # Prefer relaxed rows via `key_value_pairs` (JSON1).
+                        # Prefer relaxed rows via the systems JSON column (JSON1).
                         cur = _conn.execute(
-                            "SELECT id FROM systems WHERE json_extract(key_value_pairs, '$.relaxed') = 1 ORDER BY id ASC LIMIT 1"
+                            f"SELECT id FROM systems WHERE json_extract({SYSTEMS_JSON_COLUMN}, '$.relaxed') = 1 ORDER BY id ASC LIMIT 1"
                         )
                         r = cur.fetchone()
                         if r:

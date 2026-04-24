@@ -93,6 +93,7 @@ def main() -> None:
             params=params,
             seed=args.seed,
             output_dir=output_root,
+            surface_config=surface_config,
             system_type="surface_cluster",
         )
         minima = results.get(formula, [])

@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Pt5OH gas-phase cluster+adsorbate GO+TS via ``run_go_ts``."""
+"""Pt5+OH gas-phase: GO + TS via ``run_go_ts``.
+
+``system_type= gas_cluster_adsorbate`` with ``deposition_layout=monolithic`` — one
+initial cluster for the full mobile composition; no ``adsorbate_fragment_template`` is
+required (fragment placement is only used for ``core_then_fragment``).
+"""
 
 from __future__ import annotations
 
@@ -17,9 +22,11 @@ OUTPUT_STEM = "pt5_oh_gas"
 NITER = 8
 POPULATION_SIZE = 40
 MAX_PAIRS = 12
+# Monolithic: single gas-phase cluster for Pt5+OH; hierarchical fragment template N/A.
 ADSORBATE_DEFINITION = {
     "adsorbate_symbols": ["O", "H"],
-    "core_symbols": ["Pt"],
+    "core_symbols": ["Pt", "Pt", "Pt", "Pt", "Pt"],
+    "deposition_layout": "monolithic",
 }
 
 

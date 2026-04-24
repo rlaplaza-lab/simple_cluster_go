@@ -7,6 +7,10 @@ from scgo.cluster_adsorbate.combine import (
     expand_cubic_cell_to_fit,
 )
 from scgo.cluster_adsorbate.config import ClusterAdsorbateConfig, ClusterOHConfig
+from scgo.cluster_adsorbate.hierarchical import (
+    build_hierarchical_core_fragment_cluster,
+    reorder_cluster_to_composition,
+)
 from scgo.cluster_adsorbate.constraints import (
     attach_fix_bond_lengths,
     attach_oh_bond_constraint,
@@ -23,6 +27,8 @@ from scgo.cluster_adsorbate.relax import (
 from scgo.cluster_adsorbate.validation import validate_combined_cluster_structure
 
 __all__ = [
+    "build_hierarchical_core_fragment_cluster",
+    "reorder_cluster_to_composition",
     "ClusterAdsorbateConfig",
     "ClusterOHConfig",
     "attach_fix_bond_lengths",

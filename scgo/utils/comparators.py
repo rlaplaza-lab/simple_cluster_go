@@ -106,13 +106,11 @@ def get_mobile_atom_indices(atoms: Atoms) -> np.ndarray:
 def get_shared_mobile_atom_indices(
     a1: Atoms,
     a2: Atoms,
-    *,
-    fallback_to_all: bool = True,
 ) -> np.ndarray:
     """Return index set suitable for comparing two structures.
 
     Uses the intersection of mobile (non-``FixAtoms``) indices from both
-    structures, falling back to all indices if no shared mobile atoms exist.
+    structures. Raises if that intersection is empty.
     """
     if len(a1) != len(a2):
         raise ValueError(
@@ -123,8 +121,6 @@ def get_shared_mobile_atom_indices(
     idx2 = get_mobile_atom_indices(a2)
     shared = np.intersect1d(idx1, idx2, assume_unique=False)
     if shared.size == 0:
-        if fallback_to_all:
-            return np.arange(len(a1), dtype=int)
         raise ValueError("No shared mobile atoms across endpoints.")
     # Surface minima may occasionally lose constraints on load. When both
     # endpoints expose slab-prefix metadata, compare only adsorbate+cluster atoms.

@@ -345,7 +345,7 @@ def get_optimizer_db_filename(optimizer: str) -> str:
 
 
 def get_provenance(atoms: Atoms) -> dict[str, Any]:
-    """Get provenance (run_id, trial, trial_id) from canonical metadata.
+    """Get provenance (e.g. ``run_id``, ``trial_id``) from :attr:`Atoms.info` ``metadata``.
 
     Returns an empty dict if metadata is not present or atoms.info doesn't exist.
 
@@ -588,7 +588,7 @@ def filter_unique_minima(
     sorted_minima: list[tuple[float, Atoms]] = sorted(
         valid_minima,
         key=lambda item: (
-            get_provenance(item[1]).get("trial", float("inf")),
+            get_provenance(item[1]).get("trial_id", float("inf")),
             item[0],
         ),
     )

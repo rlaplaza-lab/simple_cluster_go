@@ -27,6 +27,7 @@ from scgo.surface.validation import validate_supported_cluster_deposit
 from scgo.system_types import (
     SystemType,
     get_system_policy,
+    validate_composition_against_adsorbate,
     validate_structure_for_system_type,
     validate_system_type_settings,
 )
@@ -99,6 +100,10 @@ def _run_serial_neb_search(
     verbosity: int,
     system_type: SystemType | None = None,
     write_timing_json: bool = False,
+    n_slab: int = 0,
+    n_core_mobile: int | None = None,
+    n_adsorbate_mobile: int | None = None,
+    adsorbate_definition: Any | None = None,
 ) -> list[dict[str, Any]]:
     """Run NEBs sequentially via :func:`find_transition_state` (one calc per pair)."""
     logger = get_logger(__name__)
@@ -133,11 +138,15 @@ def _run_serial_neb_search(
             react_ep,
             system_type=system_type,
             surface_config=surface_config,
+            n_slab=n_slab,
+            adsorbate_definition=adsorbate_definition,
         )
         validate_structure_for_system_type(
             prod_ep,
             system_type=system_type,
             surface_config=surface_config,
+            n_slab=n_slab,
+            adsorbate_definition=adsorbate_definition,
         )
 
         calculator: Any = None
@@ -169,6 +178,9 @@ def _run_serial_neb_search(
                 torchsim_params=torchsim_params,
                 verbosity=verbosity,
                 write_timing_json=write_timing_json,
+                n_slab=n_slab,
+                n_core_mobile=n_core_mobile,
+                n_adsorbate_mobile=n_adsorbate_mobile,
             )
         except (RuntimeError, ValueError) as e:
             logger.error(
@@ -236,7 +248,7 @@ def _warn_on_surface_mobile_indices(
             ai = minima[i][1]
             aj = minima[j][1]
             try:
-                shared = get_shared_mobile_atom_indices(ai, aj, fallback_to_all=False)
+                shared = get_shared_mobile_atom_indices(ai, aj)
             except ValueError:
                 logger.warning(
                     "Surface TS pair (%d,%d) has no shared mobile atoms from constraints; "
@@ -330,6 +342,7 @@ def run_transition_state_search(
     surface_config: SurfaceSystemConfig | None = None,
     system_type: SystemType | None = None,
     write_timing_json: bool = False,
+    adsorbate_definition: Any | None = None,
 ) -> list[dict[str, Any]]:
     """Run transition state search for clusters of given composition.
 
@@ -366,6 +379,8 @@ def run_transition_state_search(
         surface_config: When set, the same :class:`scgo.surface.config.SurfaceSystemConfig`
             used for GA. Endpoint structures are copied per pair and slab
             constraints are applied to match GO behavior.
+        adsorbate_definition: Optional; two-block mobile runs use blockwise NEB alignment
+            when ``neb_align_endpoints`` is True.
 
     Returns:
         List of result dictionaries from :func:`find_transition_state`.
@@ -402,6 +417,21 @@ def run_transition_state_search(
         neb_interpolation_mic = True
     if system_policy.neb_disable_alignment:
         neb_align_endpoints = False
+    neb_n_slab = (
+        len(surface_config.slab)
+        if surface_config is not None and system_policy.uses_surface
+        else 0
+    )
+    neb_n_core_m: int | None = None
+    neb_n_ads_m: int | None = None
+    if neb_align_endpoints and system_policy.has_adsorbate and adsorbate_definition is not None:
+        c_syms, a_syms = validate_composition_against_adsorbate(
+            adsorbate_composition,
+            adsorbate_definition,
+            context="run_transition_state_search",
+        )
+        if len(c_syms) > 0 and len(a_syms) > 0:
+            neb_n_core_m, neb_n_ads_m = len(c_syms), len(a_syms)
     rng = ensure_rng(seed)
 
     if use_parallel_neb and not use_torchsim:
@@ -432,8 +462,8 @@ def run_transition_state_search(
 
     try:
         calculator_class = get_calculator_class(calculator_name)
-    except (ImportError, AttributeError, ValueError) as e:
-        logger.error(f"Failed to locate calculator class {calculator_name}: {e}")
+    except ValueError as e:
+        logger.error("Failed to locate calculator class %s: %s", calculator_name, e)
         raise ValueError(f"Cannot initialize calculator: {e}") from e
 
     if verbosity >= 1:
@@ -538,6 +568,10 @@ def run_transition_state_search(
             neb_tangent_method=neb_tangent_method,
             torchsim_params=torchsim_params,
             system_type=resolved_system_type,
+            n_slab=neb_n_slab,
+            n_core_mobile=neb_n_core_m,
+            n_adsorbate_mobile=neb_n_ads_m,
+            adsorbate_definition=adsorbate_definition,
         )
         cleanup_torch_cuda(logger=logger)
     else:
@@ -564,6 +598,10 @@ def run_transition_state_search(
             verbosity=verbosity,
             system_type=resolved_system_type,
             write_timing_json=write_timing_json,
+            n_slab=neb_n_slab,
+            n_core_mobile=neb_n_core_m,
+            n_adsorbate_mobile=neb_n_ads_m,
+            adsorbate_definition=adsorbate_definition,
         )
 
     ts_phase_wall = perf_counter() - t_ts0

@@ -17,7 +17,7 @@ from ase.optimize import LBFGS
 from ase.optimize.optimize import Optimizer
 from tqdm import tqdm
 
-from scgo.algorithms.ga_common import slab_ga_metadata_extras
+from scgo.algorithms.ga_common import ga_run_metadata_extras
 from scgo.constants import (
     BOLTZMANN_K_EV_PER_K,
     DEFAULT_COMPARATOR_TOL,
@@ -30,6 +30,7 @@ from scgo.database.sync import retry_with_backoff
 from scgo.surface.config import SurfaceSystemConfig
 from scgo.surface.constraints import attach_slab_constraints_from_surface_config
 from scgo.system_types import (
+    AdsorbateDefinition,
     SystemType,
     get_system_policy,
     validate_structure_for_system_type,
@@ -156,6 +157,7 @@ def bh_go(
     surface_config: SurfaceSystemConfig | None = None,
     n_slab: int = 0,
     system_type: SystemType = "gas_cluster",
+    adsorbate_definition: AdsorbateDefinition | None = None,
     write_timing_json: bool = False,
     detailed_timing: bool = False,
     *,
@@ -217,6 +219,21 @@ def bh_go(
     )
     policy = get_system_policy(system_type)
     surface_mode = policy.uses_surface
+
+    def _run_metadata_extras(a: Atoms) -> dict[str, int | str]:
+        mobile = (
+            list(a.get_chemical_symbols()[n_slab:])
+            if surface_mode and n_slab > 0
+            else list(a.get_chemical_symbols())
+        )
+        return ga_run_metadata_extras(
+            surface_config,
+            n_slab,
+            system_type,
+            mobile,
+            adsorbate_definition=adsorbate_definition,
+        )
+
     effective_dr = dr * (
         policy.adsorbate_move_scale if policy.constrain_adsorbate_moves else 1.0
     )
@@ -233,7 +250,7 @@ def bh_go(
 
     # Create comparator for diversity calculations and deduplication
     comparator = PureInteratomicDistanceComparator(
-        n_top=comparator_n_top if comparator_n_top is not None else None,
+        n_top=comparator_n_top,
         tol=comparator_tol,
         pair_cor_max=comparator_pair_cor_max,
         mic=surface_mode,
@@ -293,8 +310,6 @@ def bh_go(
     )
     atoms.calc = calc
 
-    _HPC_RETRY_EXCEPTIONS = HPC_DATABASE_EXCEPTIONS + (IOError,)
-
     try:
         profile_t0 = perf_counter()
         profile_timings: dict[str, float] = {}
@@ -327,7 +342,7 @@ def bh_go(
             max_retries=5,
             initial_delay=0.2,
             backoff_factor=2.0,
-            exception_types=_HPC_RETRY_EXCEPTIONS,
+            exception_types=HPC_DATABASE_EXCEPTIONS,
         )
         if surface_mode and surface_config is not None:
             attach_slab_constraints_from_surface_config(a_current, surface_config)
@@ -345,10 +360,11 @@ def bh_go(
             system_type=system_type,
             surface_config=surface_config,
             n_slab=n_slab if surface_mode else None,
+            adsorbate_definition=adsorbate_definition,
         )
         add_metadata(
             a_current,
-            **slab_ga_metadata_extras(surface_config, n_slab, system_type),
+            **_run_metadata_extras(a_current),
         )
 
         if run_id is not None and a_current is not None:
@@ -360,7 +376,7 @@ def bh_go(
             max_retries=5,
             initial_delay=0.2,
             backoff_factor=2.0,
-            exception_types=_HPC_RETRY_EXCEPTIONS,
+            exception_types=HPC_DATABASE_EXCEPTIONS,
         )
         profile_timings["initial_relaxed_write_s"] = perf_counter() - t_db0
 
@@ -409,7 +425,7 @@ def bh_go(
                 max_retries=5,
                 initial_delay=0.2,
                 backoff_factor=2.0,
-                exception_types=_HPC_RETRY_EXCEPTIONS,
+                exception_types=HPC_DATABASE_EXCEPTIONS,
             )
             dt_ins = perf_counter() - t_ins0
             profile_timings["offspring_unrelaxed_insert_s"] = (
@@ -433,10 +449,11 @@ def bh_go(
                 system_type=system_type,
                 surface_config=surface_config,
                 n_slab=n_slab if surface_mode else None,
+                adsorbate_definition=adsorbate_definition,
             )
             add_metadata(
                 a_trial,
-                **slab_ga_metadata_extras(surface_config, n_slab, system_type),
+                **_run_metadata_extras(a_trial),
             )
             if run_id is not None:
                 persist_provenance(a_trial, run_id=run_id)
@@ -447,7 +464,7 @@ def bh_go(
                 max_retries=5,
                 initial_delay=0.2,
                 backoff_factor=2.0,
-                exception_types=_HPC_RETRY_EXCEPTIONS,
+                exception_types=HPC_DATABASE_EXCEPTIONS,
             )
             dt_w = perf_counter() - t_w0
             profile_timings["offspring_relaxed_write_s"] = (
@@ -521,7 +538,7 @@ def bh_go(
             max_retries=5,
             initial_delay=0.2,
             backoff_factor=2.0,
-            exception_types=_HPC_RETRY_EXCEPTIONS,
+            exception_types=HPC_DATABASE_EXCEPTIONS,
         )
         all_minima = extract_minima_from_database(all_candidates)
 

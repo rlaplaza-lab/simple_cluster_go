@@ -258,7 +258,7 @@ class TestScgoFunction:
 
         for _, atoms in results:
             assert "provenance" in atoms.info
-            assert atoms.info["provenance"]["trial"] == 5
+            assert atoms.info["provenance"]["trial_id"] == 5
             assert atoms.info["provenance"]["run_id"] == run_id
 
     def test_scgo_empty_composition(self, tmp_path, rng):

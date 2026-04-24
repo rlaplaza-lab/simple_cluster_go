@@ -10,6 +10,7 @@ from typing import Any
 
 from ase import Atoms
 
+from scgo.database.constants import SYSTEMS_JSON_COLUMN
 from scgo.utils.logging import TRACE, get_logger
 
 logger = get_logger(__name__)
@@ -39,21 +40,19 @@ def add_metadata(
         metadata["run_id"] = run_id
     if trial_id is not None:
         metadata["trial_id"] = trial_id
-        metadata["trial"] = trial_id  # Alias for callers expecting "trial"
     if generation is not None:
         metadata["generation"] = generation
 
     # Store extra metadata
     metadata.update(extra_metadata)
 
-    # ASE DB persists key_value_pairs; ensure raw_score and run_id/trial for DB rows
+    # ASE DB persists key_value_pairs; ensure raw_score and run_id / trial_id for DB rows
     kv = atoms.info.setdefault("key_value_pairs", {})
     if "raw_score" in extra_metadata:
         kv["raw_score"] = extra_metadata["raw_score"]
     if run_id is not None:
         kv["run_id"] = run_id
     if trial_id is not None:
-        kv["trial"] = trial_id
         kv["trial_id"] = trial_id
 
     # Provenance for run/trial discovery (used by scgo() results and downstream)
@@ -62,7 +61,6 @@ def add_metadata(
         if run_id is not None:
             prov["run_id"] = run_id
         if trial_id is not None:
-            prov["trial"] = trial_id
             prov["trial_id"] = trial_id
 
     # TS search provenance: minima_source_db, minima_confids, minima_unique_ids,
@@ -94,12 +92,13 @@ def add_metadata(
 def get_metadata(atoms: Atoms, key: str, default: Any = None) -> Any:
     """Retrieve a metadata value from an Atoms object, or return default.
 
-    Order: ``metadata`` (canonical), ``key_value_pairs`` (ASE DB), ``provenance``.
+    Order: ``metadata`` (canonical), ``provenance`` (TS / discovery), then
+    ``key_value_pairs`` (ASE DB persisted fields, e.g. raw_score from GA).
     """
     for src in (
         atoms.info.get("metadata", {}),
-        atoms.info.get("key_value_pairs", {}),
         atoms.info.get("provenance", {}),
+        atoms.info.get("key_value_pairs", {}),
     ):
         if key in src:
             return src[key]
@@ -112,77 +111,57 @@ def get_all_metadata(atoms: Atoms) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
-# Small internal helpers for JSON row parsing and selection
-# (keeps the complex selection logic concise and easier to test)
+# Internal helpers: SCGO ``systems`` rows use ``key_value_pairs`` JSON (no
+# separate ``metadata`` column in the SQLite schema for DBs we create).
 # ---------------------------------------------------------------------------
 
 
-def _parse_row_meta_kv(r, has_metadata_col: bool) -> tuple[dict, dict]:
-    """Safely parse JSON metadata/key_value_pairs from a DB row tuple.
-
-    Returns (meta_dict, kv_dict). Malformed JSON yields empty dicts.
-    """
+def _parse_key_value_pairs_row(row: tuple) -> dict[str, Any]:
+    """Parse ``key_value_pairs`` JSON from ``SELECT id, energy, key_value_pairs`` rows."""
     try:
-        meta_json = r[2] if len(r) > 2 and r[2] else "{}"
-        kv_json = r[-1] if r[-1] else "{}"
-        meta = json.loads(meta_json)
-        kv = json.loads(kv_json)
-        return meta, kv
-    except (json.JSONDecodeError, TypeError, ValueError):
-        return {}, {}
+        kv_json = row[2]
+        if not kv_json:
+            return {}
+        return json.loads(kv_json)
+    except (json.JSONDecodeError, TypeError, ValueError, IndexError):
+        return {}
 
 
-def _is_row_relaxed(r, has_metadata_col: bool) -> bool:
-    """Check relaxed flag from canonical column (metadata if present, else key_value_pairs)."""
-    meta, kv = _parse_row_meta_kv(r, has_metadata_col)
-    return bool(meta.get("relaxed")) if has_metadata_col else bool(kv.get("relaxed"))
+def _is_row_relaxed_row(row: tuple) -> bool:
+    return bool(_parse_key_value_pairs_row(row).get("relaxed"))
 
 
-def _find_first_relaxed(rows: list, has_metadata_col: bool):
-    """Return the first row flagged as relaxed, or None if none found."""
+def _find_first_relaxed_row(rows: list) -> tuple | None:
     for r in rows:
-        if _is_row_relaxed(r, has_metadata_col):
+        if _is_row_relaxed_row(r):
             return r
     return None
 
 
-def _row_matches_run_trial(r, has_metadata_col: bool, run_id, trial) -> bool:
-    """Return True if the row contains matching run_id and (optional) trial."""
-    meta, kv = _parse_row_meta_kv(r, has_metadata_col)
-    src = meta if has_metadata_col else kv
-    if src.get("run_id") != run_id:
+def _row_matches_run_trial_row(row: tuple, run_id, trial) -> bool:
+    kv = _parse_key_value_pairs_row(row)
+    if kv.get("run_id") != run_id:
         return False
     if trial is None:
         return True
-    return src.get("trial") == trial or src.get("trial_id") == trial
+    return kv.get("trial_id") == trial
 
 
 def _extract_row_energy(r) -> float | None:
-    """Extract energy from a DB row, trying the energy column then JSON fallbacks."""
+    """Return ``systems.energy`` (column index 1 in row selects)."""
     try:
         return float(r[1])
     except (TypeError, ValueError, IndexError):
-        pass
-    try:
-        kv_json = r[-1] if r[-1] else "{}"
-        kv = json.loads(kv_json)
-        if "raw_score" in kv:
-            return -float(kv["raw_score"])
-        if "energy" in kv:
-            return float(kv["energy"])
-    except (json.JSONDecodeError, TypeError, ValueError):
-        pass
-    return None
+        return None
 
 
 def _select_best_row(
     rows: list,
-    has_metadata_col: bool,
     run_id,
     trial,
     energy: float | None,
     tolerance: float,
-):
+) -> tuple | None:
     """Select the best matching row from candidates using a priority cascade.
 
     Priority order:
@@ -190,10 +169,8 @@ def _select_best_row(
     2. Row matching run/trial (any)
     3. Row closest in energy within tolerance
     """
-    matching = [
-        r for r in rows if _row_matches_run_trial(r, has_metadata_col, run_id, trial)
-    ]
-    relaxed_match = _find_first_relaxed(matching, has_metadata_col)
+    matching = [r for r in rows if _row_matches_run_trial_row(r, run_id, trial)]
+    relaxed_match = _find_first_relaxed_row(matching)
     if relaxed_match is not None:
         return relaxed_match
     if matching:
@@ -219,7 +196,7 @@ def _select_best_row(
 
 
 def update_metadata(atoms: Atoms, **updates: Any) -> None:
-    """Update ``atoms.info['metadata']``; mirror ``raw_score`` into ``key_value_pairs`` for the DB."""
+    """Update ``atoms.info['metadata']``; mirror ``raw_score`` into key_value_pairs (ASE)."""
     if "metadata" not in atoms.info:
         atoms.info["metadata"] = {}
 
@@ -236,27 +213,22 @@ def persist_provenance(
     run_id: str | None = None,
     trial_id: int | None = None,
 ) -> None:
-    """Persist run/trial provenance to atoms.info for discovery.
+    """Persist run/trial provenance to ``atoms.info`` for discovery.
 
-    Writes to provenance (canonical for run/trial), metadata, and key_value_pairs
-    (ASE DB stores this column).
+    Writes ``run_id`` / ``trial_id`` to provenance, ``metadata`` (via :func:`add_metadata`),
+    and ``key_value_pairs`` for ASE persistence.
     """
     if run_id is not None or trial_id is not None:
         add_metadata(atoms, run_id=run_id, trial_id=trial_id)
-    # Provenance dict for downstream discovery (run_id, trial, trial_id)
     prov = atoms.info.setdefault("provenance", {})
     if run_id is not None:
         prov["run_id"] = run_id
     if trial_id is not None:
-        prov["trial"] = trial_id
         prov["trial_id"] = trial_id
-    # ASE DB persists key_value_pairs; ensure run_id/trial for DB row filtering
     if run_id is not None:
         atoms.info.setdefault("key_value_pairs", {})["run_id"] = run_id
     if trial_id is not None:
-        kv = atoms.info.setdefault("key_value_pairs", {})
-        kv["trial"] = trial_id
-        kv["trial_id"] = trial_id
+        atoms.info.setdefault("key_value_pairs", {})["trial_id"] = trial_id
 
 
 def filter_by_metadata(
@@ -276,9 +248,8 @@ def mark_final_minima_in_db(
     base_dir: str | Path,
     db_paths: list[str | Path] | None = None,
     tolerance: float = 1e-4,
-    update_metadata_column: bool = True,
 ) -> dict:
-    """Mark final unique minima in database rows.
+    """Mark final unique minima in database ``systems.key_value_pairs`` JSON rows.
 
     Args:
         final_minima_info: List of dicts with keys: 'energy' (float), 'atoms' (Atoms),
@@ -286,7 +257,6 @@ def mark_final_minima_in_db(
         base_dir: Base output directory to search for database files (used by discovery)
         db_paths: Optional explicit list of database files to search/update (skips registry discovery)
         tolerance: Energy tolerance for best-match fallback (default 1e-4)
-        update_metadata_column: If True, also update the `metadata` JSON column when present
 
     Returns:
         dict: summary containing counts, e.g. {"dbs_touched": int, "rows_updated": int, "details": {db_path: rows}}
@@ -297,7 +267,7 @@ def mark_final_minima_in_db(
 
     # Discovery tries the JSON registry first, then falls back to a recursive glob
     # under base_dir (canonical run_*/trial_* layout still matches the glob).
-    discovery = DatabaseDiscovery(base_dir, use_registry=True)
+    discovery = DatabaseDiscovery(base_dir)
 
     # Summary counters
     total_rows_updated = 0
@@ -316,7 +286,7 @@ def mark_final_minima_in_db(
 
         # Extract provenance and identifiers from canonical metadata
         run_id = get_metadata(atoms, "run_id")
-        trial = get_metadata(atoms, "trial") or get_metadata(atoms, "trial_id")
+        trial = get_metadata(atoms, "trial_id")
         confid = (
             get_metadata(atoms, "confid")
             or get_metadata(atoms, "gaid")
@@ -345,38 +315,22 @@ def mark_final_minima_in_db(
                         operation_name="mark_final_minima",
                     ) as conn,
                 ):
-                    # Inspect table to see which JSON columns exist
-                    cols = [
-                        r[1]
-                        for r in conn.execute("PRAGMA table_info(systems)").fetchall()
-                    ]
-                    has_metadata_col = "metadata" in cols
-
-                    # Build select columns accordingly
-                    select_cols = "id, energy, key_value_pairs"
-                    if has_metadata_col:
-                        select_cols = "id, energy, metadata, key_value_pairs"
+                    kvp = SYSTEMS_JSON_COLUMN
+                    select_cols = f"id, energy, {kvp}"
 
                     # Try exact match by final_id first (highest priority), then confid/gaid/id
                     row = None
-                    params = None
 
                     # Prefer explicit final identifier when provided in final_minima_info
                     final_id = info.get("final_id")
                     if final_id is not None:
                         fid = str(final_id)
-                        if has_metadata_col:
-                            fid_conditions = [
-                                "CAST(json_extract(metadata, '$.final_id') AS TEXT) = ?",
-                                "CAST(json_extract(metadata, '$.unique_id') AS TEXT) = ?",
-                            ]
-                        else:
-                            fid_conditions = [
-                                "CAST(json_extract(key_value_pairs, '$.final_id') AS TEXT) = ?",
-                                "CAST(json_extract(key_value_pairs, '$.unique_id') AS TEXT) = ?",
-                                "CAST(unique_id AS TEXT) = ?",
-                            ]
-                        fid_params = [fid, fid] if has_metadata_col else [fid, fid, fid]
+                        fid_conditions = [
+                            f"CAST(json_extract({kvp}, '$.final_id') AS TEXT) = ?",
+                            f"CAST(json_extract({kvp}, '$.unique_id') AS TEXT) = ?",
+                            "CAST(unique_id AS TEXT) = ?",
+                        ]
+                        fid_params = [fid, fid, fid]
                         query = (
                             f"SELECT {select_cols} FROM systems WHERE "
                             + " OR ".join(fid_conditions)
@@ -385,27 +339,19 @@ def mark_final_minima_in_db(
                         cursor = conn.execute(query, tuple(fid_params))
                         rows = cursor.fetchall()
                         if rows:
-                            chosen = _find_first_relaxed(rows, has_metadata_col)
+                            chosen = _find_first_relaxed_row(rows)
                             row = chosen or rows[0]
 
                     # If final_id did not produce a match, try confid/gaid/id
                     if row is None and confid is not None:
                         confid_str = str(confid)
-                        if has_metadata_col:
-                            conditions = [
-                                "CAST(json_extract(metadata, '$.confid') AS TEXT) = ?",
-                                "CAST(json_extract(metadata, '$.gaid') AS TEXT) = ?",
-                                "CAST(json_extract(metadata, '$.id') AS TEXT) = ?",
-                            ]
-                            params = [confid_str, confid_str, confid_str]
-                        else:
-                            conditions = [
-                                "CAST(json_extract(key_value_pairs, '$.confid') AS TEXT) = ?",
-                                "CAST(json_extract(key_value_pairs, '$.gaid') AS TEXT) = ?",
-                                "CAST(json_extract(key_value_pairs, '$.id') AS TEXT) = ?",
-                                "CAST(unique_id AS TEXT) = ?",
-                            ]
-                            params = [confid_str, confid_str, confid_str, confid_str]
+                        conditions = [
+                            f"CAST(json_extract({kvp}, '$.confid') AS TEXT) = ?",
+                            f"CAST(json_extract({kvp}, '$.gaid') AS TEXT) = ?",
+                            f"CAST(json_extract({kvp}, '$.id') AS TEXT) = ?",
+                            "CAST(unique_id AS TEXT) = ?",
+                        ]
+                        params = [confid_str, confid_str, confid_str, confid_str]
                         query = (
                             f"SELECT {select_cols} FROM systems WHERE "
                             + " OR ".join(conditions)
@@ -414,35 +360,32 @@ def mark_final_minima_in_db(
                         cursor = conn.execute(query, tuple(params))
                         rows = cursor.fetchall()
                         if rows:
-                            chosen = _find_first_relaxed(rows, has_metadata_col)
+                            chosen = _find_first_relaxed_row(rows)
                             row = chosen or rows[0]
 
                     # If no exact match, fallback to best-match by energy within run/trial
                     if row is None and run_id is not None:
-                        if has_metadata_col and trial is not None:
+                        if trial is not None:
                             query = f"""
                                 SELECT {select_cols}
                                 FROM systems
-                                WHERE json_extract(metadata, '$.run_id') = ?
-                                  AND (json_extract(metadata, '$.trial') = ? OR json_extract(metadata, '$.trial_id') = ?)
+                                WHERE json_extract({kvp}, '$.run_id') = ?
+                                  AND json_extract({kvp}, '$.trial_id') = ?
                             """
-                            params = (run_id, trial, trial)
-                        elif has_metadata_col:
+                            params = (run_id, trial)
+                        else:
                             query = f"""
                                 SELECT {select_cols}
                                 FROM systems
-                                WHERE json_extract(metadata, '$.run_id') = ?
+                                WHERE json_extract({kvp}, '$.run_id') = ?
                             """
                             params = (run_id,)
-                        else:
-                            query = f"SELECT {select_cols} FROM systems"
-                            params = ()
 
                         cursor = conn.execute(query, params)
                         rows = cursor.fetchall()
                         if rows:
                             row = _select_best_row(
-                                rows, has_metadata_col, run_id, trial, energy, tolerance
+                                rows, run_id, trial, energy, tolerance
                             )
                             logger.debug(
                                 "mark_final_minima_in_db: candidate row ids for "
@@ -457,34 +400,19 @@ def mark_final_minima_in_db(
                     if row is None:
                         continue
 
-                    # Unpack row and merge JSON
-                    if has_metadata_col:
-                        row_id, e_val, metadata_col, kv_col = row
-                    else:
-                        row_id, e_val, kv_col = row
-                        metadata_col = None
+                    row_id, _, kv_col = row
 
-                    # Parse JSON column for the canonical storage (metadata or key_value_pairs)
-                    if has_metadata_col:
-                        try:
-                            existing = json.loads(metadata_col) if metadata_col else {}
-                        except (json.JSONDecodeError, TypeError, ValueError):
-                            existing = {}
-                    else:
-                        try:
-                            existing = json.loads(kv_col) if kv_col else {}
-                        except (json.JSONDecodeError, TypeError, ValueError):
-                            existing = {}
+                    try:
+                        existing = json.loads(kv_col) if kv_col else {}
+                    except (json.JSONDecodeError, TypeError, ValueError):
+                        existing = {}
 
-                    # Persist provenance and final-minima flags into canonical column
                     if run_id is not None:
                         existing["run_id"] = run_id
                     if trial is not None:
-                        existing.setdefault("trial", trial)
                         existing.setdefault("trial_id", trial)
 
                     final_id_val = info.get("final_id")
-                    # Store portable basename only (full paths break when moving output dirs)
                     fw_val = (
                         os.path.basename(str(final_written))
                         if final_written is not None
@@ -502,16 +430,10 @@ def mark_final_minima_in_db(
                         {k: v for k, v in final_keys.items() if v is not None}
                     )
 
-                    if update_metadata_column and has_metadata_col:
-                        conn.execute(
-                            "UPDATE systems SET metadata = ? WHERE id = ?",
-                            (json.dumps(existing), row_id),
-                        )
-                    else:
-                        conn.execute(
-                            "UPDATE systems SET key_value_pairs = ? WHERE id = ?",
-                            (json.dumps(existing), row_id),
-                        )
+                    conn.execute(
+                        f"UPDATE systems SET {kvp} = ? WHERE id = ?",
+                        (json.dumps(existing), row_id),
+                    )
 
                     conn.commit()
 
@@ -529,10 +451,8 @@ def mark_final_minima_in_db(
                 logger.warning(f"mark_final_minima_in_db: failed for {db_path}: {e}")
                 continue
 
-    # Return a concise summary so callers can programmatically inspect results
-    summary = {
+    return {
         "dbs_touched": len(dbs_touched),
         "rows_updated": total_rows_updated,
         "details": details,
     }
-    return summary

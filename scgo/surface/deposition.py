@@ -10,14 +10,21 @@ import numpy as np
 from ase import Atoms
 from ase_ga.utilities import atoms_too_close, atoms_too_close_two_sets
 
+from scgo.cluster_adsorbate.hierarchical import (
+    build_hierarchical_core_fragment_cluster,
+    reorder_cluster_to_composition,
+)
 from scgo.initialization.geometry_helpers import _generate_rotation_matrix
+from scgo.surface.validation import validate_supported_cluster_deposit
 from scgo.utils.logging import get_logger
 from scgo.utils.parallel_workers import resolve_n_jobs_to_workers
 
 if TYPE_CHECKING:
     from numpy.random import Generator
 
+    from scgo.cluster_adsorbate.config import ClusterAdsorbateConfig
     from scgo.surface.config import SurfaceSystemConfig
+    from scgo.system_types import AdsorbateDefinition
 
 logger = get_logger(__name__)
 
@@ -54,30 +61,6 @@ def combine_slab_adsorbate(slab: Atoms, adsorbate: Atoms) -> Atoms:
     return slab.copy() + ads
 
 
-def _reorder_cluster_to_composition(
-    cluster: Atoms, composition: Sequence[str]
-) -> Atoms:
-    """Reorder generated cluster atoms to match requested symbol sequence."""
-    desired = list(composition)
-    current = cluster.get_chemical_symbols()
-    if current == desired:
-        return cluster
-
-    by_symbol: dict[str, list[int]] = {}
-    for idx, sym in enumerate(current):
-        by_symbol.setdefault(sym, []).append(idx)
-
-    selection: list[int] = []
-    for sym in desired:
-        matching = by_symbol.get(sym)
-        if not matching:
-            raise ValueError(
-                "Generated cluster symbols do not match requested composition."
-            )
-        selection.append(matching.pop(0))
-    return cluster[selection].copy()
-
-
 def _random_rotation_matrix(rng: Generator) -> np.ndarray:
     """Return a uniformly random 3D rotation matrix."""
     rotation_axis = rng.standard_normal(3)
@@ -110,29 +93,58 @@ def create_deposited_cluster(
     slab: Atoms,
     blmin: dict,
     rng: Generator,
-    config: SurfaceSystemConfig,
+    config: "SurfaceSystemConfig",
     previous_search_glob: str = "**/*.db",
+    adsorbate_definition: "AdsorbateDefinition | None" = None,
+    adsorbate_fragment_template: Atoms | None = None,
+    cluster_adsorbate_config: "ClusterAdsorbateConfig | None" = None,
 ) -> Atoms | None:
     """One adsorbate+slab structure, or None if placement fails.
 
-    Uses :func:`scgo.initialization.create_initial_cluster` for the gas-phase
-    seed, then rotates and translates it above the slab with random in-plane
-    offset and height in ``[adsorption_height_min, adsorption_height_max]``.
+    **Monolithic** (default): :func:`scgo.initialization.create_initial_cluster` on
+    the full mobile ``composition``, then place above the slab.
+
+    **Hierarchical** (when ``adsorbate_definition['deposition_layout']`` is
+    ``\"core_then_fragment\"``): build a core NP, place the rigid adsorbate
+    fragment, then place the combined cluster (same as monolithic for the slab
+    step).
     """
     from scgo.initialization import create_initial_cluster
 
     axis = config.surface_normal_axis
     slab_top = slab_surface_extreme(slab, axis, upper=True)
-
+    use_hier = bool(
+        adsorbate_definition is not None
+        and str(adsorbate_definition.get("deposition_layout", "monolithic"))
+        == "core_then_fragment"
+    )
     for _ in range(config.max_placement_attempts):
-        cluster_seed = create_initial_cluster(
-            list(composition),
-            vacuum=config.cluster_init_vacuum,
-            rng=rng,
-            previous_search_glob=previous_search_glob,
-            mode=config.init_mode,
-        )
-        cluster_seed = _reorder_cluster_to_composition(cluster_seed, composition)
+        if use_hier:
+            assert adsorbate_definition is not None
+            cluster_seed = build_hierarchical_core_fragment_cluster(
+                composition,
+                adsorbate_definition,
+                rng,
+                previous_search_glob,
+                adsorbate_fragment_template,
+                cluster_adsorbate_config,
+                cluster_init_vacuum=config.cluster_init_vacuum,
+                init_mode=config.init_mode,
+                max_placement_attempts=config.max_placement_attempts,
+            )
+            if cluster_seed is None:
+                continue
+        else:
+            cluster_seed = create_initial_cluster(
+                list(composition),
+                vacuum=config.cluster_init_vacuum,
+                rng=rng,
+                previous_search_glob=previous_search_glob,
+                mode=config.init_mode,
+            )
+            cluster_seed = reorder_cluster_to_composition(
+                cluster_seed, composition
+            )
         atomic_numbers = cluster_seed.get_atomic_numbers()
         cluster_positions = cluster_seed.get_positions().copy()
 
@@ -158,7 +170,18 @@ def create_deposited_cluster(
         if atoms_too_close_two_sets(adsorbate, slab, blmin):
             continue
 
-        return combine_slab_adsorbate(slab, adsorbate)
+        combined = combine_slab_adsorbate(slab, adsorbate)
+        n_slab = len(slab)
+        ok, err = validate_supported_cluster_deposit(
+            combined,
+            n_slab,
+            surface_normal_axis=config.surface_normal_axis,
+            use_mic=bool(config.comparator_use_mic),
+        )
+        if not ok:
+            logger.debug("create_deposited_cluster: rejected by supported-cluster check: %s", err)
+            continue
+        return combined
 
     logger.warning(
         "create_deposited_cluster: exceeded max_placement_attempts=%s",
@@ -177,6 +200,9 @@ def create_deposited_cluster_batch(
     *,
     previous_search_glob: str = "**/*.db",
     n_jobs: int = 1,
+    adsorbate_definition: "AdsorbateDefinition | None" = None,
+    adsorbate_fragment_template: Atoms | None = None,
+    cluster_adsorbate_config: "ClusterAdsorbateConfig | None" = None,
 ) -> list[Atoms]:
     """Generate multiple deposited structures (sequential or threaded)."""
     if n_structures <= 0:
@@ -199,6 +225,9 @@ def create_deposited_cluster_batch(
                 child_rng,
                 config,
                 previous_search_glob=previous_search_glob,
+                adsorbate_definition=adsorbate_definition,
+                adsorbate_fragment_template=adsorbate_fragment_template,
+                cluster_adsorbate_config=cluster_adsorbate_config,
             )
             if struct is not None:
                 out.append(struct)
@@ -228,6 +257,9 @@ def create_deposited_cluster_batch(
                 child_rng,
                 config,
                 previous_search_glob=previous_search_glob,
+                adsorbate_definition=adsorbate_definition,
+                adsorbate_fragment_template=adsorbate_fragment_template,
+                cluster_adsorbate_config=cluster_adsorbate_config,
             )
             if structure is not None:
                 return structure

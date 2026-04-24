@@ -12,7 +12,11 @@ from ase.optimize import FIRE
 
 from scgo.calculators import torchsim_helpers as _tsh
 from scgo.surface.config import SurfaceSystemConfig
-from scgo.system_types import SystemType, validate_structure_for_system_type
+from scgo.system_types import (
+    AdsorbateDefinition,
+    SystemType,
+    validate_structure_for_system_type,
+)
 from scgo.utils.logging import get_logger
 
 from .transition_state import (
@@ -196,6 +200,8 @@ def _neb_endpoint_copies(
     atoms_j: Atoms,
     surface_config: SurfaceSystemConfig | None,
     system_type: SystemType,
+    n_slab: int = 0,
+    adsorbate_definition: AdsorbateDefinition | None = None,
 ) -> tuple[Atoms, Atoms]:
     """Copy minima endpoints, optionally re-attaching surface FixAtoms constraints."""
     from scgo.surface.constraints import attach_slab_constraints_from_surface_config
@@ -206,10 +212,18 @@ def _neb_endpoint_copies(
         attach_slab_constraints_from_surface_config(react, surface_config)
         attach_slab_constraints_from_surface_config(prod, surface_config)
     validate_structure_for_system_type(
-        react, system_type=system_type, surface_config=surface_config
+        react,
+        system_type=system_type,
+        surface_config=surface_config,
+        n_slab=n_slab,
+        adsorbate_definition=adsorbate_definition,
     )
     validate_structure_for_system_type(
-        prod, system_type=system_type, surface_config=surface_config
+        prod,
+        system_type=system_type,
+        surface_config=surface_config,
+        n_slab=n_slab,
+        adsorbate_definition=adsorbate_definition,
     )
     return react, prod
 
@@ -233,6 +247,10 @@ def run_parallel_neb_search(
     neb_tangent_method: str,
     torchsim_params: dict[str, Any],
     system_type: SystemType,
+    n_slab: int = 0,
+    n_core_mobile: int | None = None,
+    n_adsorbate_mobile: int | None = None,
+    adsorbate_definition: AdsorbateDefinition | None = None,
 ) -> tuple[list[dict[str, Any]], dict[str, float]]:
     """Run all pairs through ParallelNEBBatch. Returns (results, timing meta)."""
     t_parallel0 = perf_counter()
@@ -243,7 +261,12 @@ def run_parallel_neb_search(
     pair_endpoint_index: list[tuple[int, int]] = []
     for i, j in pairs:
         ri, rj = _neb_endpoint_copies(
-            minima[i][1], minima[j][1], surface_config, system_type
+            minima[i][1],
+            minima[j][1],
+            surface_config,
+            system_type,
+            n_slab=n_slab,
+            adsorbate_definition=adsorbate_definition,
         )
         endpoints.append(ri)
         endpoints.append(rj)
@@ -260,7 +283,12 @@ def run_parallel_neb_search(
     for (i, j), (react_e, prod_e) in zip(pairs, pair_endpoint_energies, strict=True):
         pair_id = f"{i}_{j}"
         react_ep, prod_ep = _neb_endpoint_copies(
-            minima[i][1], minima[j][1], surface_config, system_type
+            minima[i][1],
+            minima[j][1],
+            surface_config,
+            system_type,
+            n_slab=n_slab,
+            adsorbate_definition=adsorbate_definition,
         )
         images = interpolate_path(
             react_ep,
@@ -272,6 +300,9 @@ def run_parallel_neb_search(
             perturb_sigma=neb_perturb_sigma,
             rng=rng,
             system_type=system_type,
+            n_slab=n_slab,
+            n_core_mobile=n_core_mobile,
+            n_adsorbate_mobile=n_adsorbate_mobile,
         )
         neb_instances.append(
             TorchSimNEB(

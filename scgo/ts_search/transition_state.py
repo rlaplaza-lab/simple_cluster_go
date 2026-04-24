@@ -114,7 +114,8 @@ def calculate_structure_similarity(
 
     if ignore_fixed_atoms:
         comparison_indices = get_shared_mobile_atom_indices(
-            atoms1, atoms2, fallback_to_all=False
+            atoms1,
+            atoms2,
         )
     else:
         comparison_indices = np.arange(len(atoms1), dtype=int)
@@ -232,6 +233,39 @@ def _match_atoms_by_fingerprint(a1: Atoms, a2: Atoms) -> list[int]:
     return mapping
 
 
+def _reorder_block_positions_to_match(a1_block: Atoms, a2_block: Atoms) -> np.ndarray:
+    """Return positions (N,3) for a2_block reordered to match a1_block ordering."""
+    m = _match_atoms_by_fingerprint(a1_block, a2_block)
+    pos2 = a2_block.get_positions()
+    return pos2[m]
+
+
+def _align_endpoints_blockwise(
+    a1: Atoms,
+    a2: Atoms,
+    n_slab: int,
+    n_core: int,
+    n_ads: int,
+) -> None:
+    """Match product to reactant per block (slab indices unchanged; core/ads via fingerprint)."""
+    n = len(a1)
+    if len(a2) != n:
+        raise ValueError("align blockwise: endpoint length mismatch")
+    if n_slab + n_core + n_ads != n:
+        raise ValueError(
+            f"align blockwise: n_slab+n_core+n_ads={n_slab + n_core + n_ads} != len={n}"
+        )
+    p2 = a2.get_positions().copy()
+    if n_core > 0:
+        s1, s2 = n_slab, n_slab + n_core
+        p2[s1:s2] = _reorder_block_positions_to_match(a1[s1:s2], a2[s1:s2])
+    if n_ads > 0:
+        t1 = n_slab + n_core
+        t2 = t1 + n_ads
+        p2[t1:t2] = _reorder_block_positions_to_match(a1[t1:t2], a2[t1:t2])
+    a2.set_positions(p2)
+
+
 def _kabsch_rotation(P: np.ndarray, Q: np.ndarray) -> np.ndarray:
     """Return rotation matrix R that minimizes ||P - Q @ R|| (P and Q are centered)."""
     U, _, Vt = np.linalg.svd(P.T @ Q)
@@ -260,6 +294,9 @@ def interpolate_path(
     perturb_sigma: float = 0.0,
     rng: np.random.Generator | None = None,
     system_type: SystemType | None = None,
+    n_slab: int = 0,
+    n_core_mobile: int | None = None,
+    n_adsorbate_mobile: int | None = None,
 ) -> list[Atoms]:
     """Interpolate between two structures and return images including endpoints.
 
@@ -268,6 +305,10 @@ def interpolate_path(
     MIC displacements instead of Cartesian Kabsch rotation.
     ``perturb_sigma``: optional Gaussian displacement (Å) on interior images only.
     ``rng``: optional NumPy Generator when ``perturb_sigma`` > 0.
+
+    If ``n_slab`` + ``n_core_mobile`` + ``n_adsorbate_mobile`` equals
+    ``len(atoms)``, match endpoints per slab / core / adsorbate block instead
+    of one global permutation.
 
     For constrained slab systems we always interpolate with
     ``apply_constraint=False``; constraints remain attached and are enforced
@@ -287,8 +328,24 @@ def interpolate_path(
             )
 
     if align_endpoints:
-        mapping = _match_atoms_by_fingerprint(a1_copy, a2_copy)
-        new_pos = a2_copy.get_positions()[mapping]
+        n_atom = len(a1_copy)
+        use_blocks = (
+            n_core_mobile is not None
+            and n_adsorbate_mobile is not None
+            and n_slab + int(n_core_mobile) + int(n_adsorbate_mobile) == n_atom
+        )
+        if use_blocks:
+            _align_endpoints_blockwise(
+                a1_copy,
+                a2_copy,
+                n_slab,
+                int(n_core_mobile),
+                int(n_adsorbate_mobile),
+            )
+            new_pos = a2_copy.get_positions()
+        else:
+            mapping = _match_atoms_by_fingerprint(a1_copy, a2_copy)
+            new_pos = a2_copy.get_positions()[mapping]
         pbc_active = bool(np.any(a1_copy.pbc))
         if mic and pbc_active:
             # Pull product atoms to nearest MIC images relative to reactant.
@@ -401,7 +458,7 @@ def minima_provenance_dict(minima: list, idx: int) -> dict[str, Any]:
     energy, atoms = minima[idx]
     return {
         "run_id": get_metadata(atoms, "run_id"),
-        "trial": get_metadata(atoms, "trial") or get_metadata(atoms, "trial_id"),
+        "trial_id": get_metadata(atoms, "trial_id"),
         "source_db": get_metadata(atoms, "source_db"),
         "source_db_relpath": get_metadata(atoms, "source_db_relpath"),
         "systems_row_id": get_metadata(atoms, "systems_row_id"),
@@ -522,6 +579,9 @@ def find_transition_state(
     neb_tangent_method: str = DEFAULT_NEB_TANGENT_METHOD,
     system_type: SystemType | None = None,
     write_timing_json: bool = False,
+    n_slab: int = 0,
+    n_core_mobile: int | None = None,
+    n_adsorbate_mobile: int | None = None,
 ) -> dict[str, Any]:
     """Run NEB to locate a transition state between two structures.
 
@@ -531,6 +591,9 @@ def find_transition_state(
             isolated clusters.
         neb_tangent_method: ASE NEB tangent method (``ase.mep.neb.NEB`` ``method``
             argument). Default ``improvedtangent`` matches ASE recommendations.
+        n_slab: Blockwise alignment: slab length (default 0).
+        n_core_mobile: Mobile core count (with ``n_adsorbate_mobile`` for blockwise NEB).
+        n_adsorbate_mobile: Mobile adsorbate fragment count.
 
     Returns:
         A summary dict with TS geometry, energies and convergence status.
@@ -621,6 +684,9 @@ def find_transition_state(
             perturb_sigma=perturb_sigma,
             rng=rng,
             system_type=system_type,
+            n_slab=n_slab,
+            n_core_mobile=n_core_mobile,
+            n_adsorbate_mobile=n_adsorbate_mobile,
         )
 
         if np.allclose(

@@ -1126,8 +1126,7 @@ def _sample_seed_with_strategy(
 
     handler = strategy_handlers.get(strategy)
     if handler is None:
-        # Fallback to random if invalid strategy
-        return candidates[rng.integers(0, len(candidates))]
+        raise ValueError(f"Invalid seed sampling strategy: {strategy!r} (expected 0-4)")
 
     return handler()
 
@@ -1801,7 +1800,7 @@ def _try_strategies_in_order(
                         strategy_name,
                         next_strategy,
                     )
-        except (ValueError, RuntimeError, KeyError, AttributeError, TypeError) as e:
+        except (ValueError, RuntimeError) as e:
             if is_last_strategy:
                 raise
             next_strategy = strategies[idx + 1][0]
@@ -2219,7 +2218,7 @@ def create_initial_cluster_batch(
                         for f in future_to_index:
                             f.cancel()
                         raise
-                    except (RuntimeError, ValueError, IndexError, OSError) as e:
+                    except (RuntimeError, ValueError) as e:
                         # Treat expected generation errors as per-row failures
                         idx = future_to_index.get(future)
                         logger.exception(

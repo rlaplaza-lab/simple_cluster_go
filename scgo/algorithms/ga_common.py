@@ -15,6 +15,8 @@ import numpy as np
 from numpy.random import Generator
 
 if typing.TYPE_CHECKING:
+    from scgo.cluster_adsorbate.config import ClusterAdsorbateConfig
+    from scgo.system_types import AdsorbateDefinition
     from scgo.utils.diversity_scorer import DiversityScorer
     from scgo.utils.fitness_strategies import FitnessStrategy
 from ase import Atoms
@@ -58,7 +60,12 @@ from scgo.surface.deposition import (
     create_deposited_cluster,
     create_deposited_cluster_batch,
 )
-from scgo.system_types import SystemType, get_system_policy, uses_surface
+from scgo.system_types import (
+    SystemType,
+    get_system_policy,
+    uses_surface,
+    validate_composition_against_adsorbate,
+)
 from scgo.utils.rng_helpers import create_child_rng, ensure_rng_or_create
 from scgo.utils.validation import (
     validate_in_range,
@@ -78,6 +85,97 @@ def slab_ga_metadata_extras(
             list(surface_config.slab.get_chemical_symbols())
         )
     return metadata
+
+
+def adsorbate_partition_metadata(
+    system_type: SystemType,
+    composition: list[str],
+    adsorbate_definition: "AdsorbateDefinition | None",
+) -> dict[str, int | str]:
+    """Store core vs adsorbate mobile prefix for has_adsorbate system types (GA DB round-trip)."""
+    if not get_system_policy(system_type).has_adsorbate:
+        return {}
+    if adsorbate_definition is None:
+        return {}
+    core_list, ads_list = validate_composition_against_adsorbate(
+        composition, adsorbate_definition, context="adsorbate_partition_metadata"
+    )
+    n_core = len(core_list)
+    n_ads = len(ads_list)
+    return {
+        "n_core_atoms": n_core,
+        "n_adsorbate_fragment_atoms": n_ads,
+        "core_chemical_symbols_json": json.dumps(core_list),
+        "adsorbate_fragment_chemical_symbols_json": json.dumps(ads_list),
+    }
+
+
+def ga_run_metadata_extras(
+    surface_config: SurfaceSystemConfig | None,
+    n_slab: int,
+    system_type: SystemType,
+    composition: list[str],
+    adsorbate_definition: "AdsorbateDefinition | None" = None,
+) -> dict[str, int | str]:
+    """Slab + optional core/adsorbate mobile partition for GA written structures."""
+    out = slab_ga_metadata_extras(surface_config, n_slab, system_type)
+    out.update(
+        adsorbate_partition_metadata(system_type, composition, adsorbate_definition)
+    )
+    return out
+
+
+def core_adsorbate_partition_counts(
+    system_type: SystemType,
+    composition: list[str],
+    adsorbate_definition: "AdsorbateDefinition | None",
+) -> tuple[int, int] | None:
+    """(n_core, n_ads) for the mobile region, or None if not a two-block adsorbate run."""
+    if not get_system_policy(system_type).has_adsorbate or adsorbate_definition is None:
+        return None
+    try:
+        core_list, ads_list = validate_composition_against_adsorbate(
+            composition,
+            adsorbate_definition,
+            context="core_adsorbate_partition_counts",
+        )
+    except ValueError:
+        return None
+    if len(core_list) == 0 or len(ads_list) == 0:
+        return None
+    return (len(core_list), len(ads_list))
+
+
+def apply_mobile_core_ads_tags(
+    atoms: Atoms, n_slab: int, n_core: int, n_ads: int
+) -> None:
+    """Tag mobile atoms: core=0, adsorbate=1 (slab indices also 0)."""
+    n = len(atoms)
+    if n_slab + n_core + n_ads != n:
+        raise ValueError(
+            f"apply_mobile_core_ads_tags: len(atoms)={n}, n_slab={n_slab}, "
+            f"n_core={n_core}, n_ads={n_ads} (must sum to len)"
+        )
+    tags = np.zeros(n, dtype=int)
+    if n_ads:
+        tags[n_slab + n_core :] = 1
+    atoms.set_tags(tags)
+
+
+def maybe_apply_mobile_core_ads_tags(
+    atoms: Atoms,
+    n_slab: int,
+    composition: list[str],
+    adsorbate_definition: "AdsorbateDefinition | None",
+    system_type: SystemType,
+) -> None:
+    part = core_adsorbate_partition_counts(
+        system_type, composition, adsorbate_definition
+    )
+    if part is None:
+        return
+    n_core, n_ads = part
+    apply_mobile_core_ads_tags(atoms, n_slab, n_core, n_ads)
 
 
 def validate_ga_common_params(
@@ -115,6 +213,12 @@ class ClusterStartGenerator(StartGenerator):
     Uses :func:`scgo.initialization.create_initial_cluster_batch` to produce
     starting candidates. When population_size is provided, pre-generates the
     entire population in one batch call.
+
+    For ``gas_cluster_adsorbate``, pass ``adsorbate_definition`` and optional
+    fragment options; for ``deposition_layout=\"core_then_fragment\"``, uses
+    :func:`scgo.cluster_adsorbate.hierarchical.build_hierarchical_core_fragment_cluster`
+    (same as surface hierarchical seeds without a slab). Plain ``gas_cluster`` must
+    not pass these keyword arguments.
     """
 
     def __init__(
@@ -127,6 +231,12 @@ class ClusterStartGenerator(StartGenerator):
         mode: str = "smart",
         previous_search_glob: str = "**/*.db",
         n_jobs: int = 1,
+        *,
+        system_type: SystemType = "gas_cluster",
+        adsorbate_definition: "AdsorbateDefinition | None" = None,
+        adsorbate_fragment_template: Atoms | None = None,
+        cluster_adsorbate_config: "ClusterAdsorbateConfig | None" = None,
+        max_hierarchical_attempts: int = 200,
     ) -> None:
         """Initialize ClusterStartGenerator.
 
@@ -143,7 +253,38 @@ class ClusterStartGenerator(StartGenerator):
             n_jobs: Number of parallel workers for batch initialization.
                 Default 1 (sequential). Special values: -1 (all CPUs), -2 (all except one).
                 Only used when population_size is provided.
+            system_type: ``gas_cluster`` or ``gas_cluster_adsorbate``; used to reject
+                spurious adsorbate kwargs for plain gas clusters.
+            adsorbate_definition: Required for hierarchical gas seeds; optional for
+                monolithic (validated at runner; still used for metadata in GA).
+            adsorbate_fragment_template: Optional fragment geometry for hierarchical layout.
+            cluster_adsorbate_config: Optional placement/validation for the fragment.
+            max_hierarchical_attempts: Max inner tries in hierarchical core+fragment
+                build (per candidate).
         """
+        st_pol = get_system_policy(system_type)
+        if st_pol.uses_surface:
+            raise TypeError("ClusterStartGenerator is for gas-phase runs only")
+        if not st_pol.has_adsorbate and (
+            adsorbate_definition is not None
+            or adsorbate_fragment_template is not None
+            or cluster_adsorbate_config is not None
+        ):
+            raise ValueError(
+                "adsorbate_definition, adsorbate_fragment_template, and "
+                "cluster_adsorbate_config are only valid for system_type=gas_cluster_adsorbate"
+            )
+        if (adsorbate_fragment_template is not None or cluster_adsorbate_config is not None) and adsorbate_definition is None:
+            raise ValueError(
+                "adsorbate_fragment_template and cluster_adsorbate_config require "
+                "adsorbate_definition"
+            )
+        if st_pol.has_adsorbate and adsorbate_definition is None:
+            raise ValueError(
+                "adsorbate_definition is required in ClusterStartGenerator for "
+                "system_type=gas_cluster_adsorbate"
+            )
+
         # Normalize RNG if provided; allow None (falls back to default RNG later)
         self.rng: Generator | None = (
             ensure_rng_or_create(rng) if rng is not None else None
@@ -155,21 +296,61 @@ class ClusterStartGenerator(StartGenerator):
         self.mode: str = mode
         self.previous_search_glob: str = previous_search_glob
         self.n_jobs: int = n_jobs
+        self.system_type: SystemType = system_type
+        self.adsorbate_definition = adsorbate_definition
+        self.adsorbate_fragment_template = (
+            adsorbate_fragment_template.copy()
+            if adsorbate_fragment_template is not None
+            else None
+        )
+        self.cluster_adsorbate_config = cluster_adsorbate_config
+        self.max_hierarchical_attempts: int = max_hierarchical_attempts
+        self._hierarchical: bool = bool(
+            adsorbate_definition is not None
+            and str(adsorbate_definition.get("deposition_layout", "monolithic"))
+            == "core_then_fragment"
+        )
         self._candidate_count = 0
         self._candidate_batch: list[Atoms] | None = None
 
         if population_size is not None and self.rng is not None:
-            from scgo.initialization import create_initial_cluster_batch
+            if self._hierarchical and adsorbate_definition is not None:
+                from scgo.cluster_adsorbate.hierarchical import (
+                    build_hierarchical_core_fragment_cluster,
+                )
 
-            self._candidate_batch = create_initial_cluster_batch(
-                composition=composition,
-                n_structures=population_size,
-                rng=self.rng,
-                vacuum=vacuum,
-                previous_search_glob=previous_search_glob,
-                mode=mode,
-                n_jobs=n_jobs,
-            )
+                self._candidate_batch = []
+                for _i in range(population_size):
+                    a = build_hierarchical_core_fragment_cluster(
+                        self.composition,
+                        adsorbate_definition,
+                        self.rng,
+                        self.previous_search_glob,
+                        self.adsorbate_fragment_template,
+                        self.cluster_adsorbate_config,
+                        cluster_init_vacuum=self.vacuum,
+                        init_mode=self.mode,
+                        max_placement_attempts=self.max_hierarchical_attempts,
+                    )
+                    if a is None:
+                        raise RuntimeError(
+                            "ClusterStartGenerator: hierarchical gas seed could not be "
+                            "placed; increase max_hierarchical_attempts or relax "
+                            "ClusterAdsorbateConfig."
+                        )
+                    self._candidate_batch.append(a)
+            else:
+                from scgo.initialization import create_initial_cluster_batch
+
+                self._candidate_batch = create_initial_cluster_batch(
+                    composition=composition,
+                    n_structures=population_size,
+                    rng=self.rng,
+                    vacuum=vacuum,
+                    previous_search_glob=previous_search_glob,
+                    mode=mode,
+                    n_jobs=n_jobs,
+                )
 
     def get_new_candidate(self, maxiter: typing.Any = None) -> Atoms:
         """Generate a single new, random cluster candidate.
@@ -177,7 +358,7 @@ class ClusterStartGenerator(StartGenerator):
         If population_size was provided, serves candidates from pre-generated batch.
         Otherwise, generates structures on-demand.
         """
-        atoms = None
+        atoms: Atoms | None = None
         if self._candidate_batch is not None and self._candidate_count < len(
             self._candidate_batch
         ):
@@ -185,15 +366,37 @@ class ClusterStartGenerator(StartGenerator):
             self._candidate_count += 1
 
         if atoms is None:
-            from scgo.initialization import create_initial_cluster
+            if self._hierarchical and self.adsorbate_definition is not None:
+                from scgo.cluster_adsorbate.hierarchical import (
+                    build_hierarchical_core_fragment_cluster,
+                )
 
-            atoms = create_initial_cluster(
-                self.composition,
-                vacuum=self.vacuum,
-                rng=self.rng or np.random.default_rng(),
-                previous_search_glob=self.previous_search_glob,
-                mode=self.mode,
-            )
+                atoms = build_hierarchical_core_fragment_cluster(
+                    self.composition,
+                    self.adsorbate_definition,
+                    self.rng or np.random.default_rng(),
+                    self.previous_search_glob,
+                    self.adsorbate_fragment_template,
+                    self.cluster_adsorbate_config,
+                    cluster_init_vacuum=self.vacuum,
+                    init_mode=self.mode,
+                    max_placement_attempts=self.max_hierarchical_attempts,
+                )
+                if atoms is None:
+                    raise RuntimeError(
+                        "ClusterStartGenerator: hierarchical gas seed could not be placed; "
+                        "increase max_hierarchical_attempts or relax ClusterAdsorbateConfig."
+                    )
+            else:
+                from scgo.initialization import create_initial_cluster
+
+                atoms = create_initial_cluster(
+                    self.composition,
+                    vacuum=self.vacuum,
+                    rng=self.rng or np.random.default_rng(),
+                    previous_search_glob=self.previous_search_glob,
+                    mode=self.mode,
+                )
 
         assert atoms is not None
         if self.calculator is not None:
@@ -215,6 +418,9 @@ class SurfaceClusterStartGenerator(StartGenerator):
         population_size: int | None = None,
         previous_search_glob: str = "**/*.db",
         n_jobs: int = 1,
+        adsorbate_definition: "AdsorbateDefinition | None" = None,
+        adsorbate_fragment_template: Atoms | None = None,
+        cluster_adsorbate_config: "ClusterAdsorbateConfig | None" = None,
     ) -> None:
         self.rng: Generator | None = (
             ensure_rng_or_create(rng) if rng is not None else None
@@ -227,6 +433,13 @@ class SurfaceClusterStartGenerator(StartGenerator):
         self.population_size = population_size
         self.previous_search_glob = previous_search_glob
         self.n_jobs = n_jobs
+        self.adsorbate_definition = adsorbate_definition
+        self.adsorbate_fragment_template = (
+            adsorbate_fragment_template.copy()
+            if adsorbate_fragment_template is not None
+            else None
+        )
+        self.cluster_adsorbate_config = cluster_adsorbate_config
         self._candidate_count = 0
         self._candidate_batch: list[Atoms] | None = None
 
@@ -240,6 +453,9 @@ class SurfaceClusterStartGenerator(StartGenerator):
                 config=surface_config,
                 previous_search_glob=previous_search_glob,
                 n_jobs=n_jobs,
+                adsorbate_definition=adsorbate_definition,
+                adsorbate_fragment_template=self.adsorbate_fragment_template,
+                cluster_adsorbate_config=cluster_adsorbate_config,
             )
 
     def get_new_candidate(self, maxiter: typing.Any = None) -> Atoms:
@@ -258,6 +474,9 @@ class SurfaceClusterStartGenerator(StartGenerator):
                 self.rng or np.random.default_rng(),
                 self.surface_config,
                 previous_search_glob=self.previous_search_glob,
+                adsorbate_definition=self.adsorbate_definition,
+                adsorbate_fragment_template=self.adsorbate_fragment_template,
+                cluster_adsorbate_config=self.cluster_adsorbate_config,
             )
             if atoms is None:
                 raise RuntimeError(
@@ -277,6 +496,8 @@ def create_ga_pairing(
     slab_atoms: Atoms | None = None,
     system_type: SystemType = "gas_cluster",
     *,
+    composition: list[str] | None = None,
+    adsorbate_definition: "AdsorbateDefinition | None" = None,
     exploratory_crossover_probability: float = 0.2,
     exploratory_minfrac: float | None = None,
 ) -> CutAndSplicePairing | DualCutAndSplicePairing:
@@ -291,6 +512,8 @@ def create_ga_pairing(
         rng: Random number generator.
         slab_atoms: If provided, real slab atoms for adsorbate GA (non-empty).
             If None, an empty slab with the template cell/pbc is used (gas-phase GA).
+        composition, adsorbate_definition: If both set for a two-block ``*_adsorbate``
+            run, pairing uses ``use_tags`` (rigid core/fragment groups).
         exploratory_crossover_probability: When > 0 and exploratory ``minfrac``
             differs from the primary, a dual wrapper uses this probability to
             pick the more asymmetric cut-and-splice variant.
@@ -349,6 +572,15 @@ def create_ga_pairing(
     min_parent_fraction: float = min(0.5, max(0.3, 2.0 / max(1, n_to_optimize)))
     child_rng_primary = create_child_rng(rng) if rng is not None else None
 
+    use_partition_tags = False
+    if composition is not None:
+        use_partition_tags = (
+            core_adsorbate_partition_counts(
+                resolved_system_type, composition, adsorbate_definition
+            )
+            is not None
+        )
+
     if exploratory_crossover_probability <= 0.0:
         return CutAndSplicePairing(  # type: ignore[arg-type]
             slab,
@@ -357,6 +589,7 @@ def create_ga_pairing(
             minfrac=min_parent_fraction,
             rng=child_rng_primary,
             system_type=resolved_system_type,
+            use_tags=use_partition_tags,
         )
 
     expl_minfrac = (
@@ -372,6 +605,7 @@ def create_ga_pairing(
             minfrac=min_parent_fraction,
             rng=child_rng_primary,
             system_type=resolved_system_type,
+            use_tags=use_partition_tags,
         )
 
     primary = CutAndSplicePairing(  # type: ignore[arg-type]
@@ -381,6 +615,7 @@ def create_ga_pairing(
         minfrac=min_parent_fraction,
         rng=child_rng_primary,
         system_type=resolved_system_type,
+        use_tags=use_partition_tags,
     )
     exploratory = CutAndSplicePairing(  # type: ignore[arg-type]
         slab,
@@ -389,6 +624,7 @@ def create_ga_pairing(
         minfrac=expl_minfrac,
         rng=create_child_rng(rng) if rng is not None else None,
         system_type=resolved_system_type,
+        use_tags=use_partition_tags,
     )
     return DualCutAndSplicePairing(
         primary,
@@ -416,6 +652,7 @@ def create_mutation_operators(
     in_plane_slide_max_inner_attempts: int = 1000,
     breathing_scale_min: float = 0.82,
     breathing_scale_max: float = 1.22,
+    adsorbate_definition: "AdsorbateDefinition | None" = None,
 ) -> tuple[list, dict[str, int]]:
     """Create mutation operators once at start of GA.
 
@@ -427,6 +664,8 @@ def create_mutation_operators(
         blmin: Bond length minimums dictionary.
         rng: Random number generator.
         use_adaptive: Whether to include adaptive mutation operators.
+        adsorbate_definition: Two-block mobile partition: tag-aware rattle, skip
+            flattening/breathing.
         n_slab: Number of fixed slab atoms; when > 0, registers in-plane slide.
         surface_normal_axis: Slab normal (0, 1, or 2) for in-plane slide.
         flattening_thickness_factor: Passed to :class:`FlatteningMutation`
@@ -458,12 +697,17 @@ def create_mutation_operators(
     move_scale = (
         policy.adsorbate_move_scale if policy.constrain_adsorbate_moves else 1.0
     )
+    part = core_adsorbate_partition_counts(
+        resolved_system_type, composition, adsorbate_definition
+    )
+    use_partition_tags = part is not None
 
     rattle: RattleMutation = RattleMutation(
         blmin,
         n_to_optimize,
         rattle_strength=0.8 * move_scale,
         rattle_prop=min(0.4, 0.4 * move_scale),
+        use_tags=use_partition_tags,
         rng=create_child_rng(rng) if rng is not None else None,  # type: ignore[arg-type]
     )
     operators.append(rattle)
@@ -497,15 +741,16 @@ def create_mutation_operators(
         name_map["shell_swap"] = len(operators) - 1
 
     if use_adaptive:
-        flattening: FlatteningMutation = FlatteningMutation(
-            blmin,
-            n_to_optimize,
-            thickness_factor=flattening_thickness_factor,
-            rng=create_child_rng(rng) if rng is not None else None,  # type: ignore[arg-type]
-            max_inner_attempts=flattening_max_inner_attempts,
-        )
-        operators.append(flattening)
-        name_map["flattening"] = len(operators) - 1
+        if not use_partition_tags:
+            flattening: FlatteningMutation = FlatteningMutation(
+                blmin,
+                n_to_optimize,
+                thickness_factor=flattening_thickness_factor,
+                rng=create_child_rng(rng) if rng is not None else None,  # type: ignore[arg-type]
+                max_inner_attempts=flattening_max_inner_attempts,
+            )
+            operators.append(flattening)
+            name_map["flattening"] = len(operators) - 1
 
         rotational: RotationalMutation = RotationalMutation(
             blmin,
@@ -532,21 +777,23 @@ def create_mutation_operators(
             in_plane_strength=1.0 * move_scale,
             normal_strength=0.2 * move_scale,
             rattle_prop=min(0.5, 0.5 * move_scale),
+            use_tags=use_partition_tags,
             rng=create_child_rng(rng) if rng is not None else None,  # type: ignore[arg-type]
         )
         operators.append(anisotropic)
         name_map["anisotropic_rattle"] = len(operators) - 1
 
-        breathing: BreathingMutation = BreathingMutation(
-            blmin,
-            n_to_optimize,
-            scale_min=1.0 - (1.0 - breathing_scale_min) * move_scale,
-            scale_max=1.0 + (breathing_scale_max - 1.0) * move_scale,
-            rng=create_child_rng(rng) if rng is not None else None,  # type: ignore[arg-type]
-            max_inner_attempts=breathing_max_inner_attempts,
-        )
-        operators.append(breathing)
-        name_map["breathing"] = len(operators) - 1
+        if not use_partition_tags:
+            breathing: BreathingMutation = BreathingMutation(
+                blmin,
+                n_to_optimize,
+                scale_min=1.0 - (1.0 - breathing_scale_min) * move_scale,
+                scale_max=1.0 + (breathing_scale_max - 1.0) * move_scale,
+                rng=create_child_rng(rng) if rng is not None else None,  # type: ignore[arg-type]
+                max_inner_attempts=breathing_max_inner_attempts,
+            )
+            operators.append(breathing)
+            name_map["breathing"] = len(operators) - 1
 
         if uses_surface(resolved_system_type) and n_slab > 0:
             slide: InPlaneSlideMutation = InPlaneSlideMutation(
@@ -587,6 +834,10 @@ def update_mutation_weights(
             weights.append(operator_weights[name])
         else:
             weights.append(0.0)
+
+    s = float(sum(weights))
+    if s > 0.0:
+        weights = [w / s for w in weights]
 
     if "rattle" in name_map:
         rattle_idx: int = name_map["rattle"]

@@ -14,6 +14,7 @@ from pathlib import Path
 from ase import Atoms
 
 from scgo.database.connection import get_connection
+from scgo.database.constants import SYSTEMS_JSON_COLUMN
 from scgo.database.metadata import add_metadata
 from scgo.database.schema import is_scgo_database
 from scgo.utils.helpers import extract_energy_from_atoms
@@ -22,25 +23,15 @@ from scgo.utils.logging import TRACE, get_logger
 logger = get_logger(__name__)
 
 
-def _relaxed_column_for_systems_table(conn: sqlite3.Connection) -> str:
-    cols = [r[1] for r in conn.execute("PRAGMA table_info(systems)").fetchall()]
-    return "metadata" if "metadata" in cols else "key_value_pairs"
-
-
-def _energy_sql_expression(conn: sqlite3.Connection) -> str:
-    """SQL expression for structure energy (column and/or GA ``raw_score`` JSON)."""
-    colset = {r[1] for r in conn.execute("PRAGMA table_info(systems)").fetchall()}
-    parts: list[str] = ["energy"]
-    parts.extend(
-        [
-            f"CASE WHEN json_extract({col}, '$.raw_score') IS NOT NULL "
-            f"THEN (-CAST(json_extract({col}, '$.raw_score') AS REAL)) "
-            f"ELSE NULL END"
-            for col in ("metadata", "key_value_pairs")
-            if col in colset
-        ]
+def _energy_sql_expression() -> str:
+    """SQL expression for structure energy (``systems.energy`` and/or GA ``raw_score``)."""
+    kv = SYSTEMS_JSON_COLUMN
+    return (
+        "COALESCE(energy, "
+        f"CASE WHEN json_extract({kv}, '$.raw_score') IS NOT NULL "
+        f"THEN (-CAST(json_extract({kv}, '$.raw_score') AS REAL)) "
+        f"ELSE NULL END)"
     )
-    return "COALESCE(" + ", ".join(parts) + ")"
 
 
 def aggregate_relaxed_energy_stats(
@@ -71,8 +62,8 @@ def aggregate_relaxed_energy_stats(
 
     try:
         with get_connection(str(db_path)) as da, da.c.managed_connection() as conn:
-            relaxed_col = _relaxed_column_for_systems_table(conn)
-            energy_expr = _energy_sql_expression(conn)
+            relaxed_col = SYSTEMS_JSON_COLUMN
+            energy_expr = _energy_sql_expression()
             cur = conn.execute(
                 f"SELECT COUNT(*), MIN({energy_expr}), MAX({energy_expr}), AVG({energy_expr}) "
                 f"FROM systems WHERE json_extract({relaxed_col}, '$.relaxed') = 1"
@@ -124,11 +115,11 @@ def _safe_get_atoms(da, row_id):
         try:
             with da.c.managed_connection() as conn:
                 r = conn.execute(
-                    "SELECT metadata, key_value_pairs FROM systems WHERE id=?",
+                    f"SELECT {SYSTEMS_JSON_COLUMN} FROM systems WHERE id=?",
                     (row_id,),
                 ).fetchone()
                 if r:
-                    snippet = str(r[0] or r[1] or "")[:200]
+                    snippet = str(r[0] or "")[:200]
         except (sqlite3.DatabaseError, sqlite3.OperationalError, OSError, TypeError):
             snippet = "<snippet_unavailable>"
 
@@ -148,10 +139,8 @@ def _iter_relaxed_minima_from_da(
         raise ValueError("chunk_size must be a positive integer")
 
     with da.c.managed_connection() as conn:
-        cols = [r[1] for r in conn.execute("PRAGMA table_info(systems)").fetchall()]
-        has_metadata_col = "metadata" in cols
-        relaxed_col = "metadata" if has_metadata_col else "key_value_pairs"
-        raw_score_col = "metadata" if has_metadata_col else "key_value_pairs"
+        relaxed_col = SYSTEMS_JSON_COLUMN
+        raw_score_col = SYSTEMS_JSON_COLUMN
 
         try:
             cur = conn.execute(
@@ -300,7 +289,7 @@ def count_database_structures(db_path: str | Path) -> int:
 
     try:
         with get_connection(str(db_path)) as da, da.c.managed_connection() as conn:
-            relaxed_col = _relaxed_column_for_systems_table(conn)
+            relaxed_col = SYSTEMS_JSON_COLUMN
             cur = conn.execute(
                 f"SELECT COUNT(*) FROM systems WHERE json_extract({relaxed_col}, '$.relaxed') = 1"
             )

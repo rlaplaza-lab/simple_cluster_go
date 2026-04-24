@@ -73,11 +73,6 @@ def check_database_health(db_path: str | Path) -> dict:
             journal_mode = cursor.fetchone()[0]
             result["info"]["journal_mode"] = journal_mode
 
-            if journal_mode.lower() != "wal":
-                result["warnings"].append(
-                    f"Journal mode is {journal_mode}, recommended: WAL for concurrent access"
-                )
-
             # Get table count
             cursor = conn.execute(
                 "SELECT COUNT(*) FROM sqlite_master WHERE type='table';"

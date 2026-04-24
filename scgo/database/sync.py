@@ -92,14 +92,10 @@ def retry_on_lock(
     def decorator(func: F) -> F:
         @functools.wraps(func)
         def wrapper(*args, **kwargs):
-            last_error: Exception | None = None
-
             for attempt in range(effective_config.max_retries):
                 try:
                     return func(*args, **kwargs)
                 except sqlite3.OperationalError as e:
-                    last_error = e
-
                     if not is_retryable_error(e):
                         raise
 
@@ -117,9 +113,6 @@ def retry_on_lock(
                                 f"{operation_name}: database locked after {effective_config.max_retries} attempts"
                             )
                         raise
-
-            if last_error is not None:
-                raise last_error
             raise RuntimeError(f"{operation_name} failed unexpectedly")
 
         return wrapper  # type: ignore[return-value]
@@ -135,8 +128,6 @@ def retry_transaction(
 ):
     """Retry opening ``database_transaction`` on transient lock errors."""
     effective_config = config or PRESET_AGGRESSIVE
-    last_error: Exception | None = None
-
     for attempt in range(effective_config.max_retries):
         try:
             # Lazy import avoids circular imports.
@@ -146,7 +137,6 @@ def retry_transaction(
                 yield conn
                 return
         except sqlite3.OperationalError as e:
-            last_error = e
             if not is_retryable_error(e):
                 raise
             if attempt < effective_config.max_retries - 1:
@@ -161,9 +151,6 @@ def retry_transaction(
                     f"{operation_name}: database locked after {effective_config.max_retries} attempts"
                 )
                 raise
-
-    if last_error is not None:
-        raise last_error
 
 
 def retry_with_backoff(

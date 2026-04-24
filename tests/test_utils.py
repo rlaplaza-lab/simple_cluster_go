@@ -1,8 +1,4 @@
-"""Simple utility functions for testing.
-
-This module provides helper functions used across multiple test files
-to reduce code duplication and ensure consistent testing behavior.
-"""
+"""Shared test helpers; re-exports selected names from tests.constants."""
 
 from collections.abc import Callable
 from pathlib import Path
@@ -12,7 +8,24 @@ import numpy as np
 from ase import Atoms
 from ase.calculators.emt import EMT
 
+import tests.constants as _tc
 from scgo.constants import DEFAULT_ENERGY_TOLERANCE, DEFAULT_PAIR_COR_CUM_DIFF
+
+# Re-exported for `from tests.test_utils import ...` (single source: _tc).
+REPRODUCIBILITY_SEEDS = _tc.REPRODUCIBILITY_SEEDS
+SMALL_SIZES = _tc.SMALL_SIZES
+MEDIUM_SIZES = _tc.MEDIUM_SIZES
+LARGE_SIZES = _tc.LARGE_SIZES
+MIXED_COMPOSITIONS = _tc.MIXED_COMPOSITIONS
+BATCH_TEST_SAMPLES = _tc.BATCH_TEST_SAMPLES
+BATCH_TEST_SAMPLES_SLOW = _tc.BATCH_TEST_SAMPLES_SLOW
+UNIQUENESS_THRESHOLD = _tc.UNIQUENESS_THRESHOLD
+RNG_SEED_RANGE = _tc.RNG_SEED_RANGE
+DIVERSITY_TEST_SAMPLES_SMALL = _tc.DIVERSITY_TEST_SAMPLES_SMALL
+DIVERSITY_TEST_SAMPLES_MEDIUM = _tc.DIVERSITY_TEST_SAMPLES_MEDIUM
+DIVERSITY_TEST_SAMPLES_LARGE = _tc.DIVERSITY_TEST_SAMPLES_LARGE
+DIVERSITY_THRESHOLD_MIN = _tc.DIVERSITY_THRESHOLD_MIN
+DIVERSITY_THRESHOLD_DEFAULT = _tc.DIVERSITY_THRESHOLD_DEFAULT
 
 
 def positions_equal(a: Atoms, b: Atoms, tolerance: float = 1e-6) -> bool:
@@ -149,7 +162,7 @@ def create_test_atoms(
         if trial is not None:
             if "provenance" not in atoms.info:
                 atoms.info["provenance"] = {}
-            atoms.info["provenance"]["trial"] = trial
+            atoms.info["provenance"]["trial_id"] = trial
 
     return atoms
 
@@ -558,15 +571,10 @@ def assert_run_id_persisted(atoms: Atoms, expected_run_id: str) -> None:
 def assert_db_final_row(db_path, expected_run_id, expect_final_id=True):
     """Assert at least one `systems` row is tagged as a final unique minimum.
 
-    - Detects whether the DB `systems` table has a `metadata` column and
-      examines both `metadata` and `key_value_pairs` JSON blobs.
-    - If `expected_run_id` is not None, asserts at least one final-tagged row
-      has `run_id == expected_run_id` (looks in `metadata`, `provenance`, and
-      `key_value_pairs`).
-    - If `expect_final_id` is True, asserts a tagged row contains a non-empty
-      `final_id` value.
-
-    Raises AssertionError with a clear message on failure.
+    SCGO-created ASE databases store these flags in ``key_value_pairs`` JSON.
+    If `expected_run_id` is not None, asserts at least one final-tagged row has
+    ``run_id == expected_run_id`` in that JSON. If `expect_final_id` is True,
+    asserts a tagged row contains a non-empty ``final_id`` value.
     """
     import json
     import sqlite3
@@ -574,48 +582,26 @@ def assert_db_final_row(db_path, expected_run_id, expect_final_id=True):
     dbp = str(db_path)
     with sqlite3.connect(dbp) as conn:
         cur = conn.cursor()
-
-        cols = [r[1] for r in cur.execute("PRAGMA table_info(systems)").fetchall()]
-        has_meta = "metadata" in cols
-
-        if has_meta:
-            cur.execute("SELECT metadata, key_value_pairs FROM systems")
-            rows = cur.fetchall()
-        else:
-            cur.execute("SELECT key_value_pairs FROM systems")
-            rows = cur.fetchall()
-
+        cur.execute("SELECT key_value_pairs FROM systems")
+        rows = cur.fetchall()
         assert rows, "No rows found in DB"
 
         found_final = False
         found_runid_exact = False
-        for row in rows:
-            if has_meta:
-                meta_json, kvp_json = row
-                meta = json.loads(meta_json) if meta_json else {}
-                kvp = json.loads(kvp_json) if kvp_json else {}
-            else:
-                (kvp_json,) = row
-                meta = {}
-                kvp = json.loads(kvp_json) if kvp_json else {}
+        for (kvp_json,) in rows:
+            kvp = json.loads(kvp_json) if kvp_json else {}
 
-            if not (
-                meta.get("final_unique_minimum") or kvp.get("final_unique_minimum")
-            ):
+            if not kvp.get("final_unique_minimum"):
                 continue
 
             found_final = True
 
-            run_in_row = (
-                meta.get("run_id")
-                or (meta.get("provenance") or {}).get("run_id")
-                or kvp.get("run_id")
-            )
+            run_in_row = kvp.get("run_id")
             if expected_run_id is not None and run_in_row == expected_run_id:
                 found_runid_exact = True
 
             if expect_final_id:
-                final_id = meta.get("final_id") or kvp.get("final_id")
+                final_id = kvp.get("final_id")
                 assert final_id, "final_id not persisted for tagged final minima"
 
     assert found_final is True, "No final_unique_minimum flag found in database rows"
@@ -623,35 +609,6 @@ def assert_db_final_row(db_path, expected_run_id, expect_final_id=True):
         assert found_runid_exact is True, (
             f"No row with final_unique_minimum and expected run_id={expected_run_id!r}"
         )
-
-
-# Test configurations shared across initialization test files
-REPRODUCIBILITY_SEEDS = [42, 123, 456, 789, 1001, 2022, 3033, 4044, 5055, 6066]
-SMALL_SIZES = [4, 6, 8, 10]
-MEDIUM_SIZES = [15, 20, 25, 30]
-LARGE_SIZES = [40, 50, 60]
-
-MIXED_COMPOSITIONS = {
-    "PtAu": lambda n: ["Pt", "Au"] * (n // 2) + ["Pt"] * (n % 2),
-    "PtPd": lambda n: ["Pt", "Pd"] * (n // 2) + ["Pt"] * (n % 2),
-    "AuPdPt": lambda n: (["Au", "Pd", "Pt"] * ((n // 3) + 1))[:n],
-}
-
-# Batch test constants
-BATCH_TEST_SAMPLES = 100
-# Fewer samples for seed+growth/smart (DB search + growth ~8s each after cache); keep under ~300s
-BATCH_TEST_SAMPLES_SLOW = 15
-# Tightened threshold: require higher uniqueness in batch connectivity tests
-UNIQUENESS_THRESHOLD = 0.8  # Increased from 0.75 (75% → 80%)
-RNG_SEED_RANGE = (0, 100000)
-
-# Diversity test constants
-DIVERSITY_TEST_SAMPLES_SMALL = 10
-DIVERSITY_TEST_SAMPLES_MEDIUM = 15
-DIVERSITY_TEST_SAMPLES_LARGE = 20
-# Tightened thresholds: require higher uniqueness for better diversity
-DIVERSITY_THRESHOLD_MIN = 0.6  # Increased from 0.5 (50% → 60%)
-DIVERSITY_THRESHOLD_DEFAULT = 0.7  # Increased from 0.6 (60% → 70%)
 
 
 def validate_structure_with_diagnostics(

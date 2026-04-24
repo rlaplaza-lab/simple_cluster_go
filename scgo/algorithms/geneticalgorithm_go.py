@@ -27,9 +27,10 @@ from scgo.algorithms.ga_common import (
     create_mutation_operators,
     create_structure_comparator,
     log_early_stopping_info,
+    maybe_apply_mobile_core_ads_tags,
     select_population_class,
     setup_diversity_scorer,
-    slab_ga_metadata_extras,
+    ga_run_metadata_extras,
     sort_minima_by_fitness,
     update_early_stopping_state_unified,
     update_mutation_weights,
@@ -38,11 +39,13 @@ from scgo.algorithms.ga_common import (
 from scgo.constants import DEFAULT_ENERGY_TOLERANCE
 from scgo.database import HPC_DATABASE_EXCEPTIONS, close_data_connection, setup_database
 from scgo.database.metadata import add_metadata, filter_by_metadata
+from scgo.cluster_adsorbate.config import ClusterAdsorbateConfig
 from scgo.database.sync import retry_with_backoff
 from scgo.initialization import compute_cell_side
 from scgo.surface.config import SurfaceSystemConfig
 from scgo.surface.constraints import attach_slab_constraints
 from scgo.system_types import (
+    AdsorbateDefinition,
     SystemType,
     uses_surface,
     validate_structure_for_system_type,
@@ -96,6 +99,9 @@ def ga_go(
     system_type: SystemType = "gas_cluster",
     write_timing_json: bool = False,
     detailed_timing: bool = False,
+    adsorbate_definition: AdsorbateDefinition | None = None,
+    adsorbate_fragment_template: Atoms | None = None,
+    cluster_adsorbate_config: ClusterAdsorbateConfig | None = None,
 ) -> list[tuple[float, Atoms]]:
     """Genetic Algorithm global optimization with adaptive mutations.
 
@@ -232,6 +238,8 @@ def ga_go(
         rng,
         slab_atoms=slab_for_pairing,
         system_type=resolved_system_type,
+        composition=composition,
+        adsorbate_definition=adsorbate_definition,
     )
 
     adaptive_config = get_adaptive_mutation_config(
@@ -263,6 +271,7 @@ def ga_go(
         system_type=resolved_system_type,
         n_slab=n_slab,
         surface_normal_axis=(surface_config.surface_normal_axis if surface_mode else 2),
+        adsorbate_definition=adsorbate_definition,
     )
 
     mutations = update_mutation_weights(
@@ -291,6 +300,9 @@ def ga_go(
             population_size=population_size,
             previous_search_glob=previous_search_glob,
             n_jobs=n_jobs_population_init,
+            adsorbate_definition=adsorbate_definition,
+            adsorbate_fragment_template=adsorbate_fragment_template,
+            cluster_adsorbate_config=cluster_adsorbate_config,
         )
     else:
         start_generator = ClusterStartGenerator(
@@ -302,6 +314,10 @@ def ga_go(
             mode="smart",
             previous_search_glob=previous_search_glob,
             n_jobs=n_jobs_population_init,
+            system_type=resolved_system_type,
+            adsorbate_definition=adsorbate_definition,
+            adsorbate_fragment_template=adsorbate_fragment_template,
+            cluster_adsorbate_config=cluster_adsorbate_config,
         )
     t0 = perf_counter()
     starting_population = [
@@ -340,8 +356,6 @@ def ga_go(
                 f"Relaxing initial population of {population_size} candidates..."
             )
 
-        _HPC_RETRY_EXCEPTIONS = HPC_DATABASE_EXCEPTIONS + (IOError,)
-
         def _insert_unrelaxed(cand):
             cand.info.setdefault("key_value_pairs", {})
             cand.info.setdefault("data", {})
@@ -358,18 +372,26 @@ def ga_go(
 
         t0 = perf_counter()
         for cand in starting_population:
+            maybe_apply_mobile_core_ads_tags(
+                cand,
+                n_slab,
+                composition,
+                adsorbate_definition,
+                resolved_system_type,
+            )
             validate_structure_for_system_type(
                 cand,
                 system_type=resolved_system_type,
                 surface_config=surface_config,
                 n_slab=n_slab,
+                adsorbate_definition=adsorbate_definition,
             )
             retry_with_backoff(
                 lambda _cand=cand: _insert_unrelaxed(_cand),
                 max_retries=5,
                 initial_delay=0.2,
                 backoff_factor=2.0,
-                exception_types=_HPC_RETRY_EXCEPTIONS,
+                exception_types=HPC_DATABASE_EXCEPTIONS,
             )
         profile_timings["initial_unrelaxed_insert_s"] = perf_counter() - t0
 
@@ -395,18 +417,32 @@ def ga_go(
                 niter_local_relaxation,
                 center_after_relax=center_after_relax,
             )
+            maybe_apply_mobile_core_ads_tags(
+                cand,
+                n_slab,
+                composition,
+                adsorbate_definition,
+                resolved_system_type,
+            )
             validate_structure_for_system_type(
                 cand,
                 system_type=resolved_system_type,
                 surface_config=surface_config,
                 n_slab=n_slab if surface_mode else None,
+                adsorbate_definition=adsorbate_definition,
             )
             t_relax += perf_counter() - t_start
             add_metadata(
                 cand,
                 generation=0,
                 run_id=run_id,
-                **slab_ga_metadata_extras(surface_config, n_slab, resolved_system_type),
+                **ga_run_metadata_extras(
+                    surface_config,
+                    n_slab,
+                    resolved_system_type,
+                    composition,
+                    adsorbate_definition=adsorbate_definition,
+                ),
             )
 
             t_start = perf_counter()
@@ -415,7 +451,7 @@ def ga_go(
                 max_retries=5,
                 initial_delay=0.2,
                 backoff_factor=2.0,
-                exception_types=_HPC_RETRY_EXCEPTIONS,
+                exception_types=HPC_DATABASE_EXCEPTIONS,
             )
             t_write += perf_counter() - t_start
             initial_pop_count += 1
@@ -523,12 +559,20 @@ def ga_go(
                     t_mutation_gen += perf_counter() - t0
                     if a3_mutated is not None:
                         a3 = a3_mutated
+                maybe_apply_mobile_core_ads_tags(
+                    a3,
+                    n_slab,
+                    composition,
+                    adsorbate_definition,
+                    resolved_system_type,
+                )
                 try:
                     validate_structure_for_system_type(
                         a3,
                         system_type=resolved_system_type,
                         surface_config=surface_config,
                         n_slab=n_slab,
+                        adsorbate_definition=adsorbate_definition,
                     )
                 except ValueError as exc:
                     logger.debug(
@@ -544,7 +588,7 @@ def ga_go(
                     max_retries=5,
                     initial_delay=0.2,
                     backoff_factor=2.0,
-                    exception_types=_HPC_RETRY_EXCEPTIONS,
+                    exception_types=HPC_DATABASE_EXCEPTIONS,
                 )
                 t_db_unrelaxed_gen += perf_counter() - t_start
 
@@ -566,11 +610,19 @@ def ga_go(
                     niter_local_relaxation,
                     center_after_relax=center_after_relax,
                 )
+                maybe_apply_mobile_core_ads_tags(
+                    a3,
+                    n_slab,
+                    composition,
+                    adsorbate_definition,
+                    resolved_system_type,
+                )
                 validate_structure_for_system_type(
                     a3,
                     system_type=resolved_system_type,
                     surface_config=surface_config,
                     n_slab=n_slab if surface_mode else None,
+                    adsorbate_definition=adsorbate_definition,
                 )
                 t_relax_gen += perf_counter() - t_start
 
@@ -578,8 +630,12 @@ def ga_go(
                     a3,
                     generation=generation,
                     run_id=run_id,
-                    **slab_ga_metadata_extras(
-                        surface_config, n_slab, resolved_system_type
+                    **ga_run_metadata_extras(
+                        surface_config,
+                        n_slab,
+                        resolved_system_type,
+                        composition,
+                        adsorbate_definition=adsorbate_definition,
                     ),
                 )
                 t_start = perf_counter()
@@ -588,7 +644,7 @@ def ga_go(
                     max_retries=5,
                     initial_delay=0.2,
                     backoff_factor=2.0,
-                    exception_types=_HPC_RETRY_EXCEPTIONS,
+                    exception_types=HPC_DATABASE_EXCEPTIONS,
                 )
                 t_db_relaxed_gen += perf_counter() - t_start
 
@@ -682,7 +738,7 @@ def ga_go(
             max_retries=5,
             initial_delay=0.2,
             backoff_factor=2.0,
-            exception_types=_HPC_RETRY_EXCEPTIONS,
+            exception_types=HPC_DATABASE_EXCEPTIONS,
         )
         if run_id is not None:
             all_candidates = filter_by_metadata(all_candidates, run_id=run_id)

@@ -166,6 +166,9 @@ def run_scgo_trials(
         "diversity_max_references",
         "diversity_update_interval",
         "tag_final_minima",
+        "adsorbate_definition",
+        "adsorbate_fragment_template",
+        "cluster_adsorbate_config",
         "seed",  # seed is handled separately at API boundary, not passed to algorithms
     }
     unexpected_keys = set(params.keys()) - expected_top_level_keys

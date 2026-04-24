@@ -83,7 +83,7 @@ def test_unrelaxed_metadata_persisted_for_cross_process_reads(tmp_path):
     # Critical provenance keys should be present on the retrieved Atoms
     assert_run_id_persisted(u, "run_proc_42")
     kv = u.info.get("key_value_pairs", {})
-    assert kv.get("trial_id") == 99 or kv.get("trial") == 99
+    assert kv.get("trial_id") == 99
     assert kv.get("confid") == "c-1"
 
     # Existing user keys must be preserved

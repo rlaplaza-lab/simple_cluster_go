@@ -16,7 +16,10 @@ from scgo.database import (
 )
 from scgo.database.discovery import list_discovered_db_paths_with_run_trial
 from scgo.database.metadata import add_metadata, get_metadata
-from scgo.surface.validation import validate_stored_slab_adsorbate_metadata
+from scgo.surface.validation import (
+    validate_stored_mobile_partition_metadata,
+    validate_stored_slab_adsorbate_metadata,
+)
 from scgo.ts_search.ts_statistics import compute_ts_statistics
 from scgo.utils.helpers import get_cluster_formula, validate_pair_id
 from scgo.utils.logging import get_logger
@@ -118,6 +121,7 @@ def load_minima_by_composition(
                     source_db_relpath=_relative_db_path(db_file, base_dir),
                 )
                 validate_stored_slab_adsorbate_metadata(atoms_copy)
+                validate_stored_mobile_partition_metadata(atoms_copy)
                 minima_by_formula[formula].append((energy, atoms_copy))
 
         except (ValueError, OSError) as e:

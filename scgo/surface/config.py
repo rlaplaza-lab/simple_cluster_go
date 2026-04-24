@@ -88,6 +88,9 @@ class SurfaceSystemConfig:
     max_placement_attempts: int = 200
 
     def __post_init__(self) -> None:
+        # Copy slab so post-init pbc adjustments do not mutate a shared Atoms.
+        object.__setattr__(self, "slab", self.slab.copy())
+        slab = self.slab
         if self.surface_normal_axis not in (0, 1, 2):
             raise ValueError("surface_normal_axis must be 0, 1, or 2")
         validate_positive(
@@ -101,17 +104,17 @@ class SurfaceSystemConfig:
                 "adsorption_height_min must be <= adsorption_height_max, "
                 f"got {self.adsorption_height_min} and {self.adsorption_height_max}"
             )
-        if len(self.slab) == 0:
+        if len(slab) == 0:
             raise ValueError("slab must contain at least one atom")
 
-        if not any(self.slab.pbc):
+        if not any(slab.pbc):
             raise ValueError("Slab must have at least one periodic dimension.")
 
-        if not all(self.slab.pbc):
+        if not all(slab.pbc):
             logger.warning("Extending slab periodicity to 3D for VASP compatibility.")
-            self.slab.pbc = [True, True, True]
+            slab.pbc = [True, True, True]
 
-        vacuum_length = self.slab.cell.lengths()[self.surface_normal_axis]
+        vacuum_length = slab.cell.lengths()[self.surface_normal_axis]
         if vacuum_length < 10.0:
             logger.warning(
                 f"Slab vacuum size ({vacuum_length:.2f} A) on axis {self.surface_normal_axis} "
@@ -140,3 +143,18 @@ class SurfaceSystemConfig:
                 "set at most one of n_fix_bottom_slab_layers and "
                 "n_relax_top_slab_layers"
             )
+
+
+def describe_surface_config(cfg: SurfaceSystemConfig) -> str:
+    """Summarize key surface/deposition fields for logging and provenance."""
+    return (
+        f"SurfaceSystemConfig(n_slab={len(cfg.slab)}, "
+        f"adsorption_height=({cfg.adsorption_height_min}, {cfg.adsorption_height_max}), "
+        f"surface_normal_axis={cfg.surface_normal_axis}, "
+        f"fix_all_slab_atoms={cfg.fix_all_slab_atoms}, "
+        f"n_fix_bottom_slab_layers={cfg.n_fix_bottom_slab_layers}, "
+        f"n_relax_top_slab_layers={cfg.n_relax_top_slab_layers}, "
+        f"comparator_use_mic={cfg.comparator_use_mic}, "
+        f"cluster_init_vacuum={cfg.cluster_init_vacuum}, init_mode={cfg.init_mode!r}, "
+        f"max_placement_attempts={cfg.max_placement_attempts})"
+    )

@@ -135,8 +135,9 @@ def test_create_deposited_cluster_batch_threaded_is_seed_deterministic(
         rng: np.random.Generator,
         config: SurfaceSystemConfig,
         previous_search_glob: str = "**/*.db",
+        **kwargs: object,
     ) -> Atoms:
-        _ = (composition, blmin, config, previous_search_glob)
+        _ = (composition, blmin, config, previous_search_glob, kwargs)
         marker = float(rng.integers(0, 1_000_000))
         out = slab.copy()
         out.info["task_marker"] = marker

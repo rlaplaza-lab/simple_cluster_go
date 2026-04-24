@@ -234,7 +234,7 @@ def test_torchsim_ga_reproducible_single_vs_multi_cpu_init_and_genetic(tmp_path)
 
 
 def test_full_stack_smoke(tmp_path, rng):
-    comp = ["Pt", "Pt"]
+    comp = ["Pt", "Pt", "Pt", "Pt"]
     outdir = str(tmp_path / "campaign")
     params = get_testing_params()
     optimizer_kwargs = params["optimizer_params"]["bh"].copy()
@@ -257,7 +257,7 @@ def test_full_stack_smoke(tmp_path, rng):
     if results:
         e, a = results[0]
         assert np.isfinite(e)
-        assert len(a) == 2
+        assert len(a) == len(comp)
 
 
 def test_run_py_smoke(tmp_path):
@@ -846,57 +846,85 @@ def test_rng_different_seeds_different_results(seed1, seed2):
     )  # Same composition
 
 
-@pytest.mark.slow
-def test_ga_multiprocess_reproducibility(tmp_path):
-    """Test that GA produces identical results with n_jobs=1 vs n_jobs=-2.
+def test_ga_population_init_reproducible_single_vs_multi_cpu():
+    """GA population init input should be deterministic for n_jobs=1 vs n_jobs=2."""
+    import os
 
-    Lowered population/local-relaxation counts keep the test fast while
-    still exercising the multiprocess vs single-process reproducibility
-    behavior.
-    """
-    comp = ["Pt", "Pt", "Pt"]
+    if (os.cpu_count() or 1) < 2:
+        pytest.skip("Requires >=2 CPUs to validate parallel initialization behavior")
+
+    composition = ["Pt"] * 3
+    population_size = 2
+    rng_single, rng_multi = create_paired_rngs(789)
+
+    batch_single = create_initial_cluster_batch(
+        composition=composition,
+        n_structures=population_size,
+        rng=rng_single,
+        mode="smart",
+        n_jobs=1,
+    )
+    batch_multi = create_initial_cluster_batch(
+        composition=composition,
+        n_structures=population_size,
+        rng=rng_multi,
+        mode="smart",
+        n_jobs=2,
+    )
+
+    assert len(batch_single) == len(batch_multi) == population_size
+    for a_single, a_multi in zip(batch_single, batch_multi, strict=True):
+        np.testing.assert_allclose(
+            a_single.get_positions(),
+            a_multi.get_positions(),
+            rtol=1e-12,
+            atol=1e-12,
+        )
+        assert a_single.get_chemical_symbols() == a_multi.get_chemical_symbols()
+
+
+def test_ga_multiprocess_reproducibility_smoke(tmp_path):
+    """Integral but bounded GA reproducibility test for single vs multiprocess init."""
+    import os
+
+    if (os.cpu_count() or 1) < 2:
+        pytest.skip("Requires >=2 CPUs to validate multiprocess GA behavior")
+
+    comp = ["Pt", "Pt"]
     seed = 789
+    common_kwargs = {
+        "population_size": 3,
+        "niter": 2,
+        "niter_local_relaxation": 2,
+        "optimizer": FIRE,
+        "fmax": 0.25,
+        "vacuum": 5.0,
+        "energy_tolerance": 0.1,
+        "mutation_probability": 0.2,
+        "verbosity": 0,
+    }
 
-    # Run with single process
-    minima1, _ = run_algorithm_reproducibility_test(
-        ga_go,
+    minima_single = ga_go(
         comp,
-        seed,
-        tmp_path / "run1",
-        {
-            "population_size": 4,
-            "niter": 2,
-            "niter_local_relaxation": 2,
-            "optimizer": FIRE,
-            "fmax": 0.2,
-            "vacuum": 5.0,
-            "energy_tolerance": 0.1,
-            "n_jobs_population_init": 1,  # Single process
-            "mutation_probability": 0.2,
-        },
+        output_dir=str(tmp_path / "ga_single"),
+        calculator=EMT(),
+        rng=np.random.default_rng(seed),
+        n_jobs_population_init=1,
+        **common_kwargs,
+    )
+    minima_multi = ga_go(
+        comp,
+        output_dir=str(tmp_path / "ga_multi"),
+        calculator=EMT(),
+        rng=np.random.default_rng(seed),
+        n_jobs_population_init=2,
+        **common_kwargs,
     )
 
-    # Run with multiple processes
-    minima2, _ = run_algorithm_reproducibility_test(
-        ga_go,
-        comp,
-        seed,
-        tmp_path / "run2",
-        {
-            "population_size": 4,
-            "niter": 2,
-            "niter_local_relaxation": 2,
-            "optimizer": FIRE,
-            "fmax": 0.2,
-            "vacuum": 5.0,
-            "energy_tolerance": 0.1,
-            "n_jobs_population_init": -2,  # Multiple processes
-            "mutation_probability": 0.2,
-        },
-    )
-
-    # Results should be identical regardless of parallelization
-    assert compare_minima_lists(minima1, minima2)
+    assert compare_minima_lists(minima_single, minima_multi)
+    for energy, atoms in minima_multi:
+        assert np.isfinite(energy)
+        assert isinstance(atoms, Atoms)
 
 
 def test_database_persistence_reproducibility(tmp_path):

@@ -503,11 +503,7 @@ class PermutationMutation(OffspringCreator):
 
 
 class CustomPermutationMutation(PermutationMutation):
-    """PermutationMutation variant compatible with numpy.random.Generator.
-
-    Passing a ``Generator`` instance allows reproducible sampling without
-    falling back to the legacy global ``numpy.random`` module.
-    """
+    """PermutationMutation that requires ``rng`` to be a ``numpy.random.Generator`` (or None)."""
 
     def __init__(
         self,

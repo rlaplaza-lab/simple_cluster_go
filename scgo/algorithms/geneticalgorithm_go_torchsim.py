@@ -29,10 +29,11 @@ from scgo.algorithms.ga_common import (
     create_ga_pairing,
     create_mutation_operators,
     create_structure_comparator,
+    ga_run_metadata_extras,
     log_early_stopping_info,
+    maybe_apply_mobile_core_ads_tags,
     select_population_class,
     setup_diversity_scorer,
-    slab_ga_metadata_extras,
     sort_minima_by_fitness,
     update_early_stopping_state_unified,
     update_mutation_weights,
@@ -47,11 +48,13 @@ from scgo.database import (
     database_retry,
     setup_database,
 )
+from scgo.cluster_adsorbate.config import ClusterAdsorbateConfig
 from scgo.database.metadata import add_metadata, filter_by_metadata, update_metadata
 from scgo.initialization import compute_cell_side
 from scgo.surface.config import SurfaceSystemConfig
 from scgo.surface.constraints import attach_slab_constraints
 from scgo.system_types import (
+    AdsorbateDefinition,
     SystemType,
     uses_surface,
     validate_structure_for_system_type,
@@ -111,6 +114,8 @@ def _relax_unrelaxed_candidates(
     n_slab: int = 0,
     system_type: SystemType = "gas_cluster",
     profiling: dict[str, float] | None = None,
+    composition: list[str] | None = None,
+    adsorbate_definition: AdsorbateDefinition | None = None,
 ) -> int:
     """Relax unrelaxed candidates in batches and commit them to the database."""
     available = database_retry(
@@ -178,11 +183,20 @@ def _relax_unrelaxed_candidates(
                 original.set_cell(relaxed.get_cell(), scale_atoms=True)
                 original.set_pbc(relaxed.get_pbc())
                 original.set_positions(relaxed.get_positions())
+                if composition is not None:
+                    maybe_apply_mobile_core_ads_tags(
+                        original,
+                        n_slab,
+                        composition,
+                        adsorbate_definition,
+                        system_type,
+                    )
                 validate_structure_for_system_type(
                     original,
                     system_type=system_type,
                     surface_config=surface_config,
                     n_slab=n_slab if surface_mode else None,
+                    adsorbate_definition=adsorbate_definition,
                 )
 
                 # Copy forces if available (already converted to float64 by relaxer)
@@ -197,7 +211,14 @@ def _relax_unrelaxed_candidates(
                         {"potential_energy": energy, "raw_score": -energy},
                     ),
                 )
-                extra = slab_ga_metadata_extras(surface_config, n_slab, system_type)
+                comp_meta = list(composition) if composition is not None else []
+                extra = ga_run_metadata_extras(
+                    surface_config,
+                    n_slab,
+                    system_type,
+                    comp_meta,
+                    adsorbate_definition=adsorbate_definition,
+                )
                 if generation is not None:
                     add_metadata(
                         original,
@@ -272,6 +293,9 @@ def ga_go_torchsim(
     system_type: SystemType = "gas_cluster",
     write_timing_json: bool = False,
     detailed_timing: bool = False,
+    adsorbate_definition: AdsorbateDefinition | None = None,
+    adsorbate_fragment_template: Atoms | None = None,
+    cluster_adsorbate_config: ClusterAdsorbateConfig | None = None,
 ) -> list[tuple[float, Atoms]]:
     """Run the GA using TorchSim for batched relaxations.
 
@@ -354,7 +378,7 @@ def ga_go_torchsim(
         )
     elif (
         isinstance(niter_local_relaxation, int) and niter_local_relaxation > 0
-    ) or getattr(relaxer, "max_steps", None) is None:
+    ) or relaxer.max_steps is None:
         relaxer.max_steps = niter_local_relaxation
 
     n_to_optimize = len(composition)
@@ -403,6 +427,8 @@ def ga_go_torchsim(
         rng,
         slab_atoms=slab_for_pairing,
         system_type=system_type,
+        composition=composition,
+        adsorbate_definition=adsorbate_definition,
     )
 
     adaptive_config = get_adaptive_mutation_config(
@@ -434,6 +460,7 @@ def ga_go_torchsim(
         system_type=system_type,
         n_slab=n_slab,
         surface_normal_axis=(surface_config.surface_normal_axis if surface_mode else 2),
+        adsorbate_definition=adsorbate_definition,
     )
 
     _ = update_mutation_weights(
@@ -463,6 +490,9 @@ def ga_go_torchsim(
             population_size=population_size,
             previous_search_glob=previous_search_glob,
             n_jobs=n_jobs_population_init,
+            adsorbate_definition=adsorbate_definition,
+            adsorbate_fragment_template=adsorbate_fragment_template,
+            cluster_adsorbate_config=cluster_adsorbate_config,
         )
     else:
         start_generator = ClusterStartGenerator(
@@ -474,6 +504,10 @@ def ga_go_torchsim(
             mode="smart",
             previous_search_glob=previous_search_glob,
             n_jobs=n_jobs_population_init,
+            system_type=system_type,
+            adsorbate_definition=adsorbate_definition,
+            adsorbate_fragment_template=adsorbate_fragment_template,
+            cluster_adsorbate_config=cluster_adsorbate_config,
         )
     t0 = perf_counter()
     initial_population = [
@@ -535,11 +569,19 @@ def ga_go_torchsim(
 
         t0 = perf_counter()
         for cand in initial_population:
+            maybe_apply_mobile_core_ads_tags(
+                cand,
+                n_slab,
+                composition,
+                adsorbate_definition,
+                system_type,
+            )
             validate_structure_for_system_type(
                 cand,
                 system_type=system_type,
                 surface_config=surface_config,
                 n_slab=n_slab,
+                adsorbate_definition=adsorbate_definition,
             )
             database_retry(
                 lambda _cand=cand: _insert_unrelaxed(_cand),
@@ -557,11 +599,19 @@ def ga_go_torchsim(
                     original.set_cell(relaxed.get_cell(), scale_atoms=True)
                     original.set_pbc(relaxed.get_pbc())
                     original.set_positions(relaxed.get_positions())
+                    maybe_apply_mobile_core_ads_tags(
+                        original,
+                        n_slab,
+                        composition,
+                        adsorbate_definition,
+                        system_type,
+                    )
                     validate_structure_for_system_type(
                         original,
                         system_type=system_type,
                         surface_config=surface_config,
                         n_slab=n_slab if surface_mode else None,
+                        adsorbate_definition=adsorbate_definition,
                     )
 
                     # Copy forces if available
@@ -580,7 +630,13 @@ def ga_go_torchsim(
                         original,
                         generation=0,
                         run_id=run_id,
-                        **slab_ga_metadata_extras(surface_config, n_slab, system_type),
+                        **ga_run_metadata_extras(
+                            surface_config,
+                            n_slab,
+                            system_type,
+                            composition,
+                            adsorbate_definition=adsorbate_definition,
+                        ),
                     )
                     original.calc = SinglePointCalculator(original, energy=energy)
                     da.add_relaxed_step(original)
@@ -751,6 +807,8 @@ def ga_go_torchsim(
                         task_rng,
                         slab_atoms=slab_for_pairing,
                         system_type=system_type,
+                        composition=composition,
+                        adsorbate_definition=adsorbate_definition,
                     )
                     local_ops, local_name_map = create_mutation_operators(
                         composition=composition,
@@ -763,6 +821,7 @@ def ga_go_torchsim(
                         surface_normal_axis=(
                             surface_config.surface_normal_axis if surface_mode else 2
                         ),
+                        adsorbate_definition=adsorbate_definition,
                     )
                     local_mutations = update_mutation_weights(
                         operators_list=local_ops,
@@ -791,12 +850,20 @@ def ga_go_torchsim(
                         mutation_s = perf_counter() - mutation_t0
                         if mutated is not None:
                             child = mutated
+                    maybe_apply_mobile_core_ads_tags(
+                        child,
+                        n_slab,
+                        composition,
+                        adsorbate_definition,
+                        system_type,
+                    )
                     try:
                         validate_structure_for_system_type(
                             child,
                             system_type=system_type,
                             surface_config=surface_config,
                             n_slab=n_slab,
+                            adsorbate_definition=adsorbate_definition,
                         )
                     except ValueError as exc:
                         # Invalid geometry after crossover/mutation: same as ``child is None`` —
@@ -832,7 +899,7 @@ def ga_go_torchsim(
                     for future in as_completed(futures):
                         try:
                             result = future.result()
-                        except Exception as exc:
+                        except (RuntimeError, ValueError, TypeError) as exc:
                             worker_failures_gen += 1
                             err_name = type(exc).__name__
                             worker_failure_types_gen[err_name] = (
@@ -943,6 +1010,8 @@ def ga_go_torchsim(
                 n_slab=n_slab,
                 system_type=system_type,
                 profiling=profile_timings,
+                composition=composition,
+                adsorbate_definition=adsorbate_definition,
             )
             relax_call_wall_s = perf_counter() - t0_relax_call
             post_db_read = float(profile_timings.get("db_read_s", 0.0))
@@ -1044,6 +1113,8 @@ def ga_go_torchsim(
             n_slab=n_slab,
             system_type=system_type,
             profiling=profile_timings,
+            composition=composition,
+            adsorbate_definition=adsorbate_definition,
         )
 
         all_candidates = database_retry(

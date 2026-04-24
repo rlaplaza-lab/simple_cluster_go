@@ -1,8 +1,4 @@
-"""Integration tests for end-to-end SCGO workflows.
-
-These tests verify complete optimization campaigns from initialization through
-output generation, ensuring all components work together correctly.
-"""
+"""End-to-end SCGO workflow tests."""
 
 import os
 import sqlite3
@@ -135,7 +131,7 @@ def test_full_optimizer_workflow(tmp_path, rng, optimizer, opt_kwargs):
             atoms_from_file = read(str(xyz_files[0]))
             assert len(atoms_from_file) == 3
             assert "provenance" in atoms_from_file.info
-            assert "trial" in atoms_from_file.info["provenance"]
+            assert "trial_id" in atoms_from_file.info["provenance"]
 
 
 def test_multi_trial_campaign(tmp_path, rng):
@@ -333,6 +329,7 @@ def test_run_scgo_trials_integration(tmp_path):
             assert atoms.get_chemical_symbols() == ["Pt", "Pt"]
 
 
+@pytest.mark.slow
 def test_run_scgo_trials_deterministic_with_same_seed(tmp_path):
     """run_scgo_trials should be deterministic for a fixed seed."""
     comp = ["Pt", "Pt"]
@@ -395,6 +392,7 @@ def test_output_directory_creation(tmp_path, rng):
         assert xyz_file.name.endswith(".xyz")
 
 
+@pytest.mark.slow
 @pytest.mark.integration
 def test_bh_high_energy_strategy(tmp_path, rng):
     """Test Basin Hopping with high_energy fitness strategy."""
@@ -495,6 +493,7 @@ def test_ga_diversity_strategy(tmp_path, rng):
                     assert atoms.info["fitness"] >= 0.0
 
 
+@pytest.mark.slow
 @pytest.mark.integration
 def test_mixed_fitness_strategies(tmp_path, rng):
     """Test using different fitness strategies for BH and GA."""
@@ -541,6 +540,7 @@ def test_mixed_fitness_strategies(tmp_path, rng):
     assert isinstance(results, list)
 
 
+@pytest.mark.slow
 @pytest.mark.integration
 def test_campaign_database_handle_management(tmp_path, rng):
     """Test that database handles are properly closed in multi-composition campaigns.

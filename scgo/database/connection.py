@@ -55,10 +55,19 @@ def get_connection(
     wal_mode: bool = False,
     cache_size_mb: int = 64,
 ) -> Generator[DataConnection, None, None]:
-    """Open and yield a DataConnection with optional WAL, timeouts and cache tuning.
+    """Open and yield an ASE :class:`~ase_ga.data.DataConnection` (with cleanup on exit).
 
-    WAL mode is disabled by default for better HPC compatibility.
-    Enable it only if running on reliable local filesystems with heavy concurrent access.
+    This is the primary context manager for SCGO database access. The name
+    :func:`open_db` is an identical alias, kept for readability in scripts.
+
+    WAL mode is off by default (``DELETE`` journal) for shared/HPC filesystems;
+    pass ``wal_mode=True`` on local disks when you need more write concurrency.
+
+    Args:
+        db_path: Path to the ``.db`` file.
+        busy_timeout: SQLite busy timeout in milliseconds (default 30s).
+        wal_mode: If True, apply WAL-related PRAGMAs.
+        cache_size_mb: SQLite page cache size hint in MiB.
     """
     db_path = str(db_path)
     # Configure SQLite before opening DataConnection
@@ -172,43 +181,6 @@ def _apply_busy_timeout(da, busy_timeout: int) -> None:
             conn.execute(f"PRAGMA busy_timeout={busy_timeout};")
 
 
-@contextmanager
-def open_db(
-    db_path: str | Path,
-    busy_timeout: int = 30000,
-    wal_mode: bool = False,
-    cache_size_mb: int = 64,
-) -> Generator[DataConnection, None, None]:
-    """Open and yield a database connection with automatic resource management.
-
-    This is the primary interface for all database access in SCGO.
-    It automatically handles connection lifecycle and cleanup.
-
-    Args:
-        db_path: Path to database file (str or Path object)
-        busy_timeout: SQLite busy timeout in milliseconds (default 30s)
-        wal_mode: Enable WAL mode for concurrent access (default False).
-            WAL mode improves concurrency on local filesystems but can cause locking
-            issues on shared/network filesystems common in HPC environments.
-        cache_size_mb: SQLite cache size in MB (default 64)
-
-    Yields:
-        DataConnection: Database connection ready for use
-
-    Example:
-        >>> with open_db('output/run_xyz/db.db') as da:
-        ...     atoms = da.get_an_unrelaxed_candidate()
-        ...     # work with atoms
-        ...     da.add_relaxed_step(atoms)
-    """
-    db_path_str = str(db_path)
-
-    # Use the existing get_connection context manager
-    # JSON1 check is already performed in get_connection, no need to duplicate
-    with get_connection(
-        db_path_str,
-        busy_timeout=busy_timeout,
-        wal_mode=wal_mode,
-        cache_size_mb=cache_size_mb,
-    ) as conn:
-        yield conn
+# Public alias (same object; used in examples and older call sites).
+open_db = get_connection
+open_db.__doc__ = "Alias of :func:`get_connection` (identical behavior)."

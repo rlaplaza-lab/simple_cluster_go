@@ -5,7 +5,9 @@
 ``go_params['seed']`` / ``ts_params['seed']`` must agree when more than one is set
 (:func:`resolve_workflow_seed`). System mode is set only by the run function
 ``system_type=...`` argument together with explicit ``surface_config=...`` /
-``adsorbate_definition=...`` when required by that system type.
+``adsorbate_definition=...`` (and optional ``adsorbate_fragment_template=...``,
+``cluster_adsorbate_config=...`` for hierarchical surface seeds) when required by
+that system type.
 System-definition keys in ``go_params`` / ``ts_params`` are rejected.
 """
 
@@ -20,6 +22,7 @@ from typing import Any
 from ase import Atoms
 
 from scgo.optimization.algorithm_select import select_scgo_minima_algorithm
+from scgo.cluster_adsorbate.config import ClusterAdsorbateConfig
 from scgo.param_presets import get_default_params, get_ts_search_params
 from scgo.run_minima import (
     parse_composition_arg,
@@ -89,6 +92,24 @@ def _effective_write_timing_json(
     if profile_ga is not None:
         return bool(profile_ga)
     return write_timing_json
+
+
+def _merge_adsorbate_context_into_params(
+    base: dict[str, Any] | None,
+    *,
+    adsorbate_definition: AdsorbateDefinition | None,
+    adsorbate_fragment_template: Atoms | None,
+    cluster_adsorbate_config: ClusterAdsorbateConfig | None,
+) -> dict[str, Any]:
+    """Attach adsorbate/surface init context for :func:`run_scgo_trials` / GA."""
+    out = copy.deepcopy(base) if base is not None else {}
+    if adsorbate_definition is not None:
+        out["adsorbate_definition"] = adsorbate_definition
+    if adsorbate_fragment_template is not None:
+        out["adsorbate_fragment_template"] = adsorbate_fragment_template
+    if cluster_adsorbate_config is not None:
+        out["cluster_adsorbate_config"] = cluster_adsorbate_config
+    return out
 
 
 def _with_system_type_in_optimizer_params(
@@ -352,6 +373,8 @@ def run_go(
     surface_config: SurfaceSystemConfig | None = None,
     system_type: SystemType | None = None,
     adsorbate_definition: AdsorbateDefinition | None = None,
+    adsorbate_fragment_template: Atoms | None = None,
+    cluster_adsorbate_config: ClusterAdsorbateConfig | None = None,
     write_timing_json: bool = False,
     profile_ga: bool | None = None,
     log_summary: bool = True,
@@ -380,6 +403,12 @@ def run_go(
         system_type=system_type_local,
         write_timing_json=write_timing_json,
         profile_ga=profile_ga,
+    )
+    effective_params = _merge_adsorbate_context_into_params(
+        effective_params,
+        adsorbate_definition=adsorbate_definition,
+        adsorbate_fragment_template=adsorbate_fragment_template,
+        cluster_adsorbate_config=cluster_adsorbate_config,
     )
     out_path = _resolved_path(output_dir)
     t0 = perf_counter()
@@ -413,6 +442,8 @@ def run_go_campaign(
     surface_config: SurfaceSystemConfig | None = None,
     system_type: SystemType | None = None,
     adsorbate_definition: AdsorbateDefinition | None = None,
+    adsorbate_fragment_template: Atoms | None = None,
+    cluster_adsorbate_config: ClusterAdsorbateConfig | None = None,
     write_timing_json: bool = False,
     profile_ga: bool | None = None,
     log_summary: bool = True,
@@ -434,6 +465,12 @@ def run_go_campaign(
         system_type=system_type_local,
         write_timing_json=write_timing_json,
         profile_ga=profile_ga,
+    )
+    effective_params = _merge_adsorbate_context_into_params(
+        effective_params,
+        adsorbate_definition=adsorbate_definition,
+        adsorbate_fragment_template=adsorbate_fragment_template,
+        cluster_adsorbate_config=cluster_adsorbate_config,
     )
     compositions_local = _as_composition_list(compositions)
     for composition in compositions_local:
@@ -476,6 +513,8 @@ def run_go_ts(
     surface_config: SurfaceSystemConfig | None = None,
     system_type: SystemType | None = None,
     adsorbate_definition: AdsorbateDefinition | None = None,
+    adsorbate_fragment_template: Atoms | None = None,
+    cluster_adsorbate_config: ClusterAdsorbateConfig | None = None,
     write_timing_json: bool = False,
     profile_ga: bool | None = None,
     log_summary: bool = True,
@@ -513,6 +552,12 @@ def run_go_ts(
         system_type=system_type_local,
         write_timing_json=write_timing_json,
         profile_ga=profile_ga,
+    )
+    go_local = _merge_adsorbate_context_into_params(
+        go_local,
+        adsorbate_definition=adsorbate_definition,
+        adsorbate_fragment_template=adsorbate_fragment_template,
+        cluster_adsorbate_config=cluster_adsorbate_config,
     )
     ts_kwargs_local = _coerce_ts_for_runner(
         ts_params,
@@ -556,6 +601,8 @@ def run_go_ts_campaign(
     surface_config: SurfaceSystemConfig | None = None,
     system_type: SystemType | None = None,
     adsorbate_definition: AdsorbateDefinition | None = None,
+    adsorbate_fragment_template: Atoms | None = None,
+    cluster_adsorbate_config: ClusterAdsorbateConfig | None = None,
     write_timing_json: bool = False,
     profile_ga: bool | None = None,
     log_summary: bool = True,
@@ -594,6 +641,12 @@ def run_go_ts_campaign(
         system_type=system_type_local,
         write_timing_json=write_timing_json,
         profile_ga=profile_ga,
+    )
+    go_local = _merge_adsorbate_context_into_params(
+        go_local,
+        adsorbate_definition=adsorbate_definition,
+        adsorbate_fragment_template=adsorbate_fragment_template,
+        cluster_adsorbate_config=cluster_adsorbate_config,
     )
     ts_kwargs_local = _coerce_ts_for_runner(
         ts_params,
@@ -679,6 +732,7 @@ def run_ts_search(
         output_dir=out_path,
         seed=effective_seed,
         verbosity=verbosity,
+        adsorbate_definition=adsorbate_definition,
         **merged_kwargs,
     )
     if log_summary:
@@ -730,13 +784,16 @@ def run_ts_campaign(
         )
     out_path = _resolved_path(output_dir)
     t0 = perf_counter()
+    ts_kwargs_merged = dict(ts_kwargs_local)
+    if adsorbate_definition is not None:
+        ts_kwargs_merged["adsorbate_definition"] = adsorbate_definition
     campaign = _ts_campaign(
         compositions_local,
         output_dir=out_path,
         params=params,
         seed=effective_seed,
         verbosity=verbosity,
-        ts_kwargs=ts_kwargs_local,
+        ts_kwargs=ts_kwargs_merged,
     )
     if log_summary:
         total = sum(len(v) for v in campaign.values())

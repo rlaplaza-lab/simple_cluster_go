@@ -176,7 +176,7 @@ def load_latest_ga_profile(
     output_dir: str | Path,
     cluster_formula: str,
 ) -> dict | None:
-    """Load ``timing.json`` (or legacy ``ga_profile.json``) from the latest run."""
+    """Load ``timing.json`` from the latest run."""
     root = Path(output_dir)
     run_dirs = sorted(
         (root / f"{cluster_formula}_searches").glob("run_*"),
@@ -186,15 +186,13 @@ def load_latest_ga_profile(
         return None
     latest = run_dirs[-1]
     trial_dir = latest / "trial_1"
-    for name in ("timing.json", "ga_profile.json"):
-        profile_path = trial_dir / name
-        if not profile_path.exists():
-            continue
-        try:
-            return json.loads(profile_path.read_text())
-        except (OSError, json.JSONDecodeError):
-            continue
-    return None
+    profile_path = trial_dir / "timing.json"
+    if not profile_path.exists():
+        return None
+    try:
+        return json.loads(profile_path.read_text())
+    except (OSError, json.JSONDecodeError):
+        return None
 
 
 def format_ga_profile_lines(

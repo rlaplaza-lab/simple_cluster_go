@@ -51,7 +51,7 @@ def test_mark_final_minima_fallback_scans_all_db(tmp_path):
         db.write(
             pt2,
             relaxed=True,
-            key_value_pairs={"run_id": run_id, "trial": trial, "raw_score": -3.4},
+            key_value_pairs={"run_id": run_id, "trial_id": trial, "raw_score": -3.4},
         )
 
     stamp_scgo_database(dbpath)
@@ -64,7 +64,7 @@ def test_mark_final_minima_fallback_scans_all_db(tmp_path):
 
     # Construct final_minima_info with provenance matching above run/trial
     atoms = pt2.copy()
-    atoms.info["provenance"] = {"run_id": run_id, "trial": trial}
+    atoms.info["provenance"] = {"run_id": run_id, "trial_id": trial}
 
     from scgo.database.metadata import mark_final_minima_in_db
 
@@ -95,7 +95,7 @@ def test_mark_final_minima_prefers_relaxed_row(tmp_path):
             relaxed=False,
             key_value_pairs={
                 "run_id": run_id,
-                "trial": trial,
+                "trial_id": trial,
                 "raw_score": -1.0,
                 "relaxed": False,
             },
@@ -108,7 +108,7 @@ def test_mark_final_minima_prefers_relaxed_row(tmp_path):
             relaxed=True,
             key_value_pairs={
                 "run_id": run_id,
-                "trial": trial,
+                "trial_id": trial,
                 "raw_score": -2.0,
                 "relaxed": True,
             },
@@ -117,7 +117,7 @@ def test_mark_final_minima_prefers_relaxed_row(tmp_path):
     stamp_scgo_database(dbpath)
 
     atoms = a2.copy()
-    atoms.info["provenance"] = {"run_id": run_id, "trial": trial}
+    atoms.info["provenance"] = {"run_id": run_id, "trial_id": trial}
 
     # Register DB explicitly — strict discovery requires registration or
     # canonical run_xxx/trial_xxx layout.

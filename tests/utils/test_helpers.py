@@ -31,7 +31,10 @@ class TestFilterUniqueMinima:
     def test_filter_unique_minima_single(self):
         """Test filtering of single minimum."""
         atoms = Atoms("Pt", positions=[[0, 0, 0]])
-        atoms.info = {"key_value_pairs": {"raw_score": 1.0}, "provenance": {"trial": 1}}
+        atoms.info = {
+            "key_value_pairs": {"raw_score": 1.0},
+            "provenance": {"trial_id": 1},
+        }
 
         result = filter_unique_minima([(1.0, atoms)])
         assert len(result) == 1
@@ -42,13 +45,13 @@ class TestFilterUniqueMinima:
         atoms1 = Atoms("Pt", positions=[[0, 0, 0]])
         atoms1.info = {
             "key_value_pairs": {"raw_score": 1.0},
-            "provenance": {"trial": 1},
+            "provenance": {"trial_id": 1},
         }
 
         atoms2 = Atoms("Pt", positions=[[1, 1, 1]])  # Different position
         atoms2.info = {
             "key_value_pairs": {"raw_score": 2.0},
-            "provenance": {"trial": 1},
+            "provenance": {"trial_id": 1},
         }
 
         # Should return both since they have different positions

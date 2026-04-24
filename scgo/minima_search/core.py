@@ -20,6 +20,7 @@ from ase.io import write
 from ase_ga.utilities import closest_distances_generator, get_all_atom_types
 
 from scgo.algorithms import bh_go, ga_go, simple_go
+from scgo.algorithms._lazy_torchsim_ga import get_ga_go_torchsim
 from scgo.database import SCGODatabaseManager
 from scgo.database.metadata import (
     add_metadata,
@@ -29,7 +30,15 @@ from scgo.database.metadata import (
 from scgo.initialization import create_initial_cluster
 from scgo.surface.config import SurfaceSystemConfig
 from scgo.surface.deposition import create_deposited_cluster
-from scgo.system_types import get_system_policy
+from scgo.surface.validation import (
+    validate_stored_mobile_partition_metadata,
+    validate_stored_slab_adsorbate_metadata,
+)
+from scgo.system_types import (
+    get_system_policy,
+    validate_adsorbate_definition,
+    validate_system_type_settings,
+)
 from scgo.utils.helpers import (
     canonicalize_storage_frame,
     compute_final_id,
@@ -60,6 +69,9 @@ def _create_surface_initialized_atoms(
     composition: list[str],
     surface_config: SurfaceSystemConfig,
     rng: np.random.Generator,
+    adsorbate_definition: Any = None,
+    adsorbate_fragment_template: Atoms | None = None,
+    cluster_adsorbate_config: Any = None,
 ) -> Atoms:
     slab = surface_config.slab
     n_slab = len(slab)
@@ -81,10 +93,58 @@ def _create_surface_initialized_atoms(
         blmin=blmin,
         rng=rng,
         config=surface_config,
+        adsorbate_definition=adsorbate_definition,
+        adsorbate_fragment_template=adsorbate_fragment_template,
+        cluster_adsorbate_config=cluster_adsorbate_config,
     )
     if deposited is None:
         raise RuntimeError("Failed to create initial surface-supported structure.")
     return deposited
+
+
+def _create_gas_cluster_adsorbate_initial_atoms(
+    *,
+    composition: list[str],
+    rng: np.random.Generator,
+    adsorbate_definition: Any,
+    adsorbate_fragment_template: Atoms | None = None,
+    cluster_adsorbate_config: Any = None,
+    vacuum: float = 10.0,
+    init_mode: str = "smart",
+    max_hierarchical_attempts: int = 200,
+    previous_search_glob: str = "**/*.db",
+) -> Atoms:
+    """Match GA seeding for ``gas_cluster_adsorbate`` (monolithic vs hierarchical)."""
+    from scgo.cluster_adsorbate.hierarchical import build_hierarchical_core_fragment_cluster
+
+    if (
+        str(adsorbate_definition.get("deposition_layout", "monolithic"))
+        == "core_then_fragment"
+    ):
+        atoms = build_hierarchical_core_fragment_cluster(
+            composition,
+            adsorbate_definition,
+            rng,
+            previous_search_glob,
+            adsorbate_fragment_template,
+            cluster_adsorbate_config,
+            cluster_init_vacuum=vacuum,
+            init_mode=init_mode,
+            max_placement_attempts=max_hierarchical_attempts,
+        )
+        if atoms is None:
+            raise RuntimeError(
+                "Failed to build hierarchical gas-phase core+fragment seed; "
+                "increase max_hierarchical_attempts or relax fragment placement."
+            )
+        return atoms
+    return create_initial_cluster(
+        composition,
+        rng=rng,
+        vacuum=vacuum,
+        mode=init_mode,
+        previous_search_glob=previous_search_glob,
+    )
 
 
 def _sanitize_global_optimizer_kwargs_for_metadata(
@@ -93,6 +153,8 @@ def _sanitize_global_optimizer_kwargs_for_metadata(
     """Copy kwargs for JSON metadata: drop non-serializable objects (relaxer, slab)."""
     gok = global_optimizer_kwargs.copy()
     gok.pop("relaxer", None)
+    gok.pop("adsorbate_fragment_template", None)
+    gok.pop("cluster_adsorbate_config", None)
     surface_config = gok.pop("surface_config", None)
     if surface_config is not None:
         if not isinstance(surface_config, SurfaceSystemConfig):
@@ -184,20 +246,9 @@ def _is_ml_calculator_for_torchsim(calculator: Calculator) -> bool:
     )
 
 
-def _get_ga_go_torchsim():
-    try:
-        from scgo.algorithms.geneticalgorithm_go_torchsim import ga_go_torchsim as _impl
-    except ImportError as e:
-        raise ImportError(
-            "TorchSim GA requires TorchSim. Install with: pip install 'scgo[mace]' "
-            "(MACE) or 'scgo[uma]' (UMA) depending on the model family."
-        ) from e
-    return _impl
-
-
 def ga_go_torchsim(*args, **kwargs):
-    """TorchSim GA entry point; lazy-imports MACE deps (allows tests to monkeypatch)."""
-    return _get_ga_go_torchsim()(*args, **kwargs)
+    """TorchSim GA entry point; lazy-imports MACE/TorchSim deps (allows tests to monkeypatch)."""
+    return get_ga_go_torchsim()(*args, **kwargs)
 
 
 def _filter_ga_kwargs_for_torchsim(
@@ -246,7 +297,7 @@ def _resolve_ga_backend(
     if requested_torchsim:
         # Fail fast if TorchSim was explicitly requested but isn't importable.
         # This avoids silent backends switches that can hide misconfiguration.
-        _ = _get_ga_go_torchsim()
+        _ = get_ga_go_torchsim()
         logger.debug("Using TorchSim GA (explicit request)")
         return True, torchsim_kwargs, {}
 
@@ -409,6 +460,19 @@ def scgo(
         )
         optimizer_kwargs["system_type"] = system_type
     policy = get_system_policy(system_type)
+    surface_cfg = optimizer_kwargs.get("surface_config")
+    validate_system_type_settings(
+        system_type=system_type,
+        surface_config=surface_cfg
+        if isinstance(surface_cfg, SurfaceSystemConfig)
+        else None,
+    )
+    validate_adsorbate_definition(
+        system_type=system_type,
+        composition=composition,
+        adsorbate_definition=optimizer_kwargs.get("adsorbate_definition"),
+        context="scgo",
+    )
 
     ensure_directory_exists(output_dir)
 
@@ -440,8 +504,41 @@ def scgo(
                 composition=composition,
                 surface_config=surface_config,
                 rng=rng,
+                adsorbate_definition=optimizer_kwargs.get("adsorbate_definition"),
+                adsorbate_fragment_template=optimizer_kwargs.get(
+                    "adsorbate_fragment_template"
+                ),
+                cluster_adsorbate_config=optimizer_kwargs.get(
+                    "cluster_adsorbate_config"
+                ),
             )
             optimizer_kwargs.setdefault("n_slab", len(surface_config.slab))
+        elif policy.has_adsorbate:
+            ads_def = optimizer_kwargs.get("adsorbate_definition")
+            if not isinstance(ads_def, dict):
+                raise ValueError(
+                    f"system_type={system_type!r} requires adsorbate_definition in "
+                    f"global_optimizer_kwargs for {optimizer_name_lower.upper()}."
+                )
+            vac = float(optimizer_kwargs.get("vacuum", 10.0))
+            mode = str(optimizer_kwargs.get("init_mode", "smart"))
+            max_h = int(optimizer_kwargs.get("max_hierarchical_attempts", 200))
+            glb = str(optimizer_kwargs.get("previous_search_glob", "**/*.db"))
+            atoms = _create_gas_cluster_adsorbate_initial_atoms(
+                composition=composition,
+                rng=rng,
+                adsorbate_definition=ads_def,
+                adsorbate_fragment_template=optimizer_kwargs.get(
+                    "adsorbate_fragment_template"
+                ),
+                cluster_adsorbate_config=optimizer_kwargs.get(
+                    "cluster_adsorbate_config"
+                ),
+                vacuum=vac,
+                init_mode=mode,
+                max_hierarchical_attempts=max_h,
+                previous_search_glob=glb,
+            )
         else:
             atoms = create_initial_cluster(composition, rng=rng)
         atoms.calc = calculator_for_global_optimization
@@ -694,7 +791,7 @@ def run_trials(
     final_minima_info: list[dict] = []
     for i, (_energy, atoms) in enumerate(final_minima):
         provenance = get_provenance(atoms)
-        trial_id = provenance.get("trial", "N/A")
+        trial_id = provenance.get("trial_id", "N/A")
         atoms_run_id = provenance.get("run_id", run_id)
 
         # Format: Pt2_minimum_01_run_20260120_003007_trial_1.xyz
@@ -708,6 +805,11 @@ def run_trials(
         atoms_clean.calc = None
         n_slab_meta = get_metadata(atoms_clean, "n_slab_atoms", 0) or 0
         system_type = get_metadata(atoms_clean, "system_type")
+        try:
+            validate_stored_slab_adsorbate_metadata(atoms_clean)
+            validate_stored_mobile_partition_metadata(atoms_clean)
+        except ValueError as e:
+            logger.warning("Structure metadata check before write: %s", e)
         if (
             system_type in {"surface_cluster", "surface_cluster_adsorbate"}
             and n_slab_meta

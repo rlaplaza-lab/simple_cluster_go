@@ -15,14 +15,14 @@ def test_mark_final_minima_accepts_db_paths_and_returns_summary(tmp_path):
     db.write(
         Atoms("Pt", positions=[[0, 0, 0]]),
         relaxed=True,
-        key_value_pairs={"run_id": "run_ext", "trial": 1, "raw_score": -0.1},
+        key_value_pairs={"run_id": "run_ext", "trial_id": 1, "raw_score": -0.1},
     )
 
     # Prepare final_minima_info matching the above provenance
     atoms = Atoms("Pt", positions=[[0, 0, 0]])
     atoms.info.setdefault("provenance", {})
     atoms.info["provenance"]["run_id"] = "run_ext"
-    atoms.info["provenance"]["trial"] = 1
+    atoms.info["provenance"]["trial_id"] = 1
 
     final_info = [
         {"atoms": atoms, "energy": -0.1, "rank": 1, "final_written": "foo.xyz"}

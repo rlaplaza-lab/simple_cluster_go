@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Pt5 on graphite GO+TS via ``run_go_ts``."""
+"""Pt5 on graphite: GO + TS via ``run_go_ts``.
+
+``system_type= surface_cluster`` — supported Pt5 cluster on the preset graphite slab (no
+separate adsorbate fragment).
+"""
 
 from __future__ import annotations
 
@@ -35,7 +39,7 @@ def _build_go_params(surface_config) -> dict:
     return go_params
 
 
-def _build_ts_params(surface_config) -> dict:
+def _build_ts_params() -> dict:
     """Load TS preset, then tweak max pair budget."""
     ts_params = get_ts_search_params(
         system_type=SYSTEM_TYPE,
@@ -48,7 +52,7 @@ def _build_ts_params(surface_config) -> dict:
 def main() -> None:
     surface_config = make_graphite_surface_config()
     go_params = _build_go_params(surface_config)
-    ts_params = _build_ts_params(surface_config)
+    ts_params = _build_ts_params()
     run_go_ts(
         [ELEMENT] * N_ATOMS,
         go_params=go_params,

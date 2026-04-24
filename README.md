@@ -84,8 +84,13 @@ SCGO supports exactly four explicit `system_type` values:
 
 `system_type` must be passed to each `run_*` API call. System-definition keys are intentionally rejected from preset dicts (`go_params` / `ts_params`) to keep one canonical source of truth at the API boundary.
 For adsorbate system types (`gas_cluster_adsorbate`, `surface_cluster_adsorbate`),
-high-level runners also require `adsorbate_definition`, e.g.:
-`{"adsorbate_symbols": ["O", "H"], "core_symbols": ["Pt"]}`.
+high-level runners require `adsorbate_definition` with **both** `core_symbols` and
+`adsorbate_symbols` (use `[]` for an empty side). The run `composition` must match
+`core_symbols + adsorbate_symbols` **in list order** (the mobile region after any slab).
+Hierarchical `deposition_layout="core_then_fragment"` needs a non-empty core; use
+monolithic for a molecular-only mobile region (`core_symbols=[]`).
+Example:
+`{"core_symbols": ["Pt", "Pt", "Pt", "Pt", "Pt"], "adsorbate_symbols": ["O", "H"]}`.
 
 ---
 
@@ -120,7 +125,7 @@ Notes:
   - **`ts_network_metadata_{formula}.json`** — graph-oriented view: `ts_connections[]` (each edge: `pair_id`, `minima_indices`, energies, `barrier_height`, optional `barrier_forward` / `barrier_reverse`, `neb_converged`, `n_images`, optional `minima_provenance`), `num_minima`, `statistics`, optional `minima_base_dir`
   - **`final_unique_ts/`** — after deduplication: `final_unique_ts_summary_{formula}.json` (provenance + `unique_ts[]` with `connected_edges`, `connected_minima`, `filename`, energies, etc.) and one `.xyz` per deduplicated TS (names may include `pair_…` when a single edge maps to that file)
 
-**Per-pair entries** in `ts_search_summary_*.json` (and overlapping fields in `neb_*_metadata.json`) typically include: `pair_id`, `status` (`success` / `failed`), `neb_converged`, `n_images`, `spring_constant`, `reactant_energy`, `product_energy`, `ts_energy`, `barrier_height`, `error`, and on success `ts_image_index`. When traceability is available, `minima_indices` and **`minima_provenance`** appear: each endpoint lists `run_id`, `trial`, `source_db`, `source_db_relpath`, `systems_row_id`, `confid`, `gaid`, `unique_id`, `final_id`, `energy` (see `scgo/ts_search/transition_state_io.py`).
+**Per-pair entries** in `ts_search_summary_*.json` (and overlapping fields in `neb_*_metadata.json`) typically include: `pair_id`, `status` (`success` / `failed`), `neb_converged`, `n_images`, `spring_constant`, `reactant_energy`, `product_energy`, `ts_energy`, `barrier_height`, `error`, and on success `ts_image_index`. When traceability is available, `minima_indices` and **`minima_provenance`** appear: each endpoint lists `run_id`, `trial_id`, `source_db`, `source_db_relpath`, `systems_row_id`, `confid`, `gaid`, `unique_id`, `final_id`, `energy` (see `scgo/ts_search/transition_state_io.py`).
 
 **`neb_{pair_id}_metadata.json`** merges the provenance header with pair fields above plus, when present: `final_fmax`, `steps_taken`, `force_calls`, and NEB-parameter echoes (`use_torchsim`, `neb_backend`, `interpolation_method`, `climb`, `align_endpoints`, `perturb_sigma`, `neb_interpolation_mic`, `fmax`, `neb_steps`, etc.).
 
@@ -185,6 +190,8 @@ slab = fcc111("Pt", size=(3, 3, 3), vacuum=10.0)
 surface_config = make_surface_config(slab)
 ```
 
+For the **graphite preset** used in example runners, use [`scgo.surface.make_graphite_surface_config`](scgo/surface/presets.py) (or `from scgo import make_graphite_surface_config`) instead of building a slab by hand.
+
 Then wire `surface_config` into the GA parameters:
 
 ```python
@@ -196,8 +203,9 @@ params["optimizer_params"]["ga"]["surface_config"] = surface_config
 
 - **Direct API** (any adsorbate size): `from scgo import ga_go, SurfaceSystemConfig` and pass `surface_config=...`.
 - **`run_go`**: pass `surface_config=...` directly to `run_go(...)`; it is copied into each **present** `optimizer_params` entry among `simple` / `bh` / `ga` so the active algorithm sees the slab. The high-level runner only selects GA when `len(composition) >= 4`, so use **at least four adsorbate atoms** if you rely on automatic algorithm choice; for dimers/trimers, call `ga_go` directly.
-- For slab workflows, choose `system_type="surface_cluster"` (supported cluster only) or `system_type="surface_cluster_adsorbate"` (supported cluster with explicit adsorbate-mode policies).
-Surface workflows use `from scgo.runner_surface import make_surface_config` with your ASE slab.
+- For slab workflows, choose `system_type="surface_cluster"` (supported cluster only) or `system_type="surface_cluster_adsorbate"` (supported cluster with explicit adsorbate-mode policies). Use `scgo.runner_surface.make_surface_config` for a custom ASE slab; use `scgo.surface.make_graphite_surface_config` for the bundled graphite template.
+
+**`adsorbate_definition` and initial structures:** For both `gas_cluster_adsorbate` and `surface_cluster_adsorbate`, set explicit `core_symbols` and `adsorbate_symbols` that partition the mobile `composition` in order (slab atoms are not in `composition`). With `deposition_layout="monolithic"` (default), seeds are one gas-phase cluster for the full mobile composition, then (for surface) deposited on the slab. With `deposition_layout="core_then_fragment"`, the code builds the core, places a rigid fragment (from `adsorbate_fragment_template` or a built-in default), then (for surface) deposits the combined cluster; the same hierarchical path is used for **gas** GA when you choose this layout. Optional: `run_go(..., cluster_adsorbate_config=ClusterAdsorbateConfig(...))` for fragment height and validation. Use `scgo.surface.describe_surface_config` to log effective slab and height settings. GA and basin-hopping attach `n_core_atoms` and per-role symbol JSON in metadata for round-trip checks. When an `adsorbate_definition` is in scope, [`validate_structure_for_system_type`](scgo/system_types.py) also asserts that the mobile region’s chemical symbols match `core_symbols + adsorbate_symbols` in order (in addition to geometry checks). The helper [`validate_mobile_symbols_match_adsorbate_definition`](scgo/system_types.py) is available for the same symbol order check alone.
 
 ### Slab motion during local relaxation
 
@@ -226,6 +234,8 @@ pytest tests/ -m integration
 # Slow-only
 pytest tests/ -m slow
 ```
+
+Fast EMT “benchmark” smoke tests (initialization and dimers) live under [`tests/benchmarks/`](tests/benchmarks/); long MLIP regression sweeps live under the top-level [`benchmark/`](benchmark/) package (see [`benchmark/README.md`](benchmark/README.md)).
 
 For long GA/TorchSim tests, run in foreground with live output (`-s`) and an explicit timeout to avoid “looks stalled” sessions:
 
@@ -306,7 +316,16 @@ Benchmarks comparing MACE vs UMA on the same GA structure can use [`get_uma_ga_b
 
 - TorchSim is an optional tool that provides GPU-accelerated batched optimization when available; SCGO works with EMT (CPU) out of the box for quick tests.
 - For reproducible results, pass `seed=` to the workflow functions above.
-- Optional scripts in `runners/` are intentionally minimal, no-CLI examples that set composition/surface, build `go_params` / `ts_params` dicts, and call canonical `run_go_ts(...)` for each system type (`run_pt5_gas.py`, `run_pt5_graphite.py`, `run_pt5_oh_gas.py`, `run_pt5_2oh_graphite.py`; see `benchmark/` for sweep-style entry points).
+- Optional scripts in [`runners/`](runners/) are minimal, no-CLI examples that call [`run_go_ts`](scgo/runner_api.py). Each is tuned for MACE + TorchSim (edit calculator in the script if needed):
+
+| Script | `system_type` | Notes |
+|--------|----------------|-------|
+| [`runners/run_pt5_gas.py`](runners/run_pt5_gas.py) | `gas_cluster` | Gas-phase `Pt5` only |
+| [`runners/run_pt5_graphite.py`](runners/run_pt5_graphite.py) | `surface_cluster` | `Pt5` on preset graphite |
+| [`runners/run_pt5_oh_gas.py`](runners/run_pt5_oh_gas.py) | `gas_cluster_adsorbate` | `Pt5`+OH; `deposition_layout=monolithic` (no fragment template) |
+| [`runners/run_pt5_2oh_graphite.py`](runners/run_pt5_2oh_graphite.py) | `surface_cluster_adsorbate` | `Pt5`+2OH; `deposition_layout=core_then_fragment` with default fragment template |
+
+  For multi-size MLIP sweeps, see [`benchmark/`](benchmark/) (e.g. [`benchmark_Pt.py`](benchmark/benchmark_Pt.py), [`benchmark_Pt_surface_graphite.py`](benchmark/benchmark_Pt_surface_graphite.py)), not `tests/benchmarks/`.
 - See `tests/` for concrete usage patterns.
 
 ---

@@ -27,6 +27,7 @@ from scgo.database.discovery import list_discovered_db_paths_with_run_trial
 from scgo.database.exceptions import DatabaseSetupError
 from scgo.database.metadata import add_metadata, get_metadata
 from scgo.database.registry import get_registry
+from scgo.database.constants import SYSTEMS_JSON_COLUMN
 from scgo.database.schema import (
     CURRENT_SCHEMA_VERSION,
     is_scgo_database,
@@ -235,8 +236,7 @@ def setup_database(
         try:
             # Vacuum the database to flush any pending writes
             # Note: ASE's SQLite3Database manages commits internally
-            if hasattr(db.c, "vacuum"):
-                db.c.vacuum()
+            db.c.vacuum()
         except (AttributeError, sqlite3.OperationalError) as e:
             logger.debug(
                 f"Failed to vacuum database before opening DataConnection: {e}"
@@ -252,26 +252,23 @@ def setup_database(
     # Opening DataConnection uses retry_on_lock below; do not rename or probe-lock
     # the SQLite file (unsafe on shared HPC filesystems and other writers).
 
-    if enable_wal_mode:
-        try:
-            with sqlite3.connect(db_file, timeout=30.0) as conn:
-                apply_sqlite_pragmas(
-                    conn, wal_mode=True, busy_timeout=30000, cache_size_mb=64
-                )
-                conn.commit()
-        except sqlite3.OperationalError as e:
-            logger.warning(
-                f"Failed to enable WAL mode: {e}. Database will use default mode."
+    try:
+        with sqlite3.connect(db_file, timeout=30.0) as conn:
+            apply_sqlite_pragmas(
+                conn,
+                wal_mode=enable_wal_mode,
+                busy_timeout=30000,
+                cache_size_mb=64,
             )
-    else:
-        # HPC / shared FS: keep rollback journal; still tune cache and temp store.
-        try:
-            with sqlite3.connect(db_file, timeout=30.0) as conn:
-                apply_sqlite_pragmas(
-                    conn, wal_mode=False, busy_timeout=30000, cache_size_mb=64
-                )
-                conn.commit()
-        except sqlite3.OperationalError as e:
+            conn.commit()
+    except sqlite3.OperationalError as e:
+        if enable_wal_mode:
+            logger.warning(
+                "Failed to enable WAL mode for %s: %s. Continuing with default mode.",
+                db_file,
+                e,
+            )
+        else:
             logger.debug("Non-WAL PRAGMA setup skipped for %s: %s", db_file, e)
 
     # Open DataConnection with centralized retry-on-lock semantics
@@ -373,7 +370,7 @@ def setup_database(
                 # ASE DB persists key_value_pairs; copy metadata keys for discovery
                 prov_src = a.info.get("metadata") or {}
                 kv = a.info.setdefault("key_value_pairs", {})
-                for _k in ("run_id", "trial_id", "trial", "confid", "gaid", "id"):
+                for _k in ("run_id", "trial_id", "confid", "gaid", "id"):
                     if _k in prov_src and _k not in kv:
                         kv[_k] = prov_src[_k]
 
@@ -466,32 +463,20 @@ def extract_minima_from_database_file(
             if persist:
                 try:
                     with da.c.managed_connection() as conn:
-                        cols = [
-                            r[1]
-                            for r in conn.execute(
-                                "PRAGMA table_info(systems)"
-                            ).fetchall()
-                        ]
-                        has_metadata_col = "metadata" in cols
-                        col = "metadata" if has_metadata_col else "key_value_pairs"
-
                         for _, atoms in use_minima:
                             row_id = get_metadata(atoms, "systems_row_id", None)
                             if row_id is None:
                                 continue
                             row_id = int(row_id)
 
+                            k = SYSTEMS_JSON_COLUMN
                             conn.execute(
-                                f"UPDATE systems SET {col} = json_set(COALESCE({col}, '{{}}'), '$.run_id', ?) WHERE id = ?",
+                                f"UPDATE systems SET {k} = json_set(COALESCE({k}, '{{}}'), '$.run_id', ?) WHERE id = ?",
                                 (run_id, row_id),
                             )
                             if trial_id is not None:
                                 conn.execute(
-                                    f"UPDATE systems SET {col} = json_set(COALESCE({col}, '{{}}'), '$.trial', ?) WHERE id = ?",
-                                    (trial_id, row_id),
-                                )
-                                conn.execute(
-                                    f"UPDATE systems SET {col} = json_set(COALESCE({col}, '{{}}'), '$.trial_id', ?) WHERE id = ?",
+                                    f"UPDATE systems SET {k} = json_set(COALESCE({k}, '{{}}'), '$.trial_id', ?) WHERE id = ?",
                                     (trial_id, row_id),
                                 )
                         conn.commit()

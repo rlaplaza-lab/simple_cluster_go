@@ -497,6 +497,9 @@ class TestRefactoredSeedGrowth:
                 abs(e - energy) < 1e-6 and len(a) == len(atoms) for e, a in candidates
             )
 
+        with pytest.raises(ValueError, match="Invalid seed sampling strategy"):
+            _sample_seed_with_strategy(candidates, 99, rng)
+
 
 class TestSeedGrowthDiversity:
     """Tests to verify seed+growth produces diverse structures from seed selection, not fallbacks."""

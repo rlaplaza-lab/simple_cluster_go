@@ -50,7 +50,7 @@ def test_mark_final_minima_updates_db(tmp_path):
     atoms2 = Atoms("Pt", positions=[[0, 0, 0]])
     atoms2.info.setdefault("provenance", {})
     atoms2.info["provenance"]["run_id"] = "run_001"
-    atoms2.info["provenance"]["trial"] = 1
+    atoms2.info["provenance"]["trial_id"] = 1
     atoms2.info.setdefault("metadata", {})
     atoms2.info["metadata"]["confid"] = "conf123"
 
@@ -112,7 +112,7 @@ def test_mark_final_minima_matches_kvp_run_trial(tmp_path):
         {
             "confid": "conf_kvp",
             "run_id": "run_002",
-            "trial": 1,
+            "trial_id": 1,
             "raw_score": -0.1,
         }
     )
@@ -122,55 +122,28 @@ def test_mark_final_minima_matches_kvp_run_trial(tmp_path):
 
     close_data_connection(da)
 
-    # Ensure the stored row has run_id/trial in key_value_pairs and not in metadata
+    # Ensure the stored row has run_id/trial/confid in key_value_pairs
     with sqlite3.connect(str(db_path)) as conn:
         cur = conn.cursor()
-
-        # Adapt to DB schema: metadata column may not exist on some ASE versions
-        cols = [r[1] for r in cur.execute("PRAGMA table_info(systems)").fetchall()]
-        if "metadata" in cols:
-            cur.execute(
-                "SELECT id, energy, metadata, key_value_pairs FROM systems ORDER BY id DESC LIMIT 1"
-            )
-            row = cur.fetchone()
-            assert row is not None, "No DB row for final minima test"
-            row_id, _, metadata_col, kv_col = row
-        else:
-            cur.execute(
-                "SELECT id, energy, key_value_pairs FROM systems ORDER BY id DESC LIMIT 1"
-            )
-            row = cur.fetchone()
-            assert row is not None, "No DB row for final minima test"
-            row_id, _, kv_col = row
-            metadata_col = None
-
-        import json
-
-        metadata_json = json.loads(metadata_col) if metadata_col else {}
-        metadata_json.pop("run_id", None)
-        metadata_json.pop("trial_id", None)
-        metadata_json.pop("confid", None)
-
+        cur.execute(
+            "SELECT id, energy, key_value_pairs FROM systems ORDER BY id DESC LIMIT 1"
+        )
+        row = cur.fetchone()
+        assert row is not None, "No DB row for final minima test"
+        row_id, _, kv_col = row
         kv_json = json.loads(kv_col) if kv_col else {}
-        kv_json.update({"confid": "conf_kvp", "run_id": "run_002", "trial": 1})
-
-        if metadata_col is not None:
-            cur.execute(
-                "UPDATE systems SET energy = ?, metadata = ?, key_value_pairs = ? WHERE id = ?",
-                (-0.25, json.dumps(metadata_json), json.dumps(kv_json), row_id),
-            )
-        else:
-            cur.execute(
-                "UPDATE systems SET energy = ?, key_value_pairs = ? WHERE id = ?",
-                (-0.25, json.dumps(kv_json), row_id),
-            )
+        kv_json.update({"confid": "conf_kvp", "run_id": "run_002", "trial_id": 1})
+        cur.execute(
+            "UPDATE systems SET energy = ?, key_value_pairs = ? WHERE id = ?",
+            (-0.25, json.dumps(kv_json), row_id),
+        )
         conn.commit()
 
     # Final minima info (provenance stores trial, metadata may store confid)
     atoms2 = Atoms("Pt", positions=[[0, 0, 0]])
     atoms2.info.setdefault("provenance", {})
     atoms2.info["provenance"]["run_id"] = "run_002"
-    atoms2.info["provenance"]["trial"] = 1
+    atoms2.info["provenance"]["trial_id"] = 1
     atoms2.info.setdefault("metadata", {})
     atoms2.info["metadata"]["confid"] = "conf_kvp"
 
@@ -204,11 +177,9 @@ def test_mark_final_minima_matches_confid_in_kvp(tmp_path):
 
     from scgo.database.helpers import setup_database
 
-    # Create DB with metadata column present but confid only in key_value_pairs
+    # confid only in key_value_pairs (in-memory metadata may differ)
     template = Atoms("Pt", positions=[[0, 0, 0]])
-    template.info.setdefault("metadata", {})
     template.info.setdefault("key_value_pairs", {})
-    # Do not store confid in metadata, only in key_value_pairs
     template.info["key_value_pairs"]["confid"] = "conf_only"
     template.info["key_value_pairs"]["raw_score"] = -0.2
 
@@ -219,44 +190,18 @@ def test_mark_final_minima_matches_confid_in_kvp(tmp_path):
 
     with sqlite3.connect(str(db_path)) as conn:
         cur = conn.cursor()
-
-        # Adapt to DB schema: metadata column may not exist on some ASE versions
-        cols = [r[1] for r in cur.execute("PRAGMA table_info(systems)").fetchall()]
-        if "metadata" in cols:
-            cur.execute(
-                "SELECT id, energy, metadata, key_value_pairs FROM systems ORDER BY id DESC LIMIT 1"
-            )
-            row = cur.fetchone()
-            assert row is not None, "No DB row for final minima test"
-            row_id, _, metadata_col, kv_col = row
-        else:
-            cur.execute(
-                "SELECT id, energy, key_value_pairs FROM systems ORDER BY id DESC LIMIT 1"
-            )
-            row = cur.fetchone()
-            assert row is not None, "No DB row for final minima test"
-            row_id, _, kv_col = row
-            metadata_col = None
-
-        import json
-
-        metadata_json = json.loads(metadata_col) if metadata_col else {}
-        # ensure metadata does not contain confid
-        metadata_json.pop("confid", None)
-
+        cur.execute(
+            "SELECT id, energy, key_value_pairs FROM systems ORDER BY id DESC LIMIT 1"
+        )
+        row = cur.fetchone()
+        assert row is not None, "No DB row for final minima test"
+        row_id, _, kv_col = row
         kv_json = json.loads(kv_col) if kv_col else {}
         kv_json.update({"confid": "conf_only"})
-
-        if metadata_col is not None:
-            cur.execute(
-                "UPDATE systems SET energy = ?, metadata = ?, key_value_pairs = ? WHERE id = ?",
-                (-0.25, json.dumps(metadata_json), json.dumps(kv_json), row_id),
-            )
-        else:
-            cur.execute(
-                "UPDATE systems SET energy = ?, key_value_pairs = ? WHERE id = ?",
-                (-0.25, json.dumps(kv_json), row_id),
-            )
+        cur.execute(
+            "UPDATE systems SET energy = ?, key_value_pairs = ? WHERE id = ?",
+            (-0.25, json.dumps(kv_json), row_id),
+        )
         conn.commit()
 
     # Final minima info with confid in metadata (matching kvp in DB)
@@ -292,8 +237,8 @@ def test_mark_final_minima_matches_confid_in_kvp(tmp_path):
                 assert kvp.get("final_written") == "Pt_minimum_01_run_003_trial_1.xyz"
 
 
-def test_mark_final_minima_matches_metadata_trial_key(tmp_path):
-    # Ensure that a 'trial' key stored in metadata is accepted as a trial identifier
+def test_mark_final_minima_matches_metadata_trial_id_key(tmp_path):
+    # Ensure that trial_id in metadata is accepted as a trial identifier
     base = tmp_path
     run_dir = base / "run_004" / "trial_1"
     run_dir.mkdir(parents=True)
@@ -308,7 +253,7 @@ def test_mark_final_minima_matches_metadata_trial_key(tmp_path):
         {
             "confid": "conf_trial",
             "run_id": "run_004",
-            "trial": 1,
+            "trial_id": 1,
             "raw_score": -0.1,
         }
     )
@@ -318,51 +263,27 @@ def test_mark_final_minima_matches_metadata_trial_key(tmp_path):
 
     close_data_connection(da)
 
-    # Update stored row to have matching energy and identifiers
+    # Update stored row: trial_id and run_id in key_value_pairs for SQL matching
     with sqlite3.connect(str(db_path)) as conn:
         cur = conn.cursor()
-        cols = [r[1] for r in cur.execute("PRAGMA table_info(systems)").fetchall()]
-        if "metadata" in cols:
-            cur.execute(
-                "SELECT id, energy, metadata, key_value_pairs FROM systems ORDER BY id DESC LIMIT 1"
-            )
-            row = cur.fetchone()
-            assert row is not None, "No DB row for final minima test"
-            row_id, _, metadata_col, kv_col = row
-        else:
-            cur.execute(
-                "SELECT id, energy, key_value_pairs FROM systems ORDER BY id DESC LIMIT 1"
-            )
-            row = cur.fetchone()
-            assert row is not None, "No DB row for final minima test"
-            row_id, _, kv_col = row
-            metadata_col = None
-
-        import json
-
-        # Ensure metadata contains a 'trial' key for matching.
-        meta_json = json.loads(metadata_col) if metadata_col else {}
-        meta_json.update({"trial": 1})
-
+        cur.execute(
+            "SELECT id, energy, key_value_pairs FROM systems ORDER BY id DESC LIMIT 1"
+        )
+        row = cur.fetchone()
+        assert row is not None, "No DB row for final minima test"
+        row_id, _, kv_col = row
         kv_json = json.loads(kv_col) if kv_col else {}
-        kv_json.update({"confid": "conf_trial", "run_id": "run_004", "trial": 1})
-
-        if metadata_col is not None:
-            cur.execute(
-                "UPDATE systems SET energy = ?, metadata = ?, key_value_pairs = ? WHERE id = ?",
-                (-0.25, json.dumps(meta_json), json.dumps(kv_json), row_id),
-            )
-        else:
-            cur.execute(
-                "UPDATE systems SET energy = ?, key_value_pairs = ? WHERE id = ?",
-                (-0.25, json.dumps(kv_json), row_id),
-            )
+        kv_json.update({"confid": "conf_trial", "run_id": "run_004", "trial_id": 1})
+        cur.execute(
+            "UPDATE systems SET energy = ?, key_value_pairs = ? WHERE id = ?",
+            (-0.25, json.dumps(kv_json), row_id),
+        )
         conn.commit()
 
-    # Final minima info has 'trial' stored in metadata (rather than provenance)
+    # Final minima info has trial_id stored in metadata (rather than provenance)
     atoms2 = Atoms("Pt", positions=[[0, 0, 0]])
     atoms2.info.setdefault("metadata", {})
-    atoms2.info["metadata"]["trial"] = 1
+    atoms2.info["metadata"]["trial_id"] = 1
     atoms2.info.setdefault("provenance", {})
     atoms2.info["provenance"]["run_id"] = "run_004"
 
@@ -408,7 +329,7 @@ def test_mark_final_minima_matches_id_in_metadata(tmp_path):
         {
             "id": "id_777",
             "run_id": "run_005",
-            "trial": 1,
+            "trial_id": 1,
             "raw_score": -0.1,
         }
     )
@@ -492,7 +413,7 @@ def test_mark_final_minima_prefers_closest_energy_within_tolerance(tmp_path):
             relaxed=True,
             key_value_pairs={
                 "run_id": run_id,
-                "trial": trial,
+                "trial_id": trial,
                 "raw_score": -0.5,
                 "relaxed": True,
             },
@@ -504,7 +425,7 @@ def test_mark_final_minima_prefers_closest_energy_within_tolerance(tmp_path):
             relaxed=True,
             key_value_pairs={
                 "run_id": run_id,
-                "trial": trial,
+                "trial_id": trial,
                 "raw_score": -0.5,
                 "relaxed": True,
             },
@@ -522,11 +443,11 @@ def test_mark_final_minima_prefers_closest_energy_within_tolerance(tmp_path):
         # Set energies that are both within tolerance=0.0002 of final_energy
         cur.execute(
             "UPDATE systems SET energy = ?, key_value_pairs = ? WHERE id = ?",
-            (-0.50000, json.dumps({"run_id": run_id, "trial": trial}), id1),
+            (-0.50000, json.dumps({"run_id": run_id, "trial_id": trial}), id1),
         )
         cur.execute(
             "UPDATE systems SET energy = ?, key_value_pairs = ? WHERE id = ?",
-            (-0.50020, json.dumps({"run_id": run_id, "trial": trial}), id2),
+            (-0.50020, json.dumps({"run_id": run_id, "trial_id": trial}), id2),
         )
         conn.commit()
 
@@ -538,7 +459,7 @@ def test_mark_final_minima_prefers_closest_energy_within_tolerance(tmp_path):
     atoms = Atoms("Pt2", positions=[[0, 0, 0], [2.5, 0, 0]])
     atoms.info.setdefault("provenance", {})
     atoms.info["provenance"]["run_id"] = run_id
-    atoms.info["provenance"]["trial"] = trial
+    atoms.info["provenance"]["trial_id"] = trial
 
     final_energy = -0.50005
     final_info = [
@@ -591,7 +512,7 @@ def test_mark_final_minima_prefers_final_id(tmp_path):
         db.write(
             a1,
             relaxed=True,
-            key_value_pairs={"run_id": run_id, "trial": trial, "raw_score": -0.5},
+            key_value_pairs={"run_id": run_id, "trial_id": trial, "raw_score": -0.5},
         )
 
         a2 = Atoms("Pt2", positions=[[0, 0, 0], [2.6, 0, 0]])
@@ -600,7 +521,7 @@ def test_mark_final_minima_prefers_final_id(tmp_path):
             relaxed=True,
             key_value_pairs={
                 "run_id": run_id,
-                "trial": trial,
+                "trial_id": trial,
                 "raw_score": -0.5,
                 "final_id": "persisted-fid",
             },
@@ -620,7 +541,7 @@ def test_mark_final_minima_prefers_final_id(tmp_path):
     atoms = Atoms("Pt2", positions=[[0, 0, 0], [2.6, 0, 0]])
     atoms.info.setdefault("provenance", {})
     atoms.info["provenance"]["run_id"] = run_id
-    atoms.info["provenance"]["trial"] = trial
+    atoms.info["provenance"]["trial_id"] = trial
 
     final_info = [
         {

@@ -3,12 +3,10 @@ from __future__ import annotations
 import numpy as np
 
 
-def random_unit_vector(rng, fallback=None):
+def random_unit_vector(rng):
     vector = rng.normal(0.0, 1.0, 3)
     norm = np.linalg.norm(vector)
     if norm <= 1e-12:
-        if fallback is not None:
-            return np.array(fallback, dtype=float)
         return np.array([1.0, 0.0, 0.0])
     return vector / norm
 
