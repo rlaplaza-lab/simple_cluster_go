@@ -1160,18 +1160,17 @@ class FlatteningMutation(OffspringCreator):
         avg_blmin = np.mean(list(self.blmin.values()))
         desired_thickness = max(0.05 * avg_blmin, avg_blmin * self.thickness_factor)
 
-        candidate_positions = []
-        for normal in self._candidate_normals(pos, cm, slab):
-            candidate_positions.append(
-                self._build_flatten_candidate(
-                    pos,
-                    cm,
-                    normal,
-                    atomic_numbers,
-                    desired_thickness,
-                    avg_blmin,
-                )
+        candidate_positions = [
+            self._build_flatten_candidate(
+                pos,
+                cm,
+                normal,
+                atomic_numbers,
+                desired_thickness,
+                avg_blmin,
             )
+            for normal in self._candidate_normals(pos, cm, slab)
+        ]
 
         candidate_positions.sort(key=lambda item: item[0])
         self.last_attempt_count = 0

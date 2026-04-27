@@ -207,6 +207,7 @@ def test_create_deposited_cluster_preserves_adsorbate_symbol_order_with_two_oh(
 
     # Create a simple fragment template for the adsorbate
     from ase import Atoms as AtomsClass
+
     adsorbate_fragment_template = AtomsClass(
         symbols=["O", "H", "O", "H"],
         positions=[[0, 0, 0], [1.0, 0, 0], [0, 1.0, 0], [1.0, 1.0, 0]],
@@ -221,7 +222,7 @@ def test_create_deposited_cluster_preserves_adsorbate_symbol_order_with_two_oh(
         rng,
         cfg,
         adsorbate_definition=adsorbate_definition,
-        adsorbate_fragment_template=adsorbate_fragment_template
+        adsorbate_fragment_template=adsorbate_fragment_template,
     )
     assert ads_sys is not None
     assert ads_sys.get_chemical_symbols()[n_slab:] == composition
@@ -259,6 +260,7 @@ def test_create_deposited_cluster_batch_preserves_adsorbate_symbol_order_with_tw
 
     # Create a simple fragment template for the adsorbate
     from ase import Atoms as AtomsClass
+
     adsorbate_fragment_template = AtomsClass(
         symbols=["O", "H", "O", "H"],
         positions=[[0, 0, 0], [1.0, 0, 0], [0, 1.0, 0], [1.0, 1.0, 0]],
