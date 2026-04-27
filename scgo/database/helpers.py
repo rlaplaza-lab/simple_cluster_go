@@ -23,11 +23,11 @@ from scgo.database.connection import (
     close_data_connection,
     get_connection,
 )
+from scgo.database.constants import SYSTEMS_JSON_COLUMN
 from scgo.database.discovery import list_discovered_db_paths_with_run_trial
 from scgo.database.exceptions import DatabaseSetupError
 from scgo.database.metadata import add_metadata, get_metadata
 from scgo.database.registry import get_registry
-from scgo.database.constants import SYSTEMS_JSON_COLUMN
 from scgo.database.schema import (
     CURRENT_SCHEMA_VERSION,
     is_scgo_database,
@@ -127,12 +127,11 @@ def _trial_id_from_output_dir(base_path: Path) -> int | None:
 def _register_database_best_effort(
     base_dir: str | Path, db_file: str, atoms_template: Atoms | None, run_id: str | None
 ) -> None:
-    """Best-effort register DB in persistent registry (no exceptions).
+    """Best-effort register DB in registry (no exceptions).
 
     If ``base_dir`` lies under a parent whose name ends with ``_searches``,
     registers only at that parent (one index file per campaign). Otherwise
-    registers at ``base_dir``. ``trial_id`` is taken from a ``trial_<n>``
-    directory name when present.
+    registers at ``base_dir``.
     """
     comp_list = None
     if atoms_template is not None:
@@ -149,6 +148,8 @@ def _register_database_best_effort(
 
     base_path = Path(base_dir)
     trial_id = _trial_id_from_output_dir(base_path)
+
+    # Determine registry roots - prefer search directory if available
     search_root = next(
         (p for p in base_path.parents if p.name.endswith("_searches")), None
     )
@@ -166,7 +167,7 @@ def _register_database_best_effort(
                 trial_id=trial_id,
             )
             logger.debug("Registered database in registry root %s: %s", root, db_file)
-        except (ValueError, OSError, sqlite3.DatabaseError) as _e:
+        except (ValueError, OSError) as _e:
             logger.debug(
                 "Registry registration failed for %s in %s: %s", db_file, root, _e
             )

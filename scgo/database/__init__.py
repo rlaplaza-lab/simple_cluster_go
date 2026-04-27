@@ -65,12 +65,12 @@ from scgo.database.cache import (
     get_global_cache,
     reset_global_cache,
 )
-from scgo.database.constants import SYSTEMS_JSON_COLUMN
 from scgo.database.connection import (
     close_data_connection,
     get_connection,
     open_db,
 )
+from scgo.database.constants import SYSTEMS_JSON_COLUMN
 from scgo.database.discovery import (
     DatabaseDiscovery,
     find_databases_simple,

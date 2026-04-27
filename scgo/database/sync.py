@@ -40,22 +40,22 @@ class RetryConfig:
 
 PRESET_AGGRESSIVE = RetryConfig(max_retries=5, initial_delay=0.1, backoff_factor=2.0)
 PRESET_CONSERVATIVE = RetryConfig(max_retries=3, initial_delay=0.5, backoff_factor=1.5)
+PRESET_DEFAULT = RetryConfig(max_retries=3, initial_delay=0.2, backoff_factor=2.0)
 
 
 def database_retry(
     operation: Callable[[], Any],
-    max_retries: int = 5,
-    initial_delay: float = 0.2,
-    backoff_factor: float = 2.0,
+    config: RetryConfig | None = None,
     operation_name: str = "database operation",
     log_level: str = "debug",
 ) -> Any:
     """Run ``operation`` with :func:`retry_with_backoff` and SQLite-friendly defaults."""
+    effective_config = config or PRESET_DEFAULT
     return retry_with_backoff(
         operation=operation,
-        max_retries=max_retries,
-        initial_delay=initial_delay,
-        backoff_factor=backoff_factor,
+        max_retries=effective_config.max_retries,
+        initial_delay=effective_config.initial_delay,
+        backoff_factor=effective_config.backoff_factor,
         exception_types=HPC_DATABASE_EXCEPTIONS,
         operation_name=operation_name,
         log_level=log_level,

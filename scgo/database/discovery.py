@@ -14,7 +14,7 @@ from pathlib import Path
 
 from scgo.database.connection import open_db
 from scgo.database.constants import SYSTEMS_JSON_COLUMN
-from scgo.database.registry import DatabaseRegistry
+from scgo.database.registry import get_registry
 from scgo.database.schema import is_scgo_database
 from scgo.utils.helpers import get_composition_counts
 from scgo.utils.logging import get_logger
@@ -56,8 +56,8 @@ class DatabaseDiscovery:
         self._cache: dict[str, list[Path]] = {}
         self._metadata_cache: dict[Path, dict] = {}
 
-        # Persistent registry for fast lookups (fail-fast on invalid registries)
-        self._registry = DatabaseRegistry(self.base_dir)
+        # Registry for fast lookups - use global cache
+        self._registry = get_registry(self.base_dir)
         logger.debug("Using registry for fast database discovery")
         logger.debug(f"Initialized DatabaseDiscovery for {self.base_dir}")
 
@@ -100,6 +100,7 @@ class DatabaseDiscovery:
             logger.debug("Using cached results for: %s", cache_key)
             return self._cache[cache_key]
 
+        # Try registry first for fast lookup
         if db_filename == "*.db":
             db_files = self._registry.find_databases(
                 composition=composition,
