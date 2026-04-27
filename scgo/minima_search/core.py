@@ -114,37 +114,28 @@ def _create_gas_cluster_adsorbate_initial_atoms(
     max_hierarchical_attempts: int = 200,
     previous_search_glob: str = "**/*.db",
 ) -> Atoms:
-    """Match GA seeding for ``gas_cluster_adsorbate`` (monolithic vs hierarchical)."""
-    from scgo.cluster_adsorbate.hierarchical import build_hierarchical_core_fragment_cluster
-
-    if (
-        str(adsorbate_definition.get("deposition_layout", "monolithic"))
-        == "core_then_fragment"
-    ):
-        atoms = build_hierarchical_core_fragment_cluster(
-            composition,
-            adsorbate_definition,
-            rng,
-            previous_search_glob,
-            adsorbate_fragment_template,
-            cluster_adsorbate_config,
-            cluster_init_vacuum=vacuum,
-            init_mode=init_mode,
-            max_placement_attempts=max_hierarchical_attempts,
-        )
-        if atoms is None:
-            raise RuntimeError(
-                "Failed to build hierarchical gas-phase core+fragment seed; "
-                "increase max_hierarchical_attempts or relax fragment placement."
-            )
-        return atoms
-    return create_initial_cluster(
-        composition,
-        rng=rng,
-        vacuum=vacuum,
-        mode=init_mode,
-        previous_search_glob=previous_search_glob,
+    """Build hierarchical gas-phase core+fragment seed for adsorbate runs."""
+    from scgo.cluster_adsorbate.hierarchical import (
+        build_hierarchical_core_fragment_cluster,
     )
+
+    atoms = build_hierarchical_core_fragment_cluster(
+        composition,
+        adsorbate_definition,
+        rng,
+        previous_search_glob,
+        adsorbate_fragment_template,
+        cluster_adsorbate_config,
+        cluster_init_vacuum=vacuum,
+        init_mode=init_mode,
+        max_placement_attempts=max_hierarchical_attempts,
+    )
+    if atoms is None:
+        raise RuntimeError(
+            "Failed to build hierarchical gas-phase core+fragment seed; "
+            "increase max_hierarchical_attempts or relax fragment placement."
+        )
+    return atoms
 
 
 def _sanitize_global_optimizer_kwargs_for_metadata(
@@ -473,6 +464,15 @@ def scgo(
         adsorbate_definition=optimizer_kwargs.get("adsorbate_definition"),
         context="scgo",
     )
+    if policy.has_adsorbate and not policy.uses_surface:
+        ads_def = optimizer_kwargs.get("adsorbate_definition")
+        if isinstance(ads_def, dict):
+            core_symbols = [str(s) for s in ads_def.get("core_symbols", [])]
+            if len(core_symbols) == 0:
+                logger.info(
+                    "Gas adsorbate run with empty core_symbols: skipping global optimization."
+                )
+                return []
 
     ensure_directory_exists(output_dir)
 
@@ -519,6 +519,11 @@ def scgo(
                 raise ValueError(
                     f"system_type={system_type!r} requires adsorbate_definition in "
                     f"global_optimizer_kwargs for {optimizer_name_lower.upper()}."
+                )
+            if optimizer_kwargs.get("adsorbate_fragment_template") is None:
+                raise ValueError(
+                    f"system_type={system_type!r} requires adsorbate_fragment_template "
+                    "for hierarchical adsorbate initialization."
                 )
             vac = float(optimizer_kwargs.get("vacuum", 10.0))
             mode = str(optimizer_kwargs.get("init_mode", "smart"))

@@ -179,6 +179,14 @@ class TestScgoFunction:
                 "niter_local_relaxation": 1,
                 "system_type": "surface_cluster_adsorbate",
                 "surface_config": surface_config,
+                "adsorbate_definition": {
+                    "core_symbols": ["Pt"],
+                    "adsorbate_symbols": ["O", "H"],
+                    "deposition_layout": "core_then_fragment",
+                },
+                "adsorbate_fragment_template": Atoms(
+                    symbols=["O", "H"], positions=[[0.0, 0.0, 0.0], [0.0, 0.0, 0.96]]
+                ),
             },
             output_dir=str(tmp_path / "surface_bh"),
             rng=rng,
@@ -187,6 +195,30 @@ class TestScgoFunction:
         )
         assert results == []
         assert len(captured["atoms"]) > len(slab)
+
+    def test_scgo_gas_adsorbate_empty_core_is_noop(self, tmp_path, rng):
+        results = scgo(
+            composition=["O", "H"],
+            global_optimizer="ga",
+            global_optimizer_kwargs={
+                "niter": 1,
+                "population_size": 2,
+                "system_type": "gas_cluster_adsorbate",
+                "adsorbate_definition": {
+                    "core_symbols": [],
+                    "adsorbate_symbols": ["O", "H"],
+                    "deposition_layout": "core_then_fragment",
+                },
+                "adsorbate_fragment_template": Atoms(
+                    symbols=["O", "H"], positions=[[0.0, 0.0, 0.0], [0.0, 0.0, 0.96]]
+                ),
+            },
+            output_dir=str(tmp_path / "gas_empty_core_noop"),
+            rng=rng,
+            calculator_for_global_optimization=EMT(),
+            verbosity=0,
+        )
+        assert results == []
 
     def test_scgo_unknown_optimizer(self, tmp_path, rng):
         """Test scgo() raises error for unknown optimizer."""

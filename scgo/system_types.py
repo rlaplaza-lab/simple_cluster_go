@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections import Counter
 from dataclasses import dataclass
 from typing import Literal, NotRequired, TypedDict
 
@@ -160,52 +159,38 @@ def validate_mobile_symbols_match_adsorbate_definition(
     n_slab: int,
     adsorbate_definition: AdsorbateDefinition,
 ) -> None:
-    """Ensure ``atoms`` mobile slice matches ``core_symbols + adsorbate_symbols`` in order.
-
-    The mobile region is ``atoms[n_slab:]`` (entire system for gas ``n_slab=0``;
-    after the slab prefix for supported systems). Used at runtime so structures
-    cannot pass GA/TS with scrambled core/adsorbate ordering when a definition
-    is provided.
-    """
-    if "core_symbols" not in adsorbate_definition:
-        raise ValueError(
-            "adsorbate_definition['core_symbols'] is required for mobile symbol "
-            "validation (use [] for molecular-only mobile region)."
-        )
-    if "adsorbate_symbols" not in adsorbate_definition:
-        raise ValueError(
-            "adsorbate_definition['adsorbate_symbols'] is required for mobile symbol "
-            "validation (use [] for core-only mobile region)."
-        )
-    cr = adsorbate_definition["core_symbols"]
-    ad = adsorbate_definition["adsorbate_symbols"]
+    """Ensure ``atoms`` mobile slice matches ``core_symbols + adsorbate_symbols`` in order."""
+    cr = adsorbate_definition.get("core_symbols", [])
+    ad = adsorbate_definition.get("adsorbate_symbols", [])
     if not isinstance(cr, list) or not isinstance(ad, list):
         raise ValueError(
             "adsorbate_definition['core_symbols'] and ['adsorbate_symbols'] must be lists."
         )
+
     core_list = [str(s) for s in cr]
     ads_list = [str(s) for s in ad]
     expected = core_list + ads_list
+
     n = len(atoms)
     if n_slab < 0 or n_slab > n:
         raise ValueError(
             f"Invalid n_slab={n_slab} for len(atoms)={n} in mobile symbol validation."
         )
+
     mobile = atoms.get_chemical_symbols()[n_slab:]
     if len(mobile) != len(expected):
         raise ValueError(
-            "Mobile region length does not match adsorbate definition: "
-            f"len(mobile)={len(mobile)} vs len(core_symbols)+len(adsorbate_symbols)="
-            f"{len(expected)} (n_slab={n_slab}, len(atoms)={n})."
+            f"Mobile region length mismatch: len(mobile)={len(mobile)} vs expected={len(expected)}"
         )
-    if mobile != list(expected):
+
+    if mobile != expected:
+
         def _head(syms: list[str], k: int = 12) -> str:
             h = syms[:k]
             return str(h) + ("..." if len(syms) > k else "")
 
         raise ValueError(
-            "Mobile chemical symbols do not match adsorbate_definition ordered partition "
-            f"(core then adsorbate). Expected: {_head(expected)}; got: {_head(mobile)}."
+            f"Mobile symbols mismatch. Expected: {_head(expected)}; got: {_head(mobile)}."
         )
 
 
@@ -279,47 +264,38 @@ def validate_composition_against_adsorbate(
             composition, or the ordered partition does not match ``composition``.
     """
     prefix = f"{context}: " if context else ""
-    if "core_symbols" not in adsorbate_definition:
-        raise ValueError(
-            f"{prefix}adsorbate_definition['core_symbols'] is required (use [] for "
-            "molecular-only mobile region)."
-        )
-    if "adsorbate_symbols" not in adsorbate_definition:
-        raise ValueError(
-            f"{prefix}adsorbate_definition['adsorbate_symbols'] is required (use [] for "
-            "a core-only mobile region)."
-        )
-    cr = adsorbate_definition["core_symbols"]
-    ad = adsorbate_definition["adsorbate_symbols"]
+
+    cr = adsorbate_definition.get("core_symbols", [])
+    ad = adsorbate_definition.get("adsorbate_symbols", [])
     if not isinstance(cr, list) or not isinstance(ad, list):
         raise ValueError(
-            f"{prefix}adsorbate_definition['core_symbols'] and ['adsorbate_symbols'] "
-            "must be lists of str."
+            f"{prefix}adsorbate_definition['core_symbols'] and ['adsorbate_symbols'] must be lists."
         )
+
     core_list = [str(s) for s in cr]
     ads_list = [str(s) for s in ad]
+
     if not composition and not core_list and not ads_list:
         return core_list, ads_list
     if len(core_list) == 0 and len(ads_list) == 0:
         raise ValueError(
-            f"{prefix}core_symbols and adsorbate_symbols cannot both be empty unless "
-            "composition is also empty."
+            f"{prefix}core_symbols and adsorbate_symbols cannot both be empty unless composition is also empty."
         )
-    if list(composition) != core_list + ads_list:
+
+    expected = core_list + ads_list
+    if list(composition) != expected:
         raise ValueError(
-            f"{prefix}Run composition must equal core_symbols + adsorbate_symbols in "
-            f"order. composition={list(composition)!r}, expected "
-            f"core+ads={core_list + ads_list!r}."
+            f"{prefix}composition must equal core_symbols + adsorbate_symbols. Got {composition}, expected {expected}."
         )
-    if len(core_list) and len(ads_list):
-        core_set = set(Counter(core_list).keys())
-        ads_set = set(Counter(ads_list).keys())
+
+    if core_list and ads_list:
+        core_set = set(core_list)
+        ads_set = set(ads_list)
         if core_set & ads_set:
             raise ValueError(
-                f"{prefix}adsorbate_definition core_symbols and adsorbate_symbols use "
-                "overlapping element types while both non-empty; lists must be disjoint "
-                f"by atom role (overlapping symbols: {sorted(core_set & ads_set)})."
+                f"{prefix}core_symbols and adsorbate_symbols must be disjoint. Overlapping: {sorted(core_set & ads_set)}."
             )
+
     return core_list, ads_list
 
 
@@ -345,30 +321,32 @@ def validate_adsorbate_definition(
             f"{context} requires adsorbate_definition when system_type={system_type!r}."
         )
 
-    layout_raw = adsorbate_definition.get("deposition_layout", "core_then_fragment")
-    if layout_raw != "core_then_fragment":
+    if (
+        adsorbate_definition.get("deposition_layout", "core_then_fragment")
+        != "core_then_fragment"
+    ):
         raise ValueError(
-            "SCGO now supports hierarchical adsorbate initialization only. "
-            "Set deposition_layout='core_then_fragment'."
+            "SCGO now supports hierarchical adsorbate initialization only. Set deposition_layout='core_then_fragment'."
         )
+
     core_list, _ads_list = validate_composition_against_adsorbate(
         composition, adsorbate_definition, context=context
     )
 
     fba = adsorbate_definition.get("fragment_bond_axis")
-    if fba is not None:
-        if not isinstance(fba, list) or len(fba) != 2:
-            raise ValueError(
-                "adsorbate_definition['fragment_bond_axis'] must be a list of two int "
-                f"indices or omitted, got {fba!r}"
-            )
-        if not all(isinstance(x, int) for x in fba):
-            raise ValueError("adsorbate_definition['fragment_bond_axis'] must be int indices")
+    if fba is not None and (
+        not isinstance(fba, list)
+        or len(fba) != 2
+        or not all(isinstance(x, int) for x in fba)
+    ):
+        raise ValueError(
+            f"adsorbate_definition['fragment_bond_axis'] must be a list of two int indices or omitted, got {fba!r}"
+        )
+
     ai = adsorbate_definition.get("fragment_anchor_index")
     if ai is not None and not isinstance(ai, int):
         raise ValueError(
-            "adsorbate_definition['fragment_anchor_index'] must be int or omitted, "
-            f"got {ai!r}"
+            f"adsorbate_definition['fragment_anchor_index'] must be int or omitted, got {ai!r}"
         )
 
 
@@ -377,11 +355,11 @@ def normalize_adsorbates_input(
 ) -> list[Atoms]:
     prefix = f"{context}: " if context else ""
     if adsorbates is None:
-        raise ValueError(
-            f"{prefix}adsorbates is required for adsorbate system types."
-        )
+        raise ValueError(f"{prefix}adsorbates is required for adsorbate system types.")
+
     items = adsorbates if isinstance(adsorbates, list) else [adsorbates]
     out: list[Atoms] = []
+
     for idx, item in enumerate(items):
         if not isinstance(item, Atoms):
             raise TypeError(
@@ -390,6 +368,7 @@ def normalize_adsorbates_input(
         if len(item) == 0:
             raise ValueError(f"{prefix}adsorbates[{idx}] must not be empty.")
         out.append(item.copy())
+
     if not out:
         raise ValueError(f"{prefix}adsorbates must contain at least one fragment.")
     return out
@@ -422,8 +401,7 @@ def build_adsorbate_definition_from_inputs(
     if not policy.has_adsorbate:
         if adsorbates is not None:
             raise ValueError(
-                f"{context} does not accept adsorbates for "
-                f"system_type={system_type!r}."
+                f"{context} does not accept adsorbates for system_type={system_type!r}."
             )
         return None, None, list(composition)
     core_list = [str(s) for s in composition]

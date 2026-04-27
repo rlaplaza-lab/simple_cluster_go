@@ -90,7 +90,7 @@ def slab_ga_metadata_extras(
 def adsorbate_partition_metadata(
     system_type: SystemType,
     composition: list[str],
-    adsorbate_definition: "AdsorbateDefinition | None",
+    adsorbate_definition: AdsorbateDefinition | None,
 ) -> dict[str, int | str]:
     """Store core vs adsorbate mobile prefix for has_adsorbate system types (GA DB round-trip)."""
     if not get_system_policy(system_type).has_adsorbate:
@@ -115,7 +115,7 @@ def ga_run_metadata_extras(
     n_slab: int,
     system_type: SystemType,
     composition: list[str],
-    adsorbate_definition: "AdsorbateDefinition | None" = None,
+    adsorbate_definition: AdsorbateDefinition | None = None,
 ) -> dict[str, int | str]:
     """Slab + optional core/adsorbate mobile partition for GA written structures."""
     out = slab_ga_metadata_extras(surface_config, n_slab, system_type)
@@ -128,7 +128,7 @@ def ga_run_metadata_extras(
 def core_adsorbate_partition_counts(
     system_type: SystemType,
     composition: list[str],
-    adsorbate_definition: "AdsorbateDefinition | None",
+    adsorbate_definition: AdsorbateDefinition | None,
 ) -> tuple[int, int] | None:
     """(n_core, n_ads) for the mobile region, or None if not a two-block adsorbate run."""
     if not get_system_policy(system_type).has_adsorbate or adsorbate_definition is None:
@@ -166,7 +166,7 @@ def maybe_apply_mobile_core_ads_tags(
     atoms: Atoms,
     n_slab: int,
     composition: list[str],
-    adsorbate_definition: "AdsorbateDefinition | None",
+    adsorbate_definition: AdsorbateDefinition | None,
     system_type: SystemType,
 ) -> None:
     part = core_adsorbate_partition_counts(
@@ -233,9 +233,9 @@ class ClusterStartGenerator(StartGenerator):
         n_jobs: int = 1,
         *,
         system_type: SystemType = "gas_cluster",
-        adsorbate_definition: "AdsorbateDefinition | None" = None,
+        adsorbate_definition: AdsorbateDefinition | None = None,
         adsorbate_fragment_template: Atoms | None = None,
-        cluster_adsorbate_config: "ClusterAdsorbateConfig | None" = None,
+        cluster_adsorbate_config: ClusterAdsorbateConfig | None = None,
         max_hierarchical_attempts: int = 200,
     ) -> None:
         """Initialize ClusterStartGenerator.
@@ -274,7 +274,10 @@ class ClusterStartGenerator(StartGenerator):
                 "adsorbate_definition, adsorbate_fragment_template, and "
                 "cluster_adsorbate_config are only valid for system_type=gas_cluster_adsorbate"
             )
-        if (adsorbate_fragment_template is not None or cluster_adsorbate_config is not None) and adsorbate_definition is None:
+        if (
+            adsorbate_fragment_template is not None
+            or cluster_adsorbate_config is not None
+        ) and adsorbate_definition is None:
             raise ValueError(
                 "adsorbate_fragment_template and cluster_adsorbate_config require "
                 "adsorbate_definition"
@@ -305,11 +308,12 @@ class ClusterStartGenerator(StartGenerator):
         )
         self.cluster_adsorbate_config = cluster_adsorbate_config
         self.max_hierarchical_attempts: int = max_hierarchical_attempts
-        self._hierarchical: bool = bool(
-            adsorbate_definition is not None
-            and str(adsorbate_definition.get("deposition_layout", "monolithic"))
-            == "core_then_fragment"
-        )
+        self._hierarchical: bool = bool(adsorbate_definition is not None)
+        if st_pol.has_adsorbate and self.adsorbate_fragment_template is None:
+            raise ValueError(
+                "adsorbate_fragment_template is required for hierarchical "
+                "gas_cluster_adsorbate initialization."
+            )
         self._candidate_count = 0
         self._candidate_batch: list[Atoms] | None = None
 
@@ -418,9 +422,9 @@ class SurfaceClusterStartGenerator(StartGenerator):
         population_size: int | None = None,
         previous_search_glob: str = "**/*.db",
         n_jobs: int = 1,
-        adsorbate_definition: "AdsorbateDefinition | None" = None,
+        adsorbate_definition: AdsorbateDefinition | None = None,
         adsorbate_fragment_template: Atoms | None = None,
-        cluster_adsorbate_config: "ClusterAdsorbateConfig | None" = None,
+        cluster_adsorbate_config: ClusterAdsorbateConfig | None = None,
     ) -> None:
         self.rng: Generator | None = (
             ensure_rng_or_create(rng) if rng is not None else None
@@ -497,7 +501,7 @@ def create_ga_pairing(
     system_type: SystemType = "gas_cluster",
     *,
     composition: list[str] | None = None,
-    adsorbate_definition: "AdsorbateDefinition | None" = None,
+    adsorbate_definition: AdsorbateDefinition | None = None,
     exploratory_crossover_probability: float = 0.2,
     exploratory_minfrac: float | None = None,
 ) -> CutAndSplicePairing | DualCutAndSplicePairing:
@@ -652,7 +656,7 @@ def create_mutation_operators(
     in_plane_slide_max_inner_attempts: int = 1000,
     breathing_scale_min: float = 0.82,
     breathing_scale_max: float = 1.22,
-    adsorbate_definition: "AdsorbateDefinition | None" = None,
+    adsorbate_definition: AdsorbateDefinition | None = None,
 ) -> tuple[list, dict[str, int]]:
     """Create mutation operators once at start of GA.
 

@@ -15,8 +15,8 @@ from scgo.surface.deposition import (
     create_deposited_cluster_batch,
     slab_surface_extreme,
 )
-from scgo.surface.objectives import adsorption_energy
 from scgo.surface.fragment_templates import build_default_fragment_template
+from scgo.surface.objectives import adsorption_energy
 from scgo.surface.presets import (
     DEFAULT_GRAPHITE_SLAB_LAYERS,
     DEFAULT_GRAPHITE_SLAB_REPEAT_XY,

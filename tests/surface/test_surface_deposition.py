@@ -198,7 +198,31 @@ def test_create_deposited_cluster_preserves_adsorbate_symbol_order_with_two_oh(
         max_placement_attempts=500,
     )
     rng = default_rng(2026)
-    ads_sys = create_deposited_cluster(composition, pt_slab, blmin, rng, cfg)
+
+    # Use adsorbate definition to preserve order via hierarchical initialization
+    adsorbate_definition = {
+        "core_symbols": ["Pt", "Pt", "Pt", "Pt", "Pt"],
+        "adsorbate_symbols": ["O", "H", "O", "H"],
+    }
+
+    # Create a simple fragment template for the adsorbate
+    from ase import Atoms as AtomsClass
+    adsorbate_fragment_template = AtomsClass(
+        symbols=["O", "H", "O", "H"],
+        positions=[[0, 0, 0], [1.0, 0, 0], [0, 1.0, 0], [1.0, 1.0, 0]],
+        cell=[10, 10, 10],
+        pbc=False,
+    )
+
+    ads_sys = create_deposited_cluster(
+        composition,
+        pt_slab,
+        blmin,
+        rng,
+        cfg,
+        adsorbate_definition=adsorbate_definition,
+        adsorbate_fragment_template=adsorbate_fragment_template
+    )
     assert ads_sys is not None
     assert ads_sys.get_chemical_symbols()[n_slab:] == composition
 
@@ -226,6 +250,22 @@ def test_create_deposited_cluster_batch_preserves_adsorbate_symbol_order_with_tw
         adsorption_height_max=2.5,
         max_placement_attempts=500,
     )
+
+    # Use adsorbate definition to preserve order via hierarchical initialization
+    adsorbate_definition = {
+        "core_symbols": ["Pt", "Pt", "Pt", "Pt", "Pt"],
+        "adsorbate_symbols": ["O", "H", "O", "H"],
+    }
+
+    # Create a simple fragment template for the adsorbate
+    from ase import Atoms as AtomsClass
+    adsorbate_fragment_template = AtomsClass(
+        symbols=["O", "H", "O", "H"],
+        positions=[[0, 0, 0], [1.0, 0, 0], [0, 1.0, 0], [1.0, 1.0, 0]],
+        cell=[10, 10, 10],
+        pbc=False,
+    )
+
     batch = create_deposited_cluster_batch(
         composition,
         pt_slab,
@@ -234,6 +274,8 @@ def test_create_deposited_cluster_batch_preserves_adsorbate_symbol_order_with_tw
         rng=default_rng(2026),
         config=cfg,
         n_jobs=2,
+        adsorbate_definition=adsorbate_definition,
+        adsorbate_fragment_template=adsorbate_fragment_template,
     )
     assert len(batch) == 5
     for atoms in batch:

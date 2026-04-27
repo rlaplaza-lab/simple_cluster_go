@@ -41,14 +41,15 @@ from scgo.algorithms.ga_common import (
 )
 from scgo.ase_ga_patches.population import Population
 from scgo.calculators.torchsim_helpers import TorchSimBatchRelaxer
+from scgo.cluster_adsorbate.config import ClusterAdsorbateConfig
 from scgo.constants import DEFAULT_ENERGY_TOLERANCE
 from scgo.database import (
     HPC_DATABASE_EXCEPTIONS,
+    RetryConfig,
     close_data_connection,
     database_retry,
     setup_database,
 )
-from scgo.cluster_adsorbate.config import ClusterAdsorbateConfig
 from scgo.database.metadata import add_metadata, filter_by_metadata, update_metadata
 from scgo.initialization import compute_cell_side
 from scgo.surface.config import SurfaceSystemConfig
@@ -120,7 +121,7 @@ def _relax_unrelaxed_candidates(
     """Relax unrelaxed candidates in batches and commit them to the database."""
     available = database_retry(
         da.get_number_of_unrelaxed_candidates,
-        max_retries=5,
+        config=RetryConfig(max_retries=5),
         operation_name="get_unrelaxed_candidates_count",
     )
 
@@ -146,7 +147,7 @@ def _relax_unrelaxed_candidates(
     t0 = perf_counter()
     batch = database_retry(
         _read_batch_under_connection,
-        max_retries=5,
+        config=RetryConfig(max_retries=5),
         operation_name="read_candidate_batch",
     )
     if profiling is not None:
@@ -235,7 +236,7 @@ def _relax_unrelaxed_candidates(
     t0 = perf_counter()
     database_retry(
         _write_batch_under_connection,
-        max_retries=5,
+        config=RetryConfig(max_retries=5),
         operation_name="write_relaxed_batch",
     )
     if profiling is not None:
@@ -585,7 +586,7 @@ def ga_go_torchsim(
             )
             database_retry(
                 lambda _cand=cand: _insert_unrelaxed(_cand),
-                max_retries=5,
+                config=RetryConfig(max_retries=5),
                 operation_name="insert_unrelaxed_candidate",
             )
         profile_timings["initial_unrelaxed_insert_s"] = perf_counter() - t0
@@ -668,7 +669,7 @@ def ga_go_torchsim(
                 lambda _batch=batch, _results=relaxed_results: _write_relaxed_batch(
                     _batch, _results
                 ),
-                max_retries=5,
+                config=RetryConfig(max_retries=5),
                 operation_name="write_initial_relaxed_batch",
             )
             t0_write += perf_counter() - t_start
@@ -948,7 +949,7 @@ def ga_go_torchsim(
                         lambda _a3=child, _desc=result["desc"]: (
                             da.add_unrelaxed_candidate(_a3, description=_desc)
                         ),
-                        max_retries=5,
+                        config=RetryConfig(max_retries=5),
                         operation_name="add_unrelaxed_offspring",
                     )
                     t_db_unrelaxed_gen += perf_counter() - t0
@@ -1029,7 +1030,7 @@ def ga_go_torchsim(
                 try:
                     total_relaxed = database_retry(
                         da.get_all_relaxed_candidates,
-                        max_retries=5,
+                        config=RetryConfig(max_retries=5),
                         operation_name="get_all_relaxed_candidates",
                     )
                     total_relaxed_cnt = len(total_relaxed)
@@ -1119,7 +1120,7 @@ def ga_go_torchsim(
 
         all_candidates = database_retry(
             da.get_all_relaxed_candidates,
-            max_retries=5,
+            config=RetryConfig(max_retries=5),
             operation_name="get_final_all_relaxed_candidates",
         )
         if run_id is not None:

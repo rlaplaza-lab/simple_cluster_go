@@ -26,20 +26,20 @@ from scgo.algorithms.ga_common import (
     create_ga_pairing,
     create_mutation_operators,
     create_structure_comparator,
+    ga_run_metadata_extras,
     log_early_stopping_info,
     maybe_apply_mobile_core_ads_tags,
     select_population_class,
     setup_diversity_scorer,
-    ga_run_metadata_extras,
     sort_minima_by_fitness,
     update_early_stopping_state_unified,
     update_mutation_weights,
     validate_ga_common_params,
 )
+from scgo.cluster_adsorbate.config import ClusterAdsorbateConfig
 from scgo.constants import DEFAULT_ENERGY_TOLERANCE
 from scgo.database import HPC_DATABASE_EXCEPTIONS, close_data_connection, setup_database
 from scgo.database.metadata import add_metadata, filter_by_metadata
-from scgo.cluster_adsorbate.config import ClusterAdsorbateConfig
 from scgo.database.sync import retry_with_backoff
 from scgo.initialization import compute_cell_side
 from scgo.surface.config import SurfaceSystemConfig

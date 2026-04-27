@@ -67,7 +67,7 @@ def test_validate_rejects_bad_partition():
 
 
 def test_validate_rejects_wrong_list_order_with_matching_multiset():
-    with pytest.raises(ValueError, match="Run composition must equal"):
+    with pytest.raises(ValueError, match="composition must equal core_symbols"):
         validate_adsorbate_definition(
             system_type="gas_cluster_adsorbate",
             composition=["O", "H", "Pt", "Pt", "Pt"],
@@ -101,6 +101,9 @@ def test_hierarchical_deposition_ordering_and_slab_prefix():
         rng,
         cfg,
         adsorbate_definition=ads_def,
+        adsorbate_fragment_template=build_default_fragment_template(
+            ["O", "H", "O", "H"]
+        ),
     )
     assert out is not None
     sym = out.get_chemical_symbols()
@@ -113,6 +116,46 @@ def test_hierarchical_deposition_ordering_and_slab_prefix():
         np.min(out.get_positions()[n_slab:, ax]),
     )
     assert z_min_ads >= z_slab + cfg.adsorption_height_min - 0.5
+
+
+def test_surface_deposition_accepts_empty_core_symbols():
+    slab = fcc111("Pt", size=(2, 2, 2), vacuum=8.0, orthogonal=True)
+    slab.pbc = [True, True, True]
+    cfg = SurfaceSystemConfig(
+        slab=slab,
+        adsorption_height_min=3.0,
+        adsorption_height_max=4.5,
+        fix_all_slab_atoms=True,
+        max_placement_attempts=1000,
+    )
+    slab = cfg.slab
+    n_slab = len(slab)
+    mobile = ["O", "H", "O", "H"]
+    ads_def = {
+        "adsorbate_symbols": ["O", "H", "O", "H"],
+        "core_symbols": [],
+        "deposition_layout": "core_then_fragment",
+    }
+    rng = np.random.default_rng(2027)
+    blmin = closest_distances_generator(
+        list({int(z) for z in slab.numbers} | {8, 1}),
+        ratio_of_covalent_radii=0.7,
+    )
+    frag = build_default_fragment_template(["O", "H", "O", "H"])
+    assert frag is not None
+    out = create_deposited_cluster(
+        mobile,
+        slab,
+        blmin,
+        rng,
+        cfg,
+        adsorbate_definition=ads_def,
+        adsorbate_fragment_template=frag,
+    )
+    assert out is not None
+    sym = out.get_chemical_symbols()
+    assert sym[:n_slab] == list(slab.get_chemical_symbols())
+    assert sym[n_slab:] == mobile
 
 
 def test_gas_hierarchical_core_fragment_smoke():

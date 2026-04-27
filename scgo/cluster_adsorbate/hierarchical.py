@@ -14,9 +14,7 @@ if TYPE_CHECKING:
     from scgo.system_types import AdsorbateDefinition
 
 
-def reorder_cluster_to_composition(
-    cluster: Atoms, composition: Sequence[str]
-) -> Atoms:
+def reorder_cluster_to_composition(cluster: Atoms, composition: Sequence[str]) -> Atoms:
     """Reorder generated cluster atoms to match requested symbol sequence."""
     desired = list(composition)
     current = cluster.get_chemical_symbols()
@@ -40,11 +38,11 @@ def reorder_cluster_to_composition(
 
 def build_hierarchical_core_fragment_cluster(
     full_composition: Sequence[str],
-    adsorbate_definition: "AdsorbateDefinition",
-    rng: "Generator",
+    adsorbate_definition: AdsorbateDefinition,
+    rng: Generator,
     previous_search_glob: str,
     fragment_template: Atoms | None,
-    cluster_adsorbate_config: "ClusterAdsorbateConfig | None",
+    cluster_adsorbate_config: ClusterAdsorbateConfig | None,
     *,
     cluster_init_vacuum: float = 8.0,
     init_mode: str = "smart",
@@ -60,7 +58,6 @@ def build_hierarchical_core_fragment_cluster(
     from scgo.cluster_adsorbate.config import ClusterAdsorbateConfig
     from scgo.cluster_adsorbate.placement import place_fragment_on_cluster
     from scgo.initialization import create_initial_cluster
-    from scgo.surface.fragment_templates import build_default_fragment_template
 
     core_list = [str(s) for s in adsorbate_definition["core_symbols"]]
     ads_list = [str(s) for s in adsorbate_definition["adsorbate_symbols"]]
@@ -80,11 +77,9 @@ def build_hierarchical_core_fragment_cluster(
 
     tmpl = fragment_template.copy() if fragment_template is not None else None
     if tmpl is None:
-        tmpl = build_default_fragment_template(ads_list)
-    if tmpl is None:
         raise ValueError(
-            "No adsorbate_fragment_template provided and no default template for "
-            f"adsorbate_symbols={ads_list!r}. Pass adsorbate_fragment_template=."
+            "Hierarchical adsorbate runs require adsorbate_fragment_template. "
+            "Pass adsorbates=Atoms or list[Atoms] at the runner API boundary."
         )
     if list(tmpl.get_chemical_symbols()) != ads_list:
         raise ValueError(
@@ -93,7 +88,9 @@ def build_hierarchical_core_fragment_cluster(
             f"vs {ads_list!r}"
         )
     if len(ads_list) != len(tmpl):
-        raise ValueError("len(adsorbate_fragment_template) must match adsorbate_symbols")
+        raise ValueError(
+            "len(adsorbate_fragment_template) must match adsorbate_symbols"
+        )
     anchor = int(adsorbate_definition.get("fragment_anchor_index", 0))
     fba = adsorbate_definition.get("fragment_bond_axis")
     bond_axis: tuple[int, int] | None = None

@@ -97,7 +97,11 @@ def validate_stored_mobile_partition_metadata(atoms: Atoms) -> None:
     n_ads = int(get_metadata(atoms, "n_adsorbate_fragment_atoms", 0) or 0)
     if n_core == 0 and n_ads == 0:
         return
-    n_slab = int(get_metadata(atoms, "n_slab_atoms", 0) or 0) if st == "surface_cluster_adsorbate" else 0
+    n_slab = (
+        int(get_metadata(atoms, "n_slab_atoms", 0) or 0)
+        if st == "surface_cluster_adsorbate"
+        else 0
+    )
     mobile = atoms.get_chemical_symbols()[n_slab:]
     if len(mobile) < n_core + n_ads:
         raise ValueError(

@@ -2125,7 +2125,7 @@ def create_initial_cluster_batch(
                 composition=comp,
                 min_distance_factor=min_distance_factor,
                 connectivity_factor=connectivity_factor,
-                sort_atoms=True,
+                sort_atoms=False,
                 raise_on_failure=True,
                 source=InitStrategy.RANDOM_SPHERICAL.value,
             )

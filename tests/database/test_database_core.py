@@ -8,7 +8,6 @@ the current SCGO database APIs.
 from __future__ import annotations
 
 import gc
-import json
 import multiprocessing as mp
 import os
 import sqlite3
@@ -590,7 +589,7 @@ class TestRegistryConcurrency:
         # but doesn't create persistent files
         reg_path = base / ".scgo_db_registry.json"
         assert not reg_path.is_file()  # No persistent file in simplified version
-        
+
         # Test that we can still create a registry and find databases
         reg = DatabaseRegistry(base)
         all_dbs = reg.get_all_databases()

@@ -12,7 +12,6 @@ from ase_ga.utilities import atoms_too_close, atoms_too_close_two_sets
 
 from scgo.cluster_adsorbate.hierarchical import (
     build_hierarchical_core_fragment_cluster,
-    reorder_cluster_to_composition,
 )
 from scgo.initialization.geometry_helpers import _generate_rotation_matrix
 from scgo.surface.validation import validate_supported_cluster_deposit
@@ -93,48 +92,23 @@ def create_deposited_cluster(
     slab: Atoms,
     blmin: dict,
     rng: Generator,
-    config: "SurfaceSystemConfig",
+    config: SurfaceSystemConfig,
     previous_search_glob: str = "**/*.db",
-    adsorbate_definition: "AdsorbateDefinition | None" = None,
+    adsorbate_definition: AdsorbateDefinition | None = None,
     adsorbate_fragment_template: Atoms | None = None,
-    cluster_adsorbate_config: "ClusterAdsorbateConfig | None" = None,
+    cluster_adsorbate_config: ClusterAdsorbateConfig | None = None,
 ) -> Atoms | None:
     """One adsorbate+slab structure, or None if placement fails.
 
-    **Monolithic** (default): :func:`scgo.initialization.create_initial_cluster` on
-    the full mobile ``composition``, then place above the slab.
-
-    **Hierarchical** (when ``adsorbate_definition['deposition_layout']`` is
-    ``\"core_then_fragment\"``): build a core NP, place the rigid adsorbate
-    fragment, then place the combined cluster (same as monolithic for the slab
-    step).
+    For non-adsorbate runs: build one gas-phase cluster for ``composition``, then
+    place above slab. For adsorbate runs: build hierarchical core+fragment first.
     """
-    from scgo.initialization import create_initial_cluster
-
     axis = config.surface_normal_axis
     slab_top = slab_surface_extreme(slab, axis, upper=True)
-    use_hier = bool(
-        adsorbate_definition is not None
-        and str(adsorbate_definition.get("deposition_layout", "monolithic"))
-        == "core_then_fragment"
-    )
+    from scgo.initialization import create_initial_cluster
+
     for _ in range(config.max_placement_attempts):
-        if use_hier:
-            assert adsorbate_definition is not None
-            cluster_seed = build_hierarchical_core_fragment_cluster(
-                composition,
-                adsorbate_definition,
-                rng,
-                previous_search_glob,
-                adsorbate_fragment_template,
-                cluster_adsorbate_config,
-                cluster_init_vacuum=config.cluster_init_vacuum,
-                init_mode=config.init_mode,
-                max_placement_attempts=config.max_placement_attempts,
-            )
-            if cluster_seed is None:
-                continue
-        else:
+        if adsorbate_definition is None:
             cluster_seed = create_initial_cluster(
                 list(composition),
                 vacuum=config.cluster_init_vacuum,
@@ -142,9 +116,31 @@ def create_deposited_cluster(
                 previous_search_glob=previous_search_glob,
                 mode=config.init_mode,
             )
-            cluster_seed = reorder_cluster_to_composition(
-                cluster_seed, composition
-            )
+        else:
+            if adsorbate_fragment_template is None:
+                raise ValueError(
+                    "create_deposited_cluster requires adsorbate_fragment_template "
+                    "for hierarchical adsorbate initialization."
+                )
+            core_symbols = [
+                str(s) for s in adsorbate_definition.get("core_symbols", [])
+            ]
+            if len(core_symbols) == 0:
+                cluster_seed = adsorbate_fragment_template.copy()
+            else:
+                cluster_seed = build_hierarchical_core_fragment_cluster(
+                    composition,
+                    adsorbate_definition,
+                    rng,
+                    previous_search_glob,
+                    adsorbate_fragment_template,
+                    cluster_adsorbate_config,
+                    cluster_init_vacuum=config.cluster_init_vacuum,
+                    init_mode=config.init_mode,
+                    max_placement_attempts=config.max_placement_attempts,
+                )
+                if cluster_seed is None:
+                    continue
         atomic_numbers = cluster_seed.get_atomic_numbers()
         cluster_positions = cluster_seed.get_positions().copy()
 
@@ -172,6 +168,12 @@ def create_deposited_cluster(
 
         combined = combine_slab_adsorbate(slab, adsorbate)
         n_slab = len(slab)
+        skip_supported_cluster_check = bool(
+            adsorbate_definition is not None
+            and len([str(s) for s in adsorbate_definition.get("core_symbols", [])]) == 0
+        )
+        if skip_supported_cluster_check:
+            return combined
         ok, err = validate_supported_cluster_deposit(
             combined,
             n_slab,
@@ -179,7 +181,9 @@ def create_deposited_cluster(
             use_mic=bool(config.comparator_use_mic),
         )
         if not ok:
-            logger.debug("create_deposited_cluster: rejected by supported-cluster check: %s", err)
+            logger.debug(
+                "create_deposited_cluster: rejected by supported-cluster check: %s", err
+            )
             continue
         return combined
 
@@ -200,9 +204,9 @@ def create_deposited_cluster_batch(
     *,
     previous_search_glob: str = "**/*.db",
     n_jobs: int = 1,
-    adsorbate_definition: "AdsorbateDefinition | None" = None,
+    adsorbate_definition: AdsorbateDefinition | None = None,
     adsorbate_fragment_template: Atoms | None = None,
-    cluster_adsorbate_config: "ClusterAdsorbateConfig | None" = None,
+    cluster_adsorbate_config: ClusterAdsorbateConfig | None = None,
 ) -> list[Atoms]:
     """Generate multiple deposited structures (sequential or threaded)."""
     if n_structures <= 0:

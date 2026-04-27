@@ -424,7 +424,11 @@ def run_transition_state_search(
     )
     neb_n_core_m: int | None = None
     neb_n_ads_m: int | None = None
-    if neb_align_endpoints and system_policy.has_adsorbate and adsorbate_definition is not None:
+    if (
+        neb_align_endpoints
+        and system_policy.has_adsorbate
+        and adsorbate_definition is not None
+    ):
         c_syms, a_syms = validate_composition_against_adsorbate(
             adsorbate_composition,
             adsorbate_definition,

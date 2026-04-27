@@ -46,7 +46,6 @@ from scgo.ts_search.transition_state_run import (
 from scgo.utils.helpers import get_cluster_formula
 from scgo.utils.logging import get_logger
 from scgo.utils.ts_runner_kwargs import coerce_ts_params_to_runner_kwargs
-from scgo.utils.validation import validate_composition
 
 type CompositionInput = str | list[str] | Atoms
 _ALGO_KEYS = ("simple", "bh", "ga")
@@ -54,18 +53,18 @@ _LOGGER = get_logger(__name__)
 
 
 def _as_composition(composition: CompositionInput) -> list[str]:
-    match composition:
-        case Atoms():
-            return list(composition.get_chemical_symbols())
-        case str():
-            return parse_composition_arg(composition)
-        case list():
-            validate_composition(composition, allow_empty=False, allow_tuple=False)
-            return list(composition)
-        case _:
-            raise TypeError(
-                f"composition must be str, list[str], or Atoms, got {type(composition).__name__}"
-            )
+    if isinstance(composition, Atoms):
+        return list(composition.get_chemical_symbols())
+    elif isinstance(composition, str):
+        return parse_composition_arg(composition)
+    elif isinstance(composition, list):
+        if not composition:
+            raise ValueError("composition list must not be empty")
+        return [str(s) for s in composition]
+    else:
+        raise TypeError(
+            f"composition must be str, list[str], or Atoms, got {type(composition).__name__}"
+        )
 
 
 def _as_composition_list(items: Iterable[CompositionInput]) -> list[list[str]]:
@@ -76,13 +75,11 @@ def _as_composition_list(items: Iterable[CompositionInput]) -> list[list[str]]:
 
 
 def _resolved_path(path: str | Path | None) -> Path | None:
-    if path is None:
-        return None
-    return Path(path).expanduser().resolve()
+    return Path(path).expanduser().resolve() if path is not None else None
 
 
 def _require_system_type(system_type: SystemType | None, fn_name: str) -> SystemType:
-    if not isinstance(system_type, str):
+    if system_type is None:
         raise ValueError(f"system_type is required for {fn_name}.")
     return system_type
 
@@ -90,9 +87,7 @@ def _require_system_type(system_type: SystemType | None, fn_name: str) -> System
 def _effective_write_timing_json(
     write_timing_json: bool, profile_ga: bool | None
 ) -> bool:
-    if profile_ga is not None:
-        return bool(profile_ga)
-    return write_timing_json
+    return bool(profile_ga) if profile_ga is not None else write_timing_json
 
 
 def _merge_adsorbate_context_into_params(
@@ -104,11 +99,11 @@ def _merge_adsorbate_context_into_params(
 ) -> dict[str, Any]:
     """Attach adsorbate/surface init context for :func:`run_scgo_trials` / GA."""
     out = copy.deepcopy(base) if base is not None else {}
-    if adsorbate_definition is not None:
+    if adsorbate_definition:
         out["adsorbate_definition"] = adsorbate_definition
-    if adsorbate_fragment_template is not None:
+    if adsorbate_fragment_template:
         out["adsorbate_fragment_template"] = adsorbate_fragment_template
-    if cluster_adsorbate_config is not None:
+    if cluster_adsorbate_config:
         out["cluster_adsorbate_config"] = cluster_adsorbate_config
     return out
 
@@ -122,14 +117,12 @@ def _with_system_type_in_optimizer_params(
 ) -> dict[str, Any]:
     effective = _effective_write_timing_json(write_timing_json, profile_ga)
     effective_params = dict(params or {})
-    optimizer_params = dict(effective_params.get("optimizer_params", {}))
+    optimizer_params = effective_params.setdefault("optimizer_params", {})
     for algo in _ALGO_KEYS:
-        algo_cfg = dict(optimizer_params.get(algo, {}))
+        algo_cfg = optimizer_params.setdefault(algo, {})
         algo_cfg["system_type"] = system_type
         if algo in ("ga", "bh"):
             algo_cfg.setdefault("write_timing_json", effective)
-        optimizer_params[algo] = algo_cfg
-    effective_params["optimizer_params"] = optimizer_params
     return effective_params
 
 
@@ -145,20 +138,13 @@ def _coerce_ts_for_runner(
             f"ts_params is required for {fn_name}. Build with get_ts_search_params(...)."
         )
     _reject_system_definition_in_ts_params(ts_params, context=fn_name)
-    if ts_params.get("system_type") is not None:
+    if ts_params.get("system_type") or ts_params.get("surface_config"):
         raise ValueError(
-            f"{fn_name} does not allow ts_params['system_type']. "
-            "Use the run function system_type=... argument only."
-        )
-    if ts_params.get("surface_config") is not None:
-        raise ValueError(
-            f"{fn_name} does not allow ts_params['surface_config']. "
-            "Use the run function surface_config=... argument only."
+            f"{fn_name} does not allow ts_params['system_type'] or ts_params['surface_config']. "
+            "Use the run function arguments only."
         )
     return coerce_ts_params_to_runner_kwargs(
-        ts_params,
-        system_type=system_type,
-        surface_config=surface_config,
+        ts_params, system_type=system_type, surface_config=surface_config
     )
 
 
@@ -498,7 +484,9 @@ def run_go_campaign(
         )
         full_compositions.append(full_comp)
         effective_params["adsorbate_definition"] = adsorbate_definition_local
-        effective_params["adsorbate_fragment_template"] = adsorbate_fragment_template_local
+        effective_params["adsorbate_fragment_template"] = (
+            adsorbate_fragment_template_local
+        )
     out_path = _resolved_path(output_dir)
     t0 = perf_counter()
     campaign = run_scgo_campaign_arbitrary_compositions(
@@ -740,13 +728,15 @@ def run_ts_search(
         system_type=system_type_local, surface_config=surface_config
     )
     core_composition = _as_composition(composition)
-    adsorbate_definition_local, _adsorbate_fragment_template_local, composition_local = (
-        build_adsorbate_definition_from_inputs(
-            system_type=system_type_local,
-            composition=core_composition,
-            adsorbates=adsorbates,
-            context="run_ts_search",
-        )
+    (
+        adsorbate_definition_local,
+        _adsorbate_fragment_template_local,
+        composition_local,
+    ) = build_adsorbate_definition_from_inputs(
+        system_type=system_type_local,
+        composition=core_composition,
+        adsorbates=adsorbates,
+        context="run_ts_search",
     )
     validate_adsorbate_definition(
         system_type=system_type_local,
