@@ -4,7 +4,7 @@
 
 A compact toolkit for global optimization of small atomic clusters using ASE. SCGO provides a focused API for Basin Hopping (BH) and Genetic Algorithm (GA) workflows with practical defaults.
 
-## Install (minimal)
+## Install
 
 SCGO has a small core dependency set plus two mutually exclusive MLIP extras:
 
@@ -299,7 +299,7 @@ ts_results = run_ts_search(
 
 ### GO then TS
 
-`run_go_ts` / `run_go_ts_campaign` use **`go_params=`** (merged like other GO runs) and **`ts_params=`** (same flat shape as above; **not** deep-merged with `get_default_params()`). For **slab + adsorbate**, pass a `SurfaceSystemConfig` directly to `run_go_ts(..., surface_config=...)` / `run_go_ts_campaign(..., surface_config=...)`; the `composition` argument is **adsorbate symbols only** (the full system for loading minima is built as slab + adsorbate, matching GA). For MACE + TorchSim GA, start from [`get_torchsim_ga_params`](scgo/param_presets.py) with a `seed` (optional `model_name=` so the TorchSim relaxer matches the calculator), set `go_params["calculator"] = "MACE"` and `optimizer_params["ga"]` as needed; pair with `get_ts_search_params(...)` and set `ts_params["max_pairs"]`, etc. For UMA NEB defaults, you can use `get_ts_search_params_uma`. See `runners/run_pt5_gas.py` for a minimal end-to-end example. Default output if `output_dir` is omitted is under `scgo_runs/<stem>_<mace|uma>/` (set `output_root` / `output_stem` to change).
+`run_go_ts` / `run_go_ts_campaign` use **`go_params=`** (merged like other GO runs) and **`ts_params=`** (same flat shape as above; **not** deep-merged with `get_default_params()`). For **slab + adsorbate**, pass a `SurfaceSystemConfig` directly to `run_go_ts(..., surface_config=...)` / `run_go_ts_campaign(..., surface_config=...)`; the `composition` argument is **adsorbate symbols only** (the full system for loading minima is built as slab + adsorbate, matching GA). For MACE + TorchSim GA, start from [`get_torchsim_ga_params`](scgo/param_presets.py) with a `seed` (optional `model_name=` so the TorchSim relaxer matches the calculator), set `go_params["calculator"] = "MACE"` and `optimizer_params["ga"]` as needed; pair with `get_ts_search_params(...)` and set `ts_params["max_pairs"]`, etc. For UMA NEB defaults, you can use `get_ts_search_params_uma`. See `runners/example_pt5_gas.py` for a minimal end-to-end example. Default output if `output_dir` is omitted is under `scgo_runs/<stem>_<mace|uma>/` (set `output_root` / `output_stem` to change).
 
 Benchmarks comparing MACE vs UMA on the same GA structure can use [`get_uma_ga_benchmark_params`](scgo/param_presets.py) (re-exported from `scgo`).
 
@@ -318,10 +318,10 @@ Benchmarks comparing MACE vs UMA on the same GA structure can use [`get_uma_ga_b
 
 | Script | `system_type` | Notes |
 |--------|----------------|-------|
-| [`runners/run_pt5_gas.py`](runners/run_pt5_gas.py) | `gas_cluster` | Gas-phase `Pt5` only |
-| [`runners/run_pt5_graphite.py`](runners/run_pt5_graphite.py) | `surface_cluster` | `Pt5` on preset graphite |
-| [`runners/run_pt5_oh_gas.py`](runners/run_pt5_oh_gas.py) | `gas_cluster_adsorbate` | core-only `Pt5` composition + one `adsorbates` OH fragment |
-| [`runners/run_pt5_2oh_graphite.py`](runners/run_pt5_2oh_graphite.py) | `surface_cluster_adsorbate` | core-only `Pt5` composition + two `adsorbates` OH fragments |
+| [`runners/example_pt5_gas.py`](runners/example_pt5_gas.py) | `gas_cluster` | Gas-phase `Pt5` only |
+| [`runners/example_pt5_graphite.py`](runners/example_pt5_graphite.py) | `surface_cluster` | `Pt5` on preset graphite |
+| [`runners/example_pt5_oh_gas.py`](runners/example_pt5_oh_gas.py) | `gas_cluster_adsorbate` | core-only `Pt5` composition + one `adsorbates` OH fragment |
+| [`runners/example_pt5_2oh_graphite.py`](runners/example_pt5_2oh_graphite.py) | `surface_cluster_adsorbate` | core-only `Pt5` composition + two `adsorbates` OH fragments |
 
   For multi-size MLIP sweeps, see [`benchmark/`](benchmark/) (e.g. [`benchmark_Pt.py`](benchmark/benchmark_Pt.py), [`benchmark_Pt_surface_graphite.py`](benchmark/benchmark_Pt_surface_graphite.py)), not `tests/benchmarks/`.
 - See `tests/` for concrete usage patterns.
