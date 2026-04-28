@@ -999,8 +999,6 @@ def _discover_available_strategies(
     }
 
 
-
-
 def _try_strategies_in_order(
     strategies: list[tuple[str, Callable[..., Atoms]]],
     composition: list[str],
@@ -1196,7 +1194,8 @@ def _generate_single_structure_internal(
     connectivity_factor: float = CONNECTIVITY_FACTOR,
     template_index: int | None = None,
     discovery_templates: list[Atoms] | None = None,
-    precomputed_candidates_by_formula: dict[str, list[tuple[float, Atoms]]] | None = None,
+    precomputed_candidates_by_formula: dict[str, list[tuple[float, Atoms]]]
+    | None = None,
     valid_seed_combinations: list[tuple[str, ...]] | None = None,
 ) -> tuple[Atoms, str, str | None]:
     """Internal helper to generate a single structure using a specific strategy."""
@@ -1281,7 +1280,8 @@ def _generate_structure_batch_item(
     min_distance_factor: float = MIN_DISTANCE_FACTOR_DEFAULT,
     connectivity_factor: float = CONNECTIVITY_FACTOR,
     discovery_templates: list[Atoms] | None = None,
-    precomputed_candidates_by_formula: dict[str, list[tuple[float, Atoms]]] | None = None,
+    precomputed_candidates_by_formula: dict[str, list[tuple[float, Atoms]]]
+    | None = None,
     valid_seed_combinations: list[tuple[str, ...]] | None = None,
 ) -> tuple[int, Atoms, str, str | None]:
     """Helper for batch processing an individual structure assignment."""
@@ -1401,16 +1401,30 @@ def create_initial_cluster_batch(
             fallback_info[idx] = (used_strat, fallback)
     else:
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            futures = [executor.submit(_worker_wrapper, a) for a in structure_assignments]
+            futures = [
+                executor.submit(_worker_wrapper, a) for a in structure_assignments
+            ]
             for future in as_completed(futures):
                 idx, atoms, used_strat, fallback = future.result()
                 results[idx] = atoms
                 fallback_info[idx] = (used_strat, fallback)
 
     if logger.isEnabledFor(logging.DEBUG):
-        template_to_random = sum(1 for u, f in fallback_info.values() if u == "random_spherical" and f == "template")
-        seed_to_random = sum(1 for u, f in fallback_info.values() if u == "random_spherical" and f == "seed+growth")
-        logger.debug("Fallbacks: template->random=%d, seed->random=%d", template_to_random, seed_to_random)
+        template_to_random = sum(
+            1
+            for u, f in fallback_info.values()
+            if u == "random_spherical" and f == "template"
+        )
+        seed_to_random = sum(
+            1
+            for u, f in fallback_info.values()
+            if u == "random_spherical" and f == "seed+growth"
+        )
+        logger.debug(
+            "Fallbacks: template->random=%d, seed->random=%d",
+            template_to_random,
+            seed_to_random,
+        )
 
     return results  # type: ignore[return-value]
 

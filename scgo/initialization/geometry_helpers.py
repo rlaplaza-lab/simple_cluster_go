@@ -36,6 +36,7 @@ from .initialization_config import (
 # CORE UTILITIES
 # =============================================================================
 
+
 def get_covalent_radius(symbol: str) -> float:
     """Get the covalent radius for an element symbol.
 

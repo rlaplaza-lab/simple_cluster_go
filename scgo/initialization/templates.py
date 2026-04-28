@@ -90,6 +90,7 @@ _TEMPLATE_REGISTRY = {}
 # CORE HELPERS
 # =============================================================================
 
+
 def _get_base_element(composition: list[str]) -> str:
     """Get the base element from composition.
 
