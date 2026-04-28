@@ -2,7 +2,9 @@
 
 from collections import Counter
 
-from scgo.initialization.initializers import _could_path_contain_relevant_candidates
+from scgo.initialization.candidate_discovery import (
+    _could_path_contain_relevant_candidates,
+)
 from scgo.utils.helpers import get_composition_counts
 
 

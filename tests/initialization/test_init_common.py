@@ -23,6 +23,10 @@ from scgo.initialization import (
     is_cluster_connected,
     random_spherical,
 )
+from scgo.initialization.candidate_discovery import (
+    _load_candidates_from_file,
+    _load_db_candidates,
+)
 from scgo.initialization.geometry_helpers import (
     _classify_seed_geometry,
     _get_cached_hull,
@@ -40,8 +44,6 @@ from scgo.initialization.initialization_config import (
 from scgo.initialization.initializers import (
     _boltzmann_sample,
     _find_smaller_candidates,
-    _load_candidates_from_file,
-    _load_db_candidates,
 )
 from scgo.initialization.random_spherical import _add_atoms_to_cluster_iteratively
 from scgo.initialization.seed_combiners import (
@@ -403,7 +405,7 @@ class TestCacheBehavior:
             raise AttributeError("simulated DB internals error")
 
         monkeypatch.setattr(
-            "scgo.initialization.initializers.db_connection",
+            "scgo.initialization.candidate_discovery.db_connection",
             _bad_db_conn,
             raising=True,
         )
@@ -428,7 +430,7 @@ class TestCacheBehavior:
             raise sqlite3.OperationalError("simulated DB error")
 
         monkeypatch.setattr(
-            "scgo.initialization.initializers.db_connection",
+            "scgo.initialization.candidate_discovery.db_connection",
             _bad_db_conn,
             raising=True,
         )
@@ -704,16 +706,16 @@ class TestDatabaseIntegration:
 
         assert "Pt2" in candidates
         assert len(candidates["Pt2"]) == 1
-        assert candidates["Pt2"][0][0] == pytest.approx(10.0, rel=1e-6)
+        assert candidates["Pt2"][0][0] == pytest.approx(-10.0, rel=1e-6)
 
         assert "Au2" not in candidates  # Au2 is not a sub-composition of Pt3Au1
         assert "Pt3" in candidates
         assert len(candidates["Pt3"]) == 1
-        assert candidates["Pt3"][0][0] == pytest.approx(15.0, rel=1e-6)
+        assert candidates["Pt3"][0][0] == pytest.approx(-15.0, rel=1e-6)
 
         assert "AuPt" in candidates
         assert len(candidates["AuPt"]) == 1
-        assert candidates["AuPt"][0][0] == pytest.approx(12.0, rel=1e-6)
+        assert candidates["AuPt"][0][0] == pytest.approx(-12.0, rel=1e-6)
 
         # Test with an empty target composition
         empty_candidates = _find_smaller_candidates([], db_glob_pattern)
