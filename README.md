@@ -1,3 +1,7 @@
+<div align="center">
+  <img src="scgo_logo.svg" alt="SCGO Logo" width="300">
+</div>
+
 # SCGO: Simple Cluster Global Optimization
 
 [![Python](https://img.shields.io/badge/python-3.12%2B-blue.svg)](https://www.python.org/downloads/) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
