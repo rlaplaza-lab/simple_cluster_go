@@ -4,7 +4,7 @@ Quick Start
 SCGO provides several example scripts in the `examples/` directory that demonstrate different use cases. This guide explains how these examples work and how to adapt them for your own research.
 
 Example Structure
-----------------
+-----------------
 
 All examples follow a similar pattern:
 
@@ -209,7 +209,7 @@ SCGO creates a structured output directory:
 Next Steps
 ----------
 
-- Explore the :ref:`API Reference <api/runner_api>` for detailed function documentation
-- Learn about :ref:`parameter presets <api/param_presets>` for different use cases
-- Check the :ref:`system types <api/system_types>` documentation for system configuration
+- Explore the :doc:`API Reference </api/runner_api>` for detailed function documentation
+- Learn about :doc:`parameter presets </api/param_presets>` for different use cases
+- Check the :doc:`system types </api/system_types>` documentation for system configuration
 - Run the examples and examine their output to understand SCGO's workflow

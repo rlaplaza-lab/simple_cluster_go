@@ -21,10 +21,3 @@ SCGO supports four explicit system types:
 .. autoclass:: scgo.system_types.SystemType
    :members:
    :undoc-members:
-
-System Policies
----------------
-
-.. autofunction:: scgo.system_types.get_system_policy
-
-.. autofunction:: scgo.system_types.validate_system_type_settings

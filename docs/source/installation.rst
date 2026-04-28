@@ -11,7 +11,7 @@ Prerequisites
 - CUDA (for GPU acceleration with MLIPs)
 
 Conda Installation (Recommended)
--------------------------------
+--------------------------------
 
 .. code-block:: bash
 
