@@ -4,6 +4,8 @@
 
 A compact toolkit for global optimization of small atomic clusters using ASE. SCGO provides a focused API for Basin Hopping (BH) and Genetic Algorithm (GA) workflows with practical defaults.
 
+**Documentation**: Comprehensive API documentation is available in the `docs/` directory. For online documentation, see our ReadTheDocs page (link will be added when available).
+
 ## Install
 
 SCGO has a small core dependency set plus two mutually exclusive MLIP extras:
@@ -54,6 +56,30 @@ pre-commit install
 - **SQLite**: SCGO keeps WAL mode off by default (fewer `-wal`/`-shm` issues on Lustre/GPFS/NFS). Prefer writing active `*.db` files under job-local scratch (`$SLURM_TMPDIR` or site-specific scratch) when you can, then copying results back to project storage.
 - **Registry**: Discovery may write `.scgo_db_registry.json` and `.scgo_db_registry.lock` (with `flock` on Linux) for fast DB listing. When your run lives under a directory whose name ends in `_searches`, the index is kept at that parent only (not beside every `trial_*` folder). If your filesystem does not honor `flock`, use separate output directories per job or avoid parallel registry updates.
 - **Logging**: Batch-friendly defaults suppress noisy third-party loggers. For local debugging, set `SCGO_LOCAL_DEV=1` or call `configure_logging(..., hpc_mode=False)`.
+
+---
+
+## Documentation
+
+Comprehensive documentation is available in the `docs/` directory:
+
+- **Installation**: `docs/source/installation.rst` - Setup instructions for conda and pip
+- **Quick Start**: `docs/source/quickstart.rst` - Basic usage examples
+- **API Reference**: 
+  - `docs/source/api/runner_api.rst` - High-level API entry points
+  - `docs/source/api/param_presets.rst` - Parameter presets
+  - `docs/source/api/system_types.rst` - System type definitions
+- **Advanced Topics**: `docs/source/advanced/` - Adsorbates, surface systems, customization
+
+To build the documentation:
+
+```bash
+cd docs
+pip install -r requirements.txt
+make html
+```
+
+The built documentation will be available in `docs/build/html/index.html`.
 
 ---
 

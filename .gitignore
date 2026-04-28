@@ -48,6 +48,9 @@ benchmark/profiling_logs/
 # Coverage reports
 .coverage
 coverage.xml
+
+# Documentation build output
+docs/build/
 htmlcov/
 .pytest_cache/
 
