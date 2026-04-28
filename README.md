@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="scgo_logo.svg" alt="SCGO Logo" width="300">
+  <img src="docs/_static/scgo_logo.svg" alt="SCGO Logo" width="300">
 </div>
 
 # SCGO: Simple Cluster Global Optimization

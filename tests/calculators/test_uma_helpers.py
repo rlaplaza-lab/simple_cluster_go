@@ -6,6 +6,11 @@ import importlib.util
 
 import pytest
 
+from tests.conftest import skip_uma_in_github_actions
+
+
+skip_uma_in_github_actions(allow_module_level=True)
+
 
 def test_uma_class_is_ase_calculator():
     from ase.calculators.calculator import Calculator

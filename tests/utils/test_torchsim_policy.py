@@ -6,6 +6,11 @@ import importlib.util
 
 import pytest
 
+from tests.conftest import skip_uma_in_github_actions
+
+
+skip_uma_in_github_actions(allow_module_level=True)
+
 from scgo.param_presets import get_ts_search_params
 from scgo.utils.torchsim_policy import (
     calculator_name_supports_torchsim_batched_neb,

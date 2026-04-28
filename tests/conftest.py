@@ -1,5 +1,7 @@
 """Shared pytest fixtures for the SCGO test suite."""
 
+import os
+
 import numpy as np
 import pytest
 import torch
@@ -14,6 +16,15 @@ from tests.test_utils import setup_test_atoms
 def pytest_runtest_setup(item):
     if item.get_closest_marker("requires_cuda") and not torch.cuda.is_available():
         pytest.skip("CUDA not available")
+
+
+def skip_uma_in_github_actions(allow_module_level: bool = False):
+    """Skip test if running in GitHub Actions and test requires UMA authentication."""
+    if os.environ.get("GITHUB_ACTIONS") == "true":
+        pytest.skip(
+            "Skipping UMA test in GitHub Actions - requires HuggingFace authentication",
+            allow_module_level=allow_module_level,
+        )
 
 
 @pytest.fixture(scope="function")
