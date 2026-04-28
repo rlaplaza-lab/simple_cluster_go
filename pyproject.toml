@@ -79,6 +79,12 @@ packages = { find = {} }
 [tool.ruff]
 line-length = 88
 target-version = "py312"
+exclude = [
+    "*.yaml",
+    "*.yml",
+    "Makefile",
+    "docs/*",
+]
 
 [tool.ruff.lint]
 select = [
