@@ -140,6 +140,13 @@ SEED_PREFACTOR = (
     1.5  # Scaling prefactor for seeds (higher = more allocation with more combinations)
 )
 
+# ============================================================================
+# Internal Caching and Selection Parameters
+# ============================================================================
+_FIND_SMALLER_CANDIDATES_CACHE_VERSION = 3
+_MAX_CANDIDATES_PER_FORMULA = 10000
+_COMPOSITION_CACHE_NS = "composition"
+
 # Template diversity enhancement
 TEMPLATE_ROTATION_CANDIDATES = (
     3  # Number of rotation variants to generate per template for diversity

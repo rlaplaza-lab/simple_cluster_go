@@ -57,11 +57,9 @@ def compute_final_id(atoms: Atoms, energy: float | None) -> str:
     # Round positions for stable stringification
     pos_rounded = [[f"{x:.8f}" for x in triple] for triple in pos]
 
-    parts: list[str] = ["|".join(symbols)]
-    parts.extend([";".join(p) for p in pos_rounded])
+    parts = ["|".join(symbols)] + [";".join(p) for p in pos_rounded]
     if energy is not None:
         parts.append(f"E={energy:.12e}")
-
     payload = "::".join(parts).encode("utf-8")
     return hashlib.sha256(payload).hexdigest()
 
@@ -120,6 +118,7 @@ def canonicalize_storage_frame(
             atoms.wrap()
         return
 
+    # Wrap periodic axes if needed
     if np.any(atoms.get_pbc()):
         atoms.wrap()
 
@@ -168,17 +167,11 @@ def perform_local_relaxation(
     dyn: Optimizer = optimizer(atoms, trajectory=trajectory, logfile=logfile)
 
     try:
-        positions: Any | np.ndarray[tuple[Any, ...], np.dtype[Any]] = (
-            atoms.get_positions()
-        )
+        positions = atoms.get_positions()
         if len(positions) > 1:
-            tree: KDTree[Any | np.ndarray[tuple[Any, ...], np.dtype[Any]]] = KDTree(
-                positions
-            )
-            distances, indices = tree.query(positions, k=2)
-            distances = np.asarray(distances)
+            tree = KDTree(positions)
+            distances, _ = tree.query(positions, k=2)
             min_distance = np.min(distances[:, 1])
-
             if min_distance < MIN_ATOMIC_DISTANCE_WARNING:
                 logger.warning(
                     f"Atoms dangerously close (min distance: {min_distance:.3f} Å)"
@@ -186,14 +179,9 @@ def perform_local_relaxation(
                 logger.warning(
                     "This may cause numerical issues with some calculators (especially EMT)"
                 )
-
         dyn.run(fmax=fmax, steps=steps)
         energy = atoms.get_potential_energy()
-
-        forces: np.ndarray[tuple[Any, ...], np.dtype[Any]] = ensure_float64_forces(
-            atoms
-        )
-
+        forces = ensure_float64_forces(atoms)
         if np.any(atoms.get_pbc()):
             atoms.wrap()
         if center_after_relax:

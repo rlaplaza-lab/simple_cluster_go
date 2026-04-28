@@ -32,6 +32,9 @@ from .initialization_config import (
     SMART_FILTERING_PERTURBATION_SCALE,
 )
 
+# =============================================================================
+# CORE UTILITIES
+# =============================================================================
 
 def get_covalent_radius(symbol: str) -> float:
     """Get the covalent radius for an element symbol.
@@ -120,6 +123,10 @@ def format_placement_error_message(
 
     return "\n".join(parts)
 
+
+# =============================================================================
+# CONVEX HULL & CACHING
+# =============================================================================
 
 # Cache namespace for convex hull computations
 _CONVEX_HULL_CACHE_NS = "convex_hull"
