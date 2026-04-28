@@ -6,11 +6,6 @@ import importlib.util
 
 import pytest
 
-from tests.conftest import skip_uma_in_github_actions
-
-
-skip_uma_in_github_actions(allow_module_level=True)
-
 from scgo.param_presets import get_ts_search_params
 from scgo.utils.torchsim_policy import (
     calculator_name_supports_torchsim_batched_neb,
@@ -19,6 +14,9 @@ from scgo.utils.torchsim_policy import (
     resolve_ts_torchsim_flags,
 )
 from scgo.utils.ts_runner_kwargs import coerce_ts_params_to_runner_kwargs
+from tests.conftest import skip_uma_in_github_actions
+
+skip_uma_in_github_actions(allow_module_level=True)
 
 
 def test_is_uma_like_calculator():

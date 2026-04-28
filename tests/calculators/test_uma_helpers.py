@@ -8,7 +8,6 @@ import pytest
 
 from tests.conftest import skip_uma_in_github_actions
 
-
 skip_uma_in_github_actions(allow_module_level=True)
 
 
