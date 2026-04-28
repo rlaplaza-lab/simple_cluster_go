@@ -8,7 +8,7 @@
 
 A compact toolkit for global optimization of small atomic clusters using ASE. SCGO provides a focused API for Basin Hopping (BH) and Genetic Algorithm (GA) workflows with practical defaults.
 
-**Documentation**: Comprehensive API documentation is available in the `docs/` directory. For online documentation, see our ReadTheDocs page (link will be added when available).
+**Documentation**: Comprehensive API documentation is available in the `docs/` directory. For online documentation, see [ReadTheDocs](https://scgo.readthedocs.io/).
 
 ## Install
 
