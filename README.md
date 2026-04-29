@@ -2,6 +2,8 @@
 
 [![Python](https://img.shields.io/badge/python-3.12%2B-blue.svg)](https://www.python.org/downloads/) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
+![SCGO Logo](docs/_static/scgo_logo.svg)
+
 A compact toolkit for global optimization of small atomic clusters using ASE. SCGO provides a focused API for Basin Hopping (BH) and Genetic Algorithm (GA) workflows with practical defaults.
 
 **Documentation**: Comprehensive API documentation is available in the `docs/` directory. For online documentation, see [ReadTheDocs](https://scgo.readthedocs.io/).

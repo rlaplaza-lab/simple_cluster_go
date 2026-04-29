@@ -40,7 +40,7 @@ exclude_patterns = ["_build", "Thumbs.db", ".DS_Store"]
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#options-for-html-output
 
 html_theme = "furo"
-html_title = "SCGO"
+html_title = ""
 html_static_path = ["_static"]
 html_favicon = "../_static/scgo_logo.svg"
 html_logo = "../_static/scgo_logo.svg"
