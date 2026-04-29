@@ -47,7 +47,6 @@ exclude_patterns = ["_build", "Thumbs.db", ".DS_Store"]
 html_theme = "alabaster"
 html_static_path = ["_static"]
 html_favicon = "../_static/scgo_logo.svg"
-html_logo = "../_static/scgo_logo.svg"
 html_theme_options = {
     "logo_name": False,
     "description": "Simple Cluster Global Optimization",
