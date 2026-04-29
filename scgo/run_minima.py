@@ -517,12 +517,23 @@ def run_scgo_go_ts_pipeline(
 
     # Extract connectivity_factor from cluster_adsorbate_config in go_params
     from scgo.cluster_adsorbate.config import ClusterAdsorbateConfig
+
     connectivity_factor: float | None = None
-    go_cluster_adsorbate_config = go_params.get("optimizer_params", {}).get("ga", {}).get("cluster_adsorbate_config")
-    if go_cluster_adsorbate_config is not None and isinstance(go_cluster_adsorbate_config, ClusterAdsorbateConfig):
+    go_cluster_adsorbate_config = (
+        go_params.get("optimizer_params", {})
+        .get("ga", {})
+        .get("cluster_adsorbate_config")
+    )
+    if go_cluster_adsorbate_config is not None and isinstance(
+        go_cluster_adsorbate_config, ClusterAdsorbateConfig
+    ):
         connectivity_factor = go_cluster_adsorbate_config.structure_connectivity_factor
-    elif go_params.get("cluster_adsorbate_config") is not None and isinstance(go_params.get("cluster_adsorbate_config"), ClusterAdsorbateConfig):
-        connectivity_factor = go_params["cluster_adsorbate_config"].structure_connectivity_factor
+    elif go_params.get("cluster_adsorbate_config") is not None and isinstance(
+        go_params.get("cluster_adsorbate_config"), ClusterAdsorbateConfig
+    ):
+        connectivity_factor = go_params[
+            "cluster_adsorbate_config"
+        ].structure_connectivity_factor
 
     from scgo.ts_search import run_transition_state_search
 

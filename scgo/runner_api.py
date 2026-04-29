@@ -12,19 +12,42 @@ System-definition keys in ``go_params`` / ``ts_params`` are rejected.
 
 from __future__ import annotations
 
+import copy
 from collections.abc import Iterable
-try:
-    from typing import TypeAlias
-except ImportError:
-    from typing import TypeAlias
+from pathlib import Path
+from time import perf_counter
 from typing import Any
 
 from ase import Atoms
 
-from scgo.run_minima import parse_composition_arg
+from scgo.optimization.algorithm_select import select_scgo_minima_algorithm
+from scgo.cluster_adsorbate.config import ClusterAdsorbateConfig
+from scgo.param_presets import get_default_params, get_ts_search_params
+from scgo.run_minima import (
+    parse_composition_arg,
+    run_scgo_campaign_arbitrary_compositions,
+    run_scgo_go_ts_pipeline,
+    run_scgo_trials,
+)
+from scgo.surface.config import SurfaceSystemConfig
+from scgo.system_types import (
+    AdsorbatesInput,
+    AdsorbateDefinition,
+    SystemType,
+    build_adsorbate_definition_from_inputs,
+    get_system_policy,
+    validate_adsorbate_definition,
+    validate_system_type_settings,
+)
+from scgo.ts_search.transition_state_run import (
+    run_transition_state_campaign as _ts_campaign,
+    run_transition_state_search as _ts_search,
+)
+from scgo.utils.helpers import get_cluster_formula
 from scgo.utils.logging import get_logger
+from scgo.utils.ts_runner_kwargs import coerce_ts_params_to_runner_kwargs
 
-CompositionInput: TypeAlias = str | list[str] | Atoms
+type CompositionInput = str | list[str] | Atoms
 _ALGO_KEYS = ("simple", "bh", "ga")
 _LOGGER = get_logger(__name__)
 

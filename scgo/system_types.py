@@ -244,7 +244,11 @@ def validate_structure_for_system_type(
                 raise ValueError(msg)
     elif policy.has_adsorbate:
         # Use the provided connectivity_factor, or default to CONNECTIVITY_FACTOR
-        cf = connectivity_factor if connectivity_factor is not None else CONNECTIVITY_FACTOR
+        cf = (
+            connectivity_factor
+            if connectivity_factor is not None
+            else CONNECTIVITY_FACTOR
+        )
         ok, msg = validate_combined_cluster_structure(atoms, connectivity_factor=cf)
         if not ok:
             raise ValueError(msg)

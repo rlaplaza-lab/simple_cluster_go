@@ -403,7 +403,9 @@ def test_custom_permutation_mutation_bimetallic(au2pt2_atoms, rng):
     initial_symbols = atoms.get_chemical_symbols()
     n_top = len(atoms)
 
-    perm_mut = CustomPermutationMutation(n_top, system_type="gas_cluster", probability=1.0, rng=rng)
+    perm_mut = CustomPermutationMutation(
+        n_top, system_type="gas_cluster", probability=1.0, rng=rng
+    )
     mutated_atoms = perm_mut.mutate(atoms)
 
     assert mutated_atoms is not None
@@ -422,7 +424,9 @@ def test_custom_permutation_mutation_monometallic(pt4_tetrahedron, rng):
     n_top = len(atoms)
 
     # Permutation mutation should return None for monometallic clusters (not applicable)
-    perm_mut = CustomPermutationMutation(n_top, system_type="gas_cluster", probability=1.0, rng=rng)
+    perm_mut = CustomPermutationMutation(
+        n_top, system_type="gas_cluster", probability=1.0, rng=rng
+    )
     mutated_atoms = perm_mut.mutate(atoms)
 
     # For monometallic clusters, mutation is not applicable and returns None
@@ -438,7 +442,9 @@ def test_flattening_mutation(pt4_tetrahedron, rng):
     blmin = get_blmin(atoms)
     n_top = len(atoms)
 
-    flatten_mut = FlatteningMutation(blmin, n_top, system_type="gas_cluster", thickness_factor=1.0, rng=rng)
+    flatten_mut = FlatteningMutation(
+        blmin, n_top, system_type="gas_cluster", thickness_factor=1.0, rng=rng
+    )
     mutated_atoms = flatten_mut.mutate(atoms)
 
     assert mutated_atoms is not None

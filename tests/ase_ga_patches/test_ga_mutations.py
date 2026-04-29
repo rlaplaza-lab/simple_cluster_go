@@ -20,7 +20,9 @@ from scgo.ase_ga_patches.standardmutations import (
 
 
 def test_permutation_mutation_returns_none_when_single_species(pt3_atoms, rng):
-    mut = PermutationMutation(n_top=3, probability=0.5, system_type="gas_cluster", rng=rng)
+    mut = PermutationMutation(
+        n_top=3, probability=0.5, system_type="gas_cluster", rng=rng
+    )
     assert mut.mutate(pt3_atoms.copy()) is None
 
 
