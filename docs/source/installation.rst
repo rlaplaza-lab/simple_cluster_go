@@ -1,5 +1,5 @@
 Installation
-============
+=============
 
 SCGO can be installed using either conda (recommended) or pip.
 
@@ -7,7 +7,7 @@ Prerequisites
 -------------
 
 - Python 3.12+
-- SQLite with JSON1 extension
+- SQLite with JSON1 extension (``pysqlite3-binary`` if needed for pip installs)
 - CUDA (for GPU acceleration with MLIPs)
 
 Conda Installation (Recommended)
@@ -20,7 +20,7 @@ Conda Installation (Recommended)
    conda env create -f environment.yml
    conda activate scgo
 
-The conda environment installs SCGO in editable mode with MACE/TorchSim support and development tools.
+The conda environment installs SCGO in editable mode with MACE/TorchSim support and development tools. Note that ``vesin`` and ``vesin-torch`` conflict with the TorchSim stack used by SCGO and should not be installed.
 
 Pip Installation
 ----------------
@@ -39,6 +39,8 @@ Or with UMA support:
 
    pip install -e ".[uma]"
 
+For pip installs, ensure ``nvalchemi-toolkit-ops`` is available and uninstall ``vesin``/``vesin-torch`` if you encounter TorchSim-related errors.
+
 Development Installation
 ------------------------
 
@@ -52,7 +54,8 @@ For development with tests and linting:
 Dependency Notes
 ----------------
 
-- SCGO requires exactly one of the `[mace]` or `[uma]` extras for MLIP support
+- SCGO requires exactly one of the ``[mace]`` or ``[uma]`` extras for MLIP support
 - The MACE and UMA extras use incompatible dependency stacks
-- SQLite JSON1 extension is required (install `pysqlite3-binary` if needed)
-- Sella is optional for advanced optimization features
+- SQLite JSON1 extension is required for database operations (``pysqlite3-binary`` recommended for pip installs)
+- Sella is optional for advanced optimization features and requires a C toolchain
+- SCGO allows ``scipy>=1.14,<3`` to resolve cleanly with fairchem UMA dependencies

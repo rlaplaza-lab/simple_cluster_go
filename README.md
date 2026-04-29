@@ -1,7 +1,3 @@
-<div align="center">
-  <img src="docs/_static/scgo_logo.svg" alt="SCGO Logo" width="300">
-</div>
-
 # SCGO: Simple Cluster Global Optimization
 
 [![Python](https://img.shields.io/badge/python-3.12%2B-blue.svg)](https://www.python.org/downloads/) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
@@ -194,6 +190,7 @@ summary = run_go_ts(
 ```
 
 Tagging final minima in databases: ✅ After writing final XYZ files, SCGO can optionally tag the corresponding database records with metadata ("final_unique_minimum": true, "final_rank", and "final_written") so downstream tools can find final minima without re-scanning databases. This behaviour is enabled by default and can be disabled by setting `params['tag_final_minima'] = False` when calling `run_go(...)`.
+
 - `fitness_strategy`: `low_energy` (default), `high_energy`, `diversity`.
 - `validate_with_hessian` (bool): run force + Hessian checks (uses ASE vibrational analysis).
 - **GA backend**: MLIPs use TorchSim batched GA; classical calculators use ASE GA.
@@ -233,7 +230,7 @@ params["optimizer_params"]["ga"]["surface_config"] = surface_config
 - **`run_go`**: pass `surface_config=...` directly to `run_go(...)`; it is copied into each **present** `optimizer_params` entry among `simple` / `bh` / `ga` so the active algorithm sees the slab. The high-level runner only selects GA when `len(composition) >= 4`, so use **at least four adsorbate atoms** if you rely on automatic algorithm choice; for dimers/trimers, call `ga_go` directly.
 - For slab workflows, choose `system_type="surface_cluster"` (supported cluster only) or `system_type="surface_cluster_adsorbate"` (supported cluster with explicit adsorbate-mode policies). Use `scgo.runner_surface.make_surface_config` for a custom ASE slab; use `scgo.surface.make_graphite_surface_config` for the bundled graphite template.
 
-**Adsorbate inputs and initial structures:** For both `gas_cluster_adsorbate` and `surface_cluster_adsorbate`, pass core-only `composition` plus `adsorbates` (one `Atoms` or list of `Atoms`). SCGO derives a strict mobile partition in order (`core_symbols == composition`, then flattened adsorbate symbols); slab atoms are not part of `composition`. SCGO uses hierarchical initialization only: build the core, place the rigid fragment(s), then (for surface) deposit the combined cluster on the slab. Optional: `run_go(..., cluster_adsorbate_config=ClusterAdsorbateConfig(...))` for fragment height and validation. Use `scgo.surface.describe_surface_config` to log effective slab and height settings. GA and basin-hopping attach `n_core_atoms` and per-role symbol JSON in metadata for round-trip checks. When adsorbate metadata is present, [`validate_structure_for_system_type`](scgo/system_types.py) also asserts that the mobile region’s chemical symbols match `core_symbols + adsorbate_symbols` in order (in addition to geometry checks). The helper [`validate_mobile_symbols_match_adsorbate_definition`](scgo/system_types.py) is available for the same symbol order check alone.
+Adsorbate inputs and initial structures: For both `gas_cluster_adsorbate` and `surface_cluster_adsorbate`, pass core-only `composition` plus `adsorbates` (one `Atoms` or list of `Atoms`). SCGO derives a strict mobile partition in order (`core_symbols == composition`, then flattened adsorbate symbols); slab atoms are not part of `composition`. SCGO uses hierarchical initialization only: build the core, place the rigid fragment(s), then (for surface) deposit the combined cluster on the slab. Optional: `run_go(..., cluster_adsorbate_config=ClusterAdsorbateConfig(...))` for fragment height and validation. Use `scgo.surface.describe_surface_config` to log effective slab and height settings. GA and basin-hopping attach `n_core_atoms` and per-role symbol JSON in metadata for round-trip checks. When adsorbate metadata is present, [`validate_structure_for_system_type`](scgo/system_types.py) also asserts that the mobile region's chemical symbols match `core_symbols + adsorbate_symbols` in order (in addition to geometry checks).
 
 ### Slab motion during local relaxation
 
@@ -263,9 +260,9 @@ pytest tests/ -m integration
 pytest tests/ -m slow
 ```
 
-Fast EMT “benchmark” smoke tests (initialization and dimers) live under [`tests/benchmarks/`](tests/benchmarks/); long MLIP regression sweeps live under the top-level [`benchmark/`](benchmark/) package (see [`benchmark/README.md`](benchmark/README.md)).
+Fast EMT "benchmark" smoke tests (initialization and dimers) live under [`tests/benchmarks/`](tests/benchmarks/); long MLIP regression sweeps live under the top-level [`benchmark/`](benchmark/) package (see [`benchmark/README.md`](benchmark/README.md)).
 
-For long GA/TorchSim tests, run in foreground with live output (`-s`) and an explicit timeout to avoid “looks stalled” sessions:
+For long GA/TorchSim tests, run in foreground with live output (`-s`) and an explicit timeout to avoid "looks stalled" sessions:
 
 ```bash
 timeout 5400 pytest tests/ -m "not slow" -vv -s
@@ -331,7 +328,7 @@ ts_results = run_ts_search(
 
 `run_go_ts` / `run_go_ts_campaign` use **`go_params=`** (merged like other GO runs) and **`ts_params=`** (same flat shape as above; **not** deep-merged with `get_default_params()`). For **slab + adsorbate**, pass a `SurfaceSystemConfig` directly to `run_go_ts(..., surface_config=...)` / `run_go_ts_campaign(..., surface_config=...)`; the `composition` argument is **adsorbate symbols only** (the full system for loading minima is built as slab + adsorbate, matching GA). For MACE + TorchSim GA, start from [`get_torchsim_ga_params`](scgo/param_presets.py) with a `seed` (optional `model_name=` so the TorchSim relaxer matches the calculator), set `go_params["calculator"] = "MACE"` and `optimizer_params["ga"]` as needed; pair with `get_ts_search_params(...)` and set `ts_params["max_pairs"]`, etc. For UMA NEB defaults, you can use `get_ts_search_params_uma`. See `runners/example_pt5_gas.py` for a minimal end-to-end example. Default output if `output_dir` is omitted is under `scgo_runs/<stem>_<mace|uma>/` (set `output_root` / `output_stem` to change).
 
-Benchmarks comparing MACE vs UMA on the same GA structure can use [`get_uma_ga_benchmark_params`](scgo/param_presets.py) (re-exported from `scgo`).
+Benchmarks comparing MACE vs UMA on the same GA structure can use [`get_uma_ga_benchmark_params`](scgo/param_presets.py) (re-exported from `scgo`). See `benchmark/` for long-running MLIP regression sweeps.
 
 ### Advanced / internals
 
@@ -353,8 +350,7 @@ Benchmarks comparing MACE vs UMA on the same GA structure can use [`get_uma_ga_b
 | [`runners/example_pt5_oh_gas.py`](runners/example_pt5_oh_gas.py) | `gas_cluster_adsorbate` | core-only `Pt5` composition + one `adsorbates` OH fragment |
 | [`runners/example_pt5_2oh_graphite.py`](runners/example_pt5_2oh_graphite.py) | `surface_cluster_adsorbate` | core-only `Pt5` composition + two `adsorbates` OH fragments |
 
-  For multi-size MLIP sweeps, see [`benchmark/`](benchmark/) (e.g. [`benchmark_Pt.py`](benchmark/benchmark_Pt.py), [`benchmark_Pt_surface_graphite.py`](benchmark/benchmark_Pt_surface_graphite.py)), not `tests/benchmarks/`.
-- See `tests/` for concrete usage patterns.
+For multi-size MLIP sweeps, see [`benchmark/`](benchmark/) (e.g. [`benchmark/benchmark_Pt.py`](benchmark/benchmark_Pt.py), [`benchmark/benchmark_Pt_surface_graphite.py`](benchmark/benchmark_Pt_surface_graphite.py)), not `tests/benchmarks/`. - See `tests/` for concrete usage patterns.
 
 ---
 

@@ -1,6 +1,6 @@
 # SCGO Documentation
 
-This directory contains the Sphinx documentation source for SCGO (Simple Cluster Global Optimization).
+This directory contains the Sphinx documentation source for SCGO (Simple Cluster Global Optimization), built with Sphinx.
 
 ## Building the Documentation
 
@@ -27,18 +27,18 @@ The PDF will be available in `build/latex/scgo.pdf`.
 
 ## Documentation Structure
 
-- `source/` - Sphinx source files (RST format)
-  - `api/` - API reference documentation
-  - `index.rst` - Main documentation index
-  - `installation.rst` - Installation instructions
-  - `quickstart.rst` - Quick start guide with working examples
-- `conf.py` - Sphinx configuration
-- `requirements.txt` - Documentation build requirements
-- `Makefile` - Build automation
+- `source/` — Sphinx source files (RST format)
+  - `api/` — API reference documentation (auto-generated from docstrings)
+  - `index.rst` — Main documentation index
+  - `installation.rst` — Installation instructions
+  - `quickstart.rst` — Quick start guide with working examples
+- `conf.py` — Sphinx configuration
+- `requirements.txt` — Documentation build requirements
+- `Makefile` — Build automation
 
 ## Online Documentation
 
-This documentation is automatically built and published on ReadTheDocs. The configuration is in `.readthedocs.yaml` in the project root.
+This documentation is automatically built and published on [ReadTheDocs](https://scgo.readthedocs.io/). The configuration is in `.readthedocs.yaml` in the project root.
 
 ## Writing Documentation
 
