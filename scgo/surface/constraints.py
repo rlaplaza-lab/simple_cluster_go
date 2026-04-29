@@ -12,21 +12,74 @@ from scgo.surface.config import SurfaceSystemConfig
 from scgo.surface.validation import validate_surface_config_slab_prefix
 
 
+def _cluster_positions_into_layers(
+    positions: np.ndarray,
+    axis: int,
+    distance_threshold: float = 0.3,
+) -> list[set[int]]:
+    """Group atoms into distinct layers using distance-based clustering.
+
+    This is more robust than simple coordinate rounding for slabs with
+    distorted or rough layers, including defects and relaxations.
+
+    Args:
+        positions: Atomic positions (N, 3) array.
+        axis: Cartesian axis index (0, 1, or 2) along which to group layers.
+        distance_threshold: Maximum distance (Å) between atoms in the same
+            layer along the given axis. Atoms whose projected coordinates
+            differ by more than this are placed in different layers.
+
+    Returns:
+        List of sets of atom indices, one per layer, sorted from lowest
+        to highest coordinate along ``axis``.
+    """
+    if len(positions) == 0:
+        return []
+
+    coord = positions[:, axis]
+    # Sort atoms by coordinate along the axis
+    sorted_idx = np.argsort(coord)
+    sorted_coord = coord[sorted_idx]
+
+    layers: list[set[int]] = []
+    current_layer: set[int] = set()
+    # Reference coordinate for the current layer: the first (lowest) atom in it
+    layer_ref = sorted_coord[0]
+
+    for idx, c in zip(sorted_idx, sorted_coord, strict=True):
+        if c - layer_ref > distance_threshold:
+            # Start a new layer
+            layers.append(current_layer)
+            current_layer = {int(idx)}
+            layer_ref = c
+        else:
+            current_layer.add(int(idx))
+
+    if current_layer:
+        layers.append(current_layer)
+
+    return layers
+
+
 def _distinct_layers_along_axis(
     positions: np.ndarray,
     axis: int,
     n_layers: int,
 ) -> set[int]:
-    """Return atom indices belonging to the n_layers lowest distinct layers."""
-    coord = positions[:, axis]
-    # Round to reduce float noise when atoms share a layer
-    rounded = np.round(coord, decimals=6)
-    unique_vals = np.sort(np.unique(rounded))
-    if len(unique_vals) < n_layers:
+    """Return atom indices belonging to the n_layers lowest distinct layers.
+
+    Uses distance-based clustering to identify layers, which is robust for
+    slabs with distorted or rough layers, including defects and relaxations.
+    """
+    layers = _cluster_positions_into_layers(positions, axis)
+    if len(layers) < n_layers:
+        # Not enough distinct layers: return all atoms
         return set(range(len(positions)))
-    cutoff = unique_vals[n_layers - 1]
-    indices = {i for i in range(len(positions)) if rounded[i] <= cutoff + 1e-9}
-    return indices
+    # Union of the n_layers lowest layers
+    result: set[int] = set()
+    for layer in layers[:n_layers]:
+        result.update(layer)
+    return result
 
 
 def _indices_in_top_n_distinct_layers(
@@ -34,17 +87,21 @@ def _indices_in_top_n_distinct_layers(
     axis: int,
     n_top: int,
 ) -> set[int]:
-    """Return atom indices in the n_top highest distinct coordinate layers."""
+    """Return atom indices in the n_top highest distinct coordinate layers.
+
+    Uses distance-based clustering to identify layers, which is robust for
+    slabs with distorted or rough layers, including defects and relaxations.
+    """
     if n_top < 1 or len(positions) == 0:
         return set()
-    coord = positions[:, axis]
-    rounded = np.round(coord, decimals=6)
-    unique_vals = np.sort(np.unique(rounded))
-    if len(unique_vals) <= n_top:
+    layers = _cluster_positions_into_layers(positions, axis)
+    if len(layers) <= n_top:
         return set(range(len(positions)))
-    top_vals = unique_vals[-n_top:]
-    top_set = set(top_vals.tolist())
-    return {i for i in range(len(positions)) if rounded[i] in top_set}
+    # Union of the n_top highest layers
+    result: set[int] = set()
+    for layer in layers[-n_top:]:
+        result.update(layer)
+    return result
 
 
 def attach_slab_constraints(
