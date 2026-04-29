@@ -1,13 +1,4 @@
-# Configuration file for the Sphinx documentation builder.
-#
-# For the full list of built-in configuration values, see the documentation:
-# https://www.sphinx-doc.org/en/master/usage/configuration.html
-
-import os
-import sys
-
-# Add the project root to the Python path
-sys.path.insert(0, os.path.abspath("../.."))
+"""Sphinx configuration for SCGO documentation."""
 
 # -- Project information -----------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#project-information
@@ -27,11 +18,15 @@ extensions = [
     "sphinx.ext.intersphinx",
     "sphinx.ext.todo",
     "sphinx.ext.mathjax",
+    "sphinx.ext.autosummary",
+    "sphinx_copybutton",
 ]
 
 # Napoleon settings for Google-style docstrings
 napoleon_google_docstring = True
 napoleon_numpy_docstring = False
+napoleon_use_param = True
+napoleon_use_rtype = True
 
 # Add any paths that contain templates here, relative to this directory.
 templates_path = ["_templates"]
@@ -44,15 +39,21 @@ exclude_patterns = ["_build", "Thumbs.db", ".DS_Store"]
 # -- Options for HTML output -------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#options-for-html-output
 
-html_theme = "alabaster"
+html_theme = "furo"
+html_title = "SCGO"
 html_static_path = ["_static"]
 html_favicon = "../_static/scgo_logo.svg"
+html_logo = "../_static/scgo_logo.svg"
+
+# Furo theme specific settings
 html_theme_options = {
-    "logo_name": False,
-    "description": "Simple Cluster Global Optimization",
+    "light_css_variables": {
+        "color-brand-primary": "#2c3e50",
+        "color-brand-content": "#2c3e50",
+    },
 }
 
-# -- Options for autodoc ---------------------------------------------------
+# -- Options for autodoc -----------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/extensions/autodoc.html
 
 autodoc_default_options = {
@@ -63,7 +64,7 @@ autodoc_default_options = {
     "exclude-members": "__weakref__",
 }
 
-# -- Options for intersphinx -----------------------------------------------
+# -- Options for intersphinx -------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/extensions/intersphinx.html
 
 intersphinx_mapping = {
@@ -71,7 +72,7 @@ intersphinx_mapping = {
     "ase": ("https://wiki.fysik.dtu.dk/ase", None),
 }
 
-# -- Options for todo extension ---------------------------------------------
+# -- Options for todo extension -----------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/extensions/todo.html
 
 todo_include_todos = True
