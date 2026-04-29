@@ -40,13 +40,14 @@ exclude_patterns = ["_build", "Thumbs.db", ".DS_Store"]
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#options-for-html-output
 
 html_theme = "furo"
-html_title = ""
+html_title = "SCGO"
 html_static_path = ["_static"]
 html_favicon = "../_static/scgo_logo.svg"
 html_logo = "../_static/scgo_logo.svg"
 
 # Furo theme specific settings
 html_theme_options = {
+    "sidebar_hide_name": True,
     "light_css_variables": {
         "color-brand-primary": "#2c3e50",
         "color-brand-content": "#2c3e50",
