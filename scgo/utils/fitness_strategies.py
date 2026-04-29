@@ -6,7 +6,15 @@ optimization, enabling optimization objectives beyond simple energy minimization
 
 from __future__ import annotations
 
-from enum import StrEnum
+try:
+    from enum import StrEnum
+except ImportError:
+    from enum import Enum
+
+    class StrEnum(str, Enum):
+        """StrEnum for Python < 3.11."""
+        def __str__(self):
+            return self.value
 from typing import TYPE_CHECKING
 
 from ase import Atoms

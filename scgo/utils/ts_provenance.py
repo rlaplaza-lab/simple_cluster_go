@@ -8,7 +8,12 @@ README (sections *What to expect on disk* and transition-state outputs).
 from __future__ import annotations
 
 import sys
-from datetime import UTC, datetime
+
+try:
+    from datetime import UTC
+except ImportError:
+    from datetime import timezone as UTC
+from datetime import datetime
 from importlib.metadata import PackageNotFoundError, version
 from typing import Any
 

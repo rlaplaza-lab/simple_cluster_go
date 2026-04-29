@@ -20,7 +20,7 @@ from scgo.ase_ga_patches.standardmutations import (
 
 
 def test_permutation_mutation_returns_none_when_single_species(pt3_atoms, rng):
-    mut = PermutationMutation(n_top=3, probability=0.5, rng=rng)
+    mut = PermutationMutation(n_top=3, probability=0.5, system_type="gas_cluster", rng=rng)
     assert mut.mutate(pt3_atoms.copy()) is None
 
 
@@ -35,6 +35,7 @@ def test_breathing_mutation_succeeds_on_loose_pt3(pt3_atoms, rng):
         scale_min=0.94,
         scale_max=1.06,
         test_dist_to_slab=False,
+        system_type="gas_cluster",
         rng=rng,
         max_inner_attempts=3000,
     )
@@ -69,6 +70,7 @@ def test_overlap_relief_mutation_repairs_dense_pt4(rng):
         n_sweeps=4,
         jitter=0.01,
         test_dist_to_slab=False,
+        system_type="gas_cluster",
         rng=rng,
     )
     out = mut.mutate(atoms.copy())
@@ -105,6 +107,7 @@ def test_shell_swap_mutation_moves_minority_species_outward(rng):
         len(atoms),
         blmin=blmin,
         test_dist_to_slab=False,
+        system_type="gas_cluster",
         rng=rng,
     )
     out = mut.mutate(atoms.copy())
@@ -140,6 +143,7 @@ def test_in_plane_slide_mutation_succeeds_on_slab_adsorbate():
         blmin,
         2,
         surface_normal_axis=2,
+        system_type="surface_cluster",
         rng=np.random.default_rng(0),
         max_inner_attempts=8000,
     )
@@ -164,6 +168,7 @@ def test_factory_registers_overlap_relief_and_shell_swap():
         blmin,
         rng=np.random.default_rng(7),
         use_adaptive=True,
+        system_type="gas_cluster",
     )
 
     assert "overlap_relief" in name_map
@@ -181,6 +186,7 @@ def test_anisotropic_rattle_mutation_runs_on_small_cluster(pt3_atoms, rng):
         normal_strength=0.05,
         rattle_prop=1.0,
         test_dist_to_slab=False,
+        system_type="gas_cluster",
         rng=rng,
     )
     mutated = mut.mutate(pt3_atoms.copy())

@@ -53,6 +53,7 @@ class TestRattleGuaranteedSelection:
         mut = RattleMutation(
             blmin,
             len(atoms),
+            system_type="gas_cluster",
             rattle_strength=0.3,
             rattle_prop=0.01,
             rng=np.random.default_rng(7),
@@ -71,6 +72,7 @@ class TestRattleGuaranteedSelection:
             mut = RattleMutation(
                 blmin,
                 len(atoms),
+                system_type="gas_cluster",
                 rattle_strength=0.3,
                 rattle_prop=0.0,
                 rng=np.random.default_rng(seed),
@@ -92,6 +94,7 @@ class TestAnisotropicRattleGuaranteedSelection:
         mut = AnisotropicRattleMutation(
             blmin,
             len(atoms),
+            system_type="gas_cluster",
             in_plane_strength=0.3,
             normal_strength=0.05,
             rattle_prop=0.01,
@@ -127,6 +130,7 @@ class TestRotationalMutationAngleRange:
         blmin = {(78, 78): 0.1}
         mut = RotationalMutation(
             blmin,
+            system_type="gas_cluster",
             n_top=4,
             fraction=1.0,
             min_angle=np.pi / 2,
@@ -168,6 +172,7 @@ class TestPermutationBoundedPairSelection:
         atoms = au2pt2_atoms.copy()
         mut = PermutationMutation(
             len(atoms),
+            system_type="gas_cluster",
             probability=1.0,
             rng=np.random.default_rng(5),
         )
@@ -194,6 +199,7 @@ class TestPermutationBoundedPairSelection:
         atoms.center(vacuum=10.0)
         mut = PermutationMutation(
             len(atoms),
+            system_type="gas_cluster",
             probability=1.0,
             rng=np.random.default_rng(8),
         )
@@ -221,6 +227,7 @@ class TestOverlapReliefBoundedRepair:
         mut = OverlapReliefMutation(
             blmin,
             len(atoms),
+            system_type="gas_cluster",
             n_sweeps=4,
             jitter=0.01,
             test_dist_to_slab=False,
@@ -259,6 +266,7 @@ class TestFlatteningVectorised:
         mut = FlatteningMutation(
             blmin,
             len(atoms),
+            system_type="gas_cluster",
             thickness_factor=1.0,
             rng=np.random.default_rng(1),
         )
@@ -308,6 +316,7 @@ class TestBreathingBoundedCandidates:
         mut = BreathingMutation(
             blmin,
             len(atoms),
+            system_type="gas_cluster",
             scale_min=0.94,
             scale_max=1.06,
             test_dist_to_slab=False,
@@ -350,6 +359,7 @@ class TestInPlaneSlideBoundedCandidates:
         mut = InPlaneSlideMutation(
             blmin,
             2,
+            system_type="surface_cluster",
             surface_normal_axis=2,
             rng=np.random.default_rng(23),
             max_inner_attempts=8000,

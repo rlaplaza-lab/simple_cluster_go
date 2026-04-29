@@ -104,6 +104,7 @@ class TestSlabPositionsPreserved:
             rattle_strength=0.8,
             rattle_prop=0.6,
             test_dist_to_slab=True,
+            system_type="surface_cluster",
             rng=np.random.default_rng(seed),
         )
         result = mut.mutate(combined)
@@ -118,6 +119,7 @@ class TestSlabPositionsPreserved:
             blmin,
             n_top,
             test_dist_to_slab=True,
+            system_type="surface_cluster",
             rng=np.random.default_rng(seed),
         )
         result = mut.mutate(combined)
@@ -131,6 +133,7 @@ class TestSlabPositionsPreserved:
         mut = MirrorMutation(
             blmin,
             n_top,
+            system_type="surface_cluster",
             rng=np.random.default_rng(seed),
         )
         result = mut.mutate(combined)
@@ -153,7 +156,8 @@ class TestSlabPositionsPreserved:
         combined2.set_tags(tags2)
         mut = RotationalMutation(
             blmin2,
-            n_top2,
+            system_type="surface_cluster",
+            n_top=n_top2,
             fraction=1.0,
             min_angle=0.5,
             test_dist_to_slab=True,
@@ -172,6 +176,7 @@ class TestSlabPositionsPreserved:
             n_top,
             thickness_factor=1.0,
             test_dist_to_slab=True,
+            system_type="surface_cluster",
             rng=np.random.default_rng(seed),
         )
         result = mut.mutate(combined)
@@ -189,6 +194,7 @@ class TestSlabPositionsPreserved:
             scale_min=0.85,
             scale_max=1.15,
             test_dist_to_slab=True,
+            system_type="surface_cluster",
             rng=np.random.default_rng(seed),
         )
         result = mut.mutate(combined)
@@ -205,6 +211,7 @@ class TestSlabPositionsPreserved:
             n_top,
             surface_normal_axis=2,
             max_displacement=1.0,
+            system_type="surface_cluster",
             rng=np.random.default_rng(seed),
         )
         result = mut.mutate(combined)
@@ -236,7 +243,8 @@ class TestNoCenteringOnSurfaceSystems:
         for seed in range(30):
             mut = RotationalMutation(
                 blmin,
-                n_top,
+                system_type="surface_cluster",
+                n_top=n_top,
                 fraction=1.0,
                 min_angle=0.5,
                 test_dist_to_slab=True,
@@ -271,6 +279,7 @@ class TestNoCenteringOnSurfaceSystems:
                 n_top,
                 thickness_factor=1.0,
                 test_dist_to_slab=True,
+                system_type="surface_cluster",
                 rng=np.random.default_rng(seed),
             )
             result = mut.mutate(combined)
@@ -302,6 +311,7 @@ class TestGasPhaseCenteringPreserved:
             fraction=1.0,
             min_angle=0.5,
             test_dist_to_slab=False,
+            system_type="gas_cluster",
             rng=np.random.default_rng(42),
         )
         result = mut.mutate(atoms)
@@ -318,6 +328,7 @@ class TestGasPhaseCenteringPreserved:
             n_top=4,
             thickness_factor=1.0,
             test_dist_to_slab=False,
+            system_type="gas_cluster",
             rng=np.random.default_rng(42),
         )
         result = mut.mutate(atoms)
@@ -342,6 +353,7 @@ class TestCutAndSpliceSurfaceCoherence:
             n_top,
             blmin,
             test_dist_to_slab=True,
+            system_type="surface_cluster",
             rng=np.random.default_rng(42),
         )
 
@@ -363,6 +375,7 @@ class TestCutAndSpliceSurfaceCoherence:
             len(atoms1),
             blmin,
             test_dist_to_slab=False,
+            system_type="gas_cluster",
             rng=np.random.default_rng(42),
         )
 
@@ -394,6 +407,7 @@ class TestInPlaneSlideAxes:
             n_top,
             surface_normal_axis=2,
             max_displacement=1.0,
+            system_type="surface_cluster",
             rng=np.random.default_rng(42),
         )
         result = mut.mutate(combined)

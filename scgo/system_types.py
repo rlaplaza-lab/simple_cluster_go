@@ -3,7 +3,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal, NotRequired, TypedDict
+from typing import Literal, TypedDict
+
+try:
+    from typing import NotRequired
+except ImportError:
+    from typing import NotRequired
 
 from ase import Atoms
 

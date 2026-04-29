@@ -24,8 +24,8 @@ def test_cut_and_splice_preserves_stoichiometry_and_is_deterministic(au2pt2_atom
     pt = 78
     au = 79
     blmin = {(pt, pt): 0.1, (pt, au): 0.1, (au, au): 0.1}
-    op1 = CutAndSplicePairing(slab=Atoms(), n_top=4, blmin=blmin, rng=rng1)
-    op2 = CutAndSplicePairing(slab=Atoms(), n_top=4, blmin=blmin, rng=rng2)
+    op1 = CutAndSplicePairing(slab=Atoms(), n_top=4, blmin=blmin, system_type="gas_cluster", rng=rng1)
+    op2 = CutAndSplicePairing(slab=Atoms(), n_top=4, blmin=blmin, system_type="gas_cluster", rng=rng2)
 
     child1 = op1.cross(p1, p2)
     child2 = op2.cross(p1, p2)
@@ -49,10 +49,10 @@ def test_dual_cut_and_splice_returns_offspring(pt3_atoms):
     )
     slab = Atoms(cell=pt3_atoms.get_cell(), pbc=pt3_atoms.get_pbc())
     primary = CutAndSplicePairing(
-        slab, n_top, blmin, minfrac=0.3, rng=np.random.default_rng(11)
+        slab, n_top, blmin, minfrac=0.3, system_type="gas_cluster", rng=np.random.default_rng(11)
     )
     exploratory = CutAndSplicePairing(
-        slab, n_top, blmin, minfrac=0.15, rng=np.random.default_rng(22)
+        slab, n_top, blmin, minfrac=0.15, system_type="gas_cluster", rng=np.random.default_rng(22)
     )
     dual = DualCutAndSplicePairing(
         primary,
@@ -92,5 +92,5 @@ def test_cut_and_splice_constructor_rejects_legacy_randomstate():
     with pytest.raises(TypeError):
         # Legacy RandomState should be rejected after enforcing Generator-only policy
         CutAndSplicePairing(
-            slab=Atoms(), n_top=2, blmin={}, rng=_np.random.RandomState(42)
+            slab=Atoms(), n_top=2, blmin={}, system_type="gas_cluster", rng=_np.random.RandomState(42)
         )

@@ -712,6 +712,7 @@ def create_mutation_operators(
         rattle_strength=0.8 * move_scale,
         rattle_prop=min(0.4, 0.4 * move_scale),
         use_tags=use_partition_tags,
+        system_type=resolved_system_type,
         rng=create_child_rng(rng) if rng is not None else None,  # type: ignore[arg-type]
     )
     operators.append(rattle)
@@ -720,6 +721,7 @@ def create_mutation_operators(
     overlap_relief: OverlapReliefMutation = OverlapReliefMutation(
         blmin,
         n_to_optimize,
+        system_type=resolved_system_type,
         rng=create_child_rng(rng) if rng is not None else None,  # type: ignore[arg-type]
     )
     operators.append(overlap_relief)
@@ -731,6 +733,7 @@ def create_mutation_operators(
             rng=create_child_rng(rng) if rng is not None else None,  # type: ignore[arg-type]
             blmin=blmin,
             test_dist_to_slab=uses_surface(resolved_system_type),
+            system_type=resolved_system_type,
         )
         operators.append(permutation)
         name_map["permutation"] = len(operators) - 1
@@ -740,6 +743,7 @@ def create_mutation_operators(
             rng=create_child_rng(rng) if rng is not None else None,  # type: ignore[arg-type]
             blmin=blmin,
             test_dist_to_slab=uses_surface(resolved_system_type),
+            system_type=resolved_system_type,
         )
         operators.append(shell_swap)
         name_map["shell_swap"] = len(operators) - 1
@@ -752,13 +756,15 @@ def create_mutation_operators(
                 thickness_factor=flattening_thickness_factor,
                 rng=create_child_rng(rng) if rng is not None else None,  # type: ignore[arg-type]
                 max_inner_attempts=flattening_max_inner_attempts,
+                system_type=resolved_system_type,
             )
             operators.append(flattening)
             name_map["flattening"] = len(operators) - 1
 
         rotational: RotationalMutation = RotationalMutation(
             blmin,
-            n_to_optimize,
+            system_type=resolved_system_type,
+            n_top=n_to_optimize,
             rng=create_child_rng(rng) if rng is not None else None,  # type: ignore[arg-type]
             max_inner_attempts=rotational_max_inner_attempts,
         )
@@ -769,6 +775,7 @@ def create_mutation_operators(
             blmin,
             n_to_optimize,
             reflect=True,
+            system_type=resolved_system_type,
             rng=create_child_rng(rng) if rng is not None else None,  # type: ignore[arg-type]
             max_tries=mirror_max_tries,
         )
@@ -782,6 +789,7 @@ def create_mutation_operators(
             normal_strength=0.2 * move_scale,
             rattle_prop=min(0.5, 0.5 * move_scale),
             use_tags=use_partition_tags,
+            system_type=resolved_system_type,
             rng=create_child_rng(rng) if rng is not None else None,  # type: ignore[arg-type]
         )
         operators.append(anisotropic)
@@ -793,6 +801,7 @@ def create_mutation_operators(
                 n_to_optimize,
                 scale_min=1.0 - (1.0 - breathing_scale_min) * move_scale,
                 scale_max=1.0 + (breathing_scale_max - 1.0) * move_scale,
+                system_type=resolved_system_type,
                 rng=create_child_rng(rng) if rng is not None else None,  # type: ignore[arg-type]
                 max_inner_attempts=breathing_max_inner_attempts,
             )
@@ -804,6 +813,7 @@ def create_mutation_operators(
                 blmin,
                 n_to_optimize,
                 surface_normal_axis=surface_normal_axis,
+                system_type=resolved_system_type,
                 rng=create_child_rng(rng) if rng is not None else None,  # type: ignore[arg-type]
                 max_inner_attempts=in_plane_slide_max_inner_attempts,
             )

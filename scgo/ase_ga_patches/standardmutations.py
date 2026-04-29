@@ -19,6 +19,7 @@ from scgo.ase_ga_patches._vector_utils import (
     append_unique_unit_vector as _append_unique_unit_vector,
 )
 from scgo.ase_ga_patches._vector_utils import random_unit_vector as _random_unit_vector
+from scgo.system_types import SystemType, get_system_policy
 from scgo.utils.rng_helpers import ensure_rng_or_create as _ensure_rng
 
 
@@ -54,6 +55,10 @@ class RattleMutation(OffspringCreator):
         displaced collectively, so that the internal
         geometry is preserved.
 
+    system_type: System type (e.g., "gas_cluster", "surface_cluster",
+        "gas_cluster_adsorbate", "surface_cluster_adsorbate").
+        Used to ensure physical validity of mutations.
+
     rng: Random number generator
         By default numpy.random.
 
@@ -62,7 +67,7 @@ class RattleMutation(OffspringCreator):
 
     """
 
-    def __init__(self, blmin, n_top, rattle_strength=0.8,
+    def __init__(self, blmin, n_top, system_type: SystemType, rattle_strength=0.8,
                  rattle_prop=0.4, test_dist_to_slab=True, use_tags=False,
                  verbose=False, rng=None):
         rng = _ensure_rng(rng)
@@ -73,6 +78,8 @@ class RattleMutation(OffspringCreator):
         self.rattle_prop = rattle_prop
         self.test_dist_to_slab = test_dist_to_slab
         self.use_tags = use_tags
+        self.system_type = system_type
+        self._policy = get_system_policy(system_type)
 
         self.descriptor = "RattleMutation"
         self.min_inputs = 1
@@ -144,6 +151,9 @@ class RattleMutation(OffspringCreator):
             return None
 
         mutant = slab + top
+        # Apply centering only for gas-phase systems
+        if not self._policy.uses_surface:
+            mutant.center()
         return mutant
 
 
@@ -159,6 +169,7 @@ class AnisotropicRattleMutation(OffspringCreator):
         self,
         blmin,
         n_top,
+        system_type: SystemType,
         in_plane_strength=1.0,
         normal_strength=0.2,
         rattle_prop=0.5,
@@ -176,6 +187,8 @@ class AnisotropicRattleMutation(OffspringCreator):
         self.rattle_prop = rattle_prop
         self.test_dist_to_slab = test_dist_to_slab
         self.use_tags = use_tags
+        self.system_type = system_type
+        self._policy = get_system_policy(system_type)
 
         self.descriptor = "AnisotropicRattleMutation"
         self.min_inputs = 1
@@ -250,7 +263,11 @@ class AnisotropicRattleMutation(OffspringCreator):
         if count == maxcount:
             return None
 
-        return slab + top
+        result = slab + top
+        # Apply centering only for gas-phase systems
+        if not self._policy.uses_surface:
+            result.center()
+        return result
 
 
 class OverlapReliefMutation(OffspringCreator):
@@ -265,6 +282,7 @@ class OverlapReliefMutation(OffspringCreator):
         self,
         blmin,
         n_top,
+        system_type: SystemType,
         n_sweeps=4,
         jitter=0.02,
         margin=0.04,
@@ -280,6 +298,8 @@ class OverlapReliefMutation(OffspringCreator):
         self.jitter = jitter
         self.margin = margin
         self.test_dist_to_slab = test_dist_to_slab
+        self.system_type = system_type
+        self._policy = get_system_policy(system_type)
 
         self.descriptor = "OverlapReliefMutation"
         self.min_inputs = 1
@@ -368,7 +388,7 @@ class OverlapReliefMutation(OffspringCreator):
                 pbc=pbc,
                 tags=tags,
             )
-            if len(slab) == 0:
+            if not self._policy.uses_surface:
                 candidate.center()
             if atoms_too_close(candidate, self.blmin):
                 continue
@@ -413,7 +433,7 @@ class PermutationMutation(OffspringCreator):
 
     """
 
-    def __init__(self, n_top, probability=0.33, test_dist_to_slab=True,
+    def __init__(self, n_top, system_type: SystemType, probability=0.33, test_dist_to_slab=True,
                  use_tags=False, blmin=None, rng=None, verbose=False):
         rng = _ensure_rng(rng)
         OffspringCreator.__init__(self, verbose, rng=rng)
@@ -422,6 +442,8 @@ class PermutationMutation(OffspringCreator):
         self.test_dist_to_slab = test_dist_to_slab
         self.use_tags = use_tags
         self.blmin = blmin
+        self.system_type = system_type
+        self._policy = get_system_policy(system_type)
 
         self.descriptor = "PermutationMutation"
         self.min_inputs = 1
@@ -499,6 +521,9 @@ class PermutationMutation(OffspringCreator):
             return None
 
         mutant = slab + top
+        # Apply centering only for gas-phase systems
+        if not self._policy.uses_surface:
+            mutant.center()
         return mutant
 
 
@@ -508,6 +533,7 @@ class CustomPermutationMutation(PermutationMutation):
     def __init__(
         self,
         n_top,
+        system_type: SystemType,
         probability=0.4,
         test_dist_to_slab=False,
         use_tags=False,
@@ -522,6 +548,7 @@ class CustomPermutationMutation(PermutationMutation):
             test_dist_to_slab=test_dist_to_slab,
             use_tags=use_tags,
             blmin=blmin,
+            system_type=system_type,
             rng=rng,
             verbose=verbose,
         )
@@ -537,6 +564,7 @@ class ShellSwapMutation(OffspringCreator):
     def __init__(
         self,
         n_top,
+        system_type: SystemType,
         inner_fraction=0.33,
         outer_fraction=0.33,
         test_dist_to_slab=True,
@@ -555,6 +583,8 @@ class ShellSwapMutation(OffspringCreator):
         self.use_tags = use_tags
         self.blmin = blmin
         self.max_pair_trials = max_pair_trials
+        self.system_type = system_type
+        self._policy = get_system_policy(system_type)
 
         self.descriptor = "ShellSwapMutation"
         self.min_inputs = 1
@@ -686,14 +716,16 @@ class MirrorMutation(OffspringCreator):
 
     """
 
-    def __init__(self, blmin, n_top, reflect=True, rng=None,
-                 verbose=False, max_tries=1000):
+    def __init__(self, blmin, n_top, system_type: SystemType, reflect=True,
+                 rng=None, verbose=False, max_tries=1000):
         rng = _ensure_rng(rng)
         OffspringCreator.__init__(self, verbose, rng=rng)
         self.blmin = blmin
         self.n_top = n_top
         self.max_tries = max_tries
         self.reflect = reflect
+        self.system_type = system_type
+        self._policy = get_system_policy(system_type)
 
         self.descriptor = "MirrorMutation"
         self.min_inputs = 1
@@ -858,9 +890,9 @@ class RotationalMutation(OffspringCreator):
 
     """
 
-    def __init__(self, blmin, n_top=None, fraction=0.33, tags=None,
-                 min_angle=1.57, test_dist_to_slab=True, rng=None,
-                 verbose=False, max_inner_attempts=10000):
+    def __init__(self, blmin, system_type: SystemType, n_top=None, fraction=0.33, tags=None,
+                 min_angle=1.57, test_dist_to_slab=True,
+                 rng=None, verbose=False, max_inner_attempts=10000):
         rng = _ensure_rng(rng)
         OffspringCreator.__init__(self, verbose, rng=rng)
         self.blmin = blmin
@@ -869,6 +901,8 @@ class RotationalMutation(OffspringCreator):
         self.tags = tags
         self.min_angle = min_angle
         self.test_dist_to_slab = test_dist_to_slab
+        self.system_type = system_type
+        self._policy = get_system_policy(system_type)
         self.max_inner_attempts = max_inner_attempts
         self.descriptor = "RotationalMutation"
         self.min_inputs = 1
@@ -944,7 +978,7 @@ class RotationalMutation(OffspringCreator):
             mutant.set_positions(newpos)
             # Only center gas-phase clusters; surface adsorbates must keep
             # their positions relative to the slab.
-            if len(slab) == 0:
+            if not self._policy.uses_surface:
                 mutant.center()
             too_close = atoms_too_close(mutant, self.blmin, use_tags=True)
             count += 1
@@ -980,7 +1014,7 @@ class FlatteningMutation(OffspringCreator):
 
     """
 
-    def __init__(self, blmin, n_top, thickness_factor=0.5,
+    def __init__(self, blmin, n_top, system_type: SystemType, thickness_factor=0.5,
                  test_dist_to_slab=True, rng=None, verbose=False,
                  max_inner_attempts=5000):
         rng = _ensure_rng(rng)
@@ -990,6 +1024,8 @@ class FlatteningMutation(OffspringCreator):
         self.thickness_factor = thickness_factor
         self.test_dist_to_slab = test_dist_to_slab
         self.max_inner_attempts = max_inner_attempts
+        self.system_type = system_type
+        self._policy = get_system_policy(system_type)
         self.last_attempt_count = 0
 
         self.descriptor = "FlatteningMutation"
@@ -1179,7 +1215,7 @@ class FlatteningMutation(OffspringCreator):
             mutant.set_positions(new_positions)
             # Only center gas-phase clusters; surface adsorbates must keep
             # their positions relative to the slab.
-            if len(slab) == 0:
+            if not self._policy.uses_surface:
                 mutant.center()
 
             too_close = atoms_too_close(mutant, self.blmin)
@@ -1218,7 +1254,7 @@ class BreathingMutation(OffspringCreator):
         Maximum number of random scale attempts per call.
     """
 
-    def __init__(self, blmin, n_top, scale_min=0.9, scale_max=1.1,
+    def __init__(self, blmin, n_top, system_type: SystemType, scale_min=0.9, scale_max=1.1,
                  test_dist_to_slab=True, rng=None, verbose=False,
                  max_inner_attempts=1000):
         rng = _ensure_rng(rng)
@@ -1228,6 +1264,8 @@ class BreathingMutation(OffspringCreator):
         self.scale_min = scale_min
         self.scale_max = scale_max
         self.test_dist_to_slab = test_dist_to_slab
+        self.system_type = system_type
+        self._policy = get_system_policy(system_type)
         self.max_inner_attempts = max_inner_attempts
         self.last_attempt_count = 0
         self.descriptor = "BreathingMutation"
@@ -1368,7 +1406,7 @@ class InPlaneSlideMutation(OffspringCreator):
         Maximum number of random displacement attempts per call.
     """
 
-    def __init__(self, blmin, n_top, surface_normal_axis=2,
+    def __init__(self, blmin, n_top, system_type: SystemType, surface_normal_axis=2,
                  max_displacement=2.0, rng=None, verbose=False,
                  max_inner_attempts=1000):
         rng = _ensure_rng(rng)
@@ -1377,6 +1415,8 @@ class InPlaneSlideMutation(OffspringCreator):
         self.n_top = n_top
         self.surface_normal_axis = surface_normal_axis
         self.max_displacement = max_displacement
+        self.system_type = system_type
+        self._policy = get_system_policy(system_type)
         self.max_inner_attempts = max_inner_attempts
         self.last_attempt_count = 0
         self.descriptor = "InPlaneSlideMutation"
