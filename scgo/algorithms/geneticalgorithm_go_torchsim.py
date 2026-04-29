@@ -117,6 +117,7 @@ def _relax_unrelaxed_candidates(
     profiling: dict[str, float] | None = None,
     composition: list[str] | None = None,
     adsorbate_definition: AdsorbateDefinition | None = None,
+    connectivity_factor: float | None = None,
 ) -> int:
     """Relax unrelaxed candidates in batches and commit them to the database."""
     available = database_retry(
@@ -198,6 +199,7 @@ def _relax_unrelaxed_candidates(
                     surface_config=surface_config,
                     n_slab=n_slab if surface_mode else None,
                     adsorbate_definition=adsorbate_definition,
+                    connectivity_factor=connectivity_factor,
                 )
 
                 # Copy forces if available (already converted to float64 by relaxer)
@@ -338,6 +340,13 @@ def ga_go_torchsim(
         "offspring_worker_failures": 0,
     }
     per_generation: list[dict[str, Any]] | None = [] if detailed_timing else None
+
+    # Extract connectivity factor from cluster_adsorbate_config if available
+    connectivity_factor = (
+        cluster_adsorbate_config.structure_connectivity_factor
+        if cluster_adsorbate_config is not None
+        else None
+    )
 
     if system_type == "gas_cluster" and surface_config is not None:
         system_type = "surface_cluster"
@@ -1013,6 +1022,7 @@ def ga_go_torchsim(
                 profiling=profile_timings,
                 composition=composition,
                 adsorbate_definition=adsorbate_definition,
+                connectivity_factor=connectivity_factor,
             )
             relax_call_wall_s = perf_counter() - t0_relax_call
             post_db_read = float(profile_timings.get("db_read_s", 0.0))
@@ -1116,6 +1126,7 @@ def ga_go_torchsim(
             profiling=profile_timings,
             composition=composition,
             adsorbate_definition=adsorbate_definition,
+            connectivity_factor=connectivity_factor,
         )
 
         all_candidates = database_retry(

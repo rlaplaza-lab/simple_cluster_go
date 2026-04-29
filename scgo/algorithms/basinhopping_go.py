@@ -18,6 +18,7 @@ from ase.optimize.optimize import Optimizer
 from tqdm import tqdm
 
 from scgo.algorithms.ga_common import ga_run_metadata_extras
+from scgo.cluster_adsorbate.config import ClusterAdsorbateConfig
 from scgo.constants import (
     BOLTZMANN_K_EV_PER_K,
     DEFAULT_COMPARATOR_TOL,
@@ -160,6 +161,7 @@ def bh_go(
     adsorbate_definition: AdsorbateDefinition | None = None,
     write_timing_json: bool = False,
     detailed_timing: bool = False,
+    cluster_adsorbate_config: ClusterAdsorbateConfig | None = None,
     *,
     rng: np.random.Generator,
 ) -> list[tuple[float, Atoms]]:
@@ -217,6 +219,14 @@ def bh_go(
     validate_system_type_settings(
         system_type=system_type, surface_config=surface_config
     )
+
+    # Extract connectivity factor from cluster_adsorbate_config if available
+    connectivity_factor = (
+        cluster_adsorbate_config.structure_connectivity_factor
+        if cluster_adsorbate_config is not None
+        else None
+    )
+
     policy = get_system_policy(system_type)
     surface_mode = policy.uses_surface
 
@@ -361,6 +371,7 @@ def bh_go(
             surface_config=surface_config,
             n_slab=n_slab if surface_mode else None,
             adsorbate_definition=adsorbate_definition,
+            connectivity_factor=connectivity_factor,
         )
         add_metadata(
             a_current,
@@ -450,6 +461,7 @@ def bh_go(
                 surface_config=surface_config,
                 n_slab=n_slab if surface_mode else None,
                 adsorbate_definition=adsorbate_definition,
+                connectivity_factor=connectivity_factor,
             )
             add_metadata(
                 a_trial,

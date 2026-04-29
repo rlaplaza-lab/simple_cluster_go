@@ -202,6 +202,7 @@ def _neb_endpoint_copies(
     system_type: SystemType,
     n_slab: int = 0,
     adsorbate_definition: AdsorbateDefinition | None = None,
+    connectivity_factor: float | None = None,
 ) -> tuple[Atoms, Atoms]:
     """Copy minima endpoints, optionally re-attaching surface FixAtoms constraints."""
     from scgo.surface.constraints import attach_slab_constraints_from_surface_config
@@ -217,6 +218,7 @@ def _neb_endpoint_copies(
         surface_config=surface_config,
         n_slab=n_slab,
         adsorbate_definition=adsorbate_definition,
+        connectivity_factor=connectivity_factor,
     )
     validate_structure_for_system_type(
         prod,
@@ -224,6 +226,7 @@ def _neb_endpoint_copies(
         surface_config=surface_config,
         n_slab=n_slab,
         adsorbate_definition=adsorbate_definition,
+        connectivity_factor=connectivity_factor,
     )
     return react, prod
 
@@ -251,6 +254,7 @@ def run_parallel_neb_search(
     n_core_mobile: int | None = None,
     n_adsorbate_mobile: int | None = None,
     adsorbate_definition: AdsorbateDefinition | None = None,
+    connectivity_factor: float | None = None,
 ) -> tuple[list[dict[str, Any]], dict[str, float]]:
     """Run all pairs through ParallelNEBBatch. Returns (results, timing meta)."""
     t_parallel0 = perf_counter()
@@ -267,6 +271,7 @@ def run_parallel_neb_search(
             system_type,
             n_slab=n_slab,
             adsorbate_definition=adsorbate_definition,
+            connectivity_factor=connectivity_factor,
         )
         endpoints.append(ri)
         endpoints.append(rj)
@@ -289,6 +294,7 @@ def run_parallel_neb_search(
             system_type,
             n_slab=n_slab,
             adsorbate_definition=adsorbate_definition,
+            connectivity_factor=connectivity_factor,
         )
         images = interpolate_path(
             react_ep,

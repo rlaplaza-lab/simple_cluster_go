@@ -97,6 +97,7 @@ def _prepare_run_context(
     surface_config: SurfaceSystemConfig | None,
     params: dict[str, Any] | None,
     adsorbates: AdsorbatesInput | None,
+    cluster_adsorbate_config: Any | None = None,
     context: str,
 ) -> tuple[
     SystemType,
@@ -119,11 +120,16 @@ def _prepare_run_context(
         adsorbate_definition=ads_def,
         context=context,
     )
-    params_prep = (
-        _with_surface_in_optimizers(params, surface_config=surface_config)
-        if params
-        else None
-    )
+    params_prep = params or {}
+    if params:
+        params_prep = _with_surface_in_optimizers(params, surface_config=surface_config)
+    if params_prep:
+        params_prep = _with_adsorbate_in_optimizers(
+            params_prep,
+            adsorbate_definition=ads_def,
+            adsorbate_fragment_template=ads_template,
+            cluster_adsorbate_config=cluster_adsorbate_config,
+        )
     return st, params_prep, ads_def, ads_template, full_comp
 
 
@@ -339,6 +345,47 @@ def _with_surface_in_optimizers(
     return out
 
 
+def _with_adsorbate_in_optimizers(
+    go_params: dict[str, Any],
+    *,
+    adsorbate_definition: Any | None = None,
+    adsorbate_fragment_template: Any | None = None,
+    cluster_adsorbate_config: Any | None = None,
+) -> dict[str, Any]:
+    """Copy ``go_params``; fan out explicit run adsorbate params to optimizer slots."""
+    out = copy.deepcopy(go_params)
+
+    # If any adsorbate param is set, distribute to all optimizer slots
+    if (
+        adsorbate_definition is not None
+        or adsorbate_fragment_template is not None
+        or cluster_adsorbate_config is not None
+    ):
+        op = out.setdefault("optimizer_params", {})
+        for key in _ALGO_KEYS:
+            if key not in op:
+                continue
+            slot = op[key]
+            if not isinstance(slot, dict):
+                raise ValueError(
+                    f"optimizer_params['{key}'] must be a dict when using adsorbate parameters"
+                )
+            if adsorbate_definition is not None:
+                ex = slot.get("adsorbate_definition")
+                if ex is None:
+                    slot["adsorbate_definition"] = adsorbate_definition
+                # Don't check for match, multiple definitions may be equivalent
+            if adsorbate_fragment_template is not None:
+                ex = slot.get("adsorbate_fragment_template")
+                if ex is None:
+                    slot["adsorbate_fragment_template"] = adsorbate_fragment_template
+            if cluster_adsorbate_config is not None:
+                ex = slot.get("cluster_adsorbate_config")
+                if ex is None:
+                    slot["cluster_adsorbate_config"] = cluster_adsorbate_config
+    return out
+
+
 def _reject_system_keys(
     params: dict[str, Any], *, context: str, kind: str = "go"
 ) -> None:
@@ -373,6 +420,7 @@ def run_go(
         surface_config=surface_config,
         params=params,
         adsorbates=adsorbates,
+        cluster_adsorbate_config=cluster_adsorbate_config,
         context="run_go",
     )
     eff_seed = resolve_workflow_seed(seed_kw=seed, go_params=params)

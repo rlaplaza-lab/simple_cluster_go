@@ -162,6 +162,13 @@ def ga_go(
     profile_counters: dict[str, int] = {"offspring_created": 0}
     per_generation: list[dict[str, Any]] | None = [] if detailed_timing else None
 
+    # Extract connectivity factor from cluster_adsorbate_config if available
+    connectivity_factor = (
+        cluster_adsorbate_config.structure_connectivity_factor
+        if cluster_adsorbate_config is not None
+        else None
+    )
+
     resolved_system_type: SystemType = (
         "surface_cluster"
         if system_type == "gas_cluster" and surface_config is not None
@@ -385,6 +392,7 @@ def ga_go(
                 surface_config=surface_config,
                 n_slab=n_slab,
                 adsorbate_definition=adsorbate_definition,
+                connectivity_factor=connectivity_factor,
             )
             retry_with_backoff(
                 lambda _cand=cand: _insert_unrelaxed(_cand),
@@ -430,6 +438,7 @@ def ga_go(
                 surface_config=surface_config,
                 n_slab=n_slab if surface_mode else None,
                 adsorbate_definition=adsorbate_definition,
+                connectivity_factor=connectivity_factor,
             )
             t_relax += perf_counter() - t_start
             add_metadata(
@@ -573,6 +582,7 @@ def ga_go(
                         surface_config=surface_config,
                         n_slab=n_slab,
                         adsorbate_definition=adsorbate_definition,
+                        connectivity_factor=connectivity_factor,
                     )
                 except ValueError as exc:
                     logger.debug(
@@ -623,6 +633,7 @@ def ga_go(
                     surface_config=surface_config,
                     n_slab=n_slab if surface_mode else None,
                     adsorbate_definition=adsorbate_definition,
+                    connectivity_factor=connectivity_factor,
                 )
                 t_relax_gen += perf_counter() - t_start
 

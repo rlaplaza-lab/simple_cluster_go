@@ -9,6 +9,7 @@ final_unique_minima/
 build/
 scgo.egg-info/
 test_output/
+examples/results/
 
 # Generated analysis and documentation
 *_REPORT.md

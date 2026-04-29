@@ -11,6 +11,7 @@ from pathlib import Path
 
 from ase import Atoms
 
+from scgo.cluster_adsorbate.config import ClusterAdsorbateConfig
 from scgo.param_presets import get_torchsim_ga_params, get_ts_search_params
 from scgo.runner_api import run_go_ts
 
@@ -24,6 +25,11 @@ NITER = 8
 POPULATION_SIZE = 40
 MAX_PAIRS = 12
 ADSORBATES = [Atoms(symbols=["O", "H"], positions=[[0.0, 0.0, 0.0], [0.0, 0.0, 0.96]])]
+
+# Use more lenient connectivity factor for Pt+OH systems (default 1.4 may be too strict)
+CLUSTER_ADSORBATE_CONFIG = ClusterAdsorbateConfig(
+    structure_connectivity_factor=1.8,
+)
 
 
 def main() -> None:
@@ -43,6 +49,7 @@ def main() -> None:
         output_stem=OUTPUT_STEM,
         system_type=SYSTEM_TYPE,
         adsorbates=ADSORBATES,
+        cluster_adsorbate_config=CLUSTER_ADSORBATE_CONFIG,
     )
 
 

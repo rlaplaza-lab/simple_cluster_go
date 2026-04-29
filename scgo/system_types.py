@@ -8,6 +8,7 @@ from typing import Literal, NotRequired, TypedDict
 from ase import Atoms
 
 from scgo.cluster_adsorbate.validation import validate_combined_cluster_structure
+from scgo.initialization.initialization_config import CONNECTIVITY_FACTOR
 from scgo.surface.config import SurfaceSystemConfig
 from scgo.surface.validation import (
     validate_supported_cluster_deposit,
@@ -201,12 +202,22 @@ def validate_structure_for_system_type(
     surface_config: SurfaceSystemConfig | None = None,
     n_slab: int | None = None,
     adsorbate_definition: AdsorbateDefinition | None = None,
+    connectivity_factor: float | None = None,
 ) -> None:
     """Apply system-type-specific structural validation.
 
     When ``adsorbate_definition`` is set for a ``*_adsorbate`` system type, the
     mobile region must match ``core_symbols + adsorbate_symbols`` in order (after
     the slab prefix for surface systems).
+
+    Args:
+        atoms: The Atoms object to validate
+        system_type: The system type
+        surface_config: Surface configuration (for surface systems)
+        n_slab: Number of slab atoms (for surface systems)
+        adsorbate_definition: Adsorbate definition (for adsorbate systems)
+        connectivity_factor: Connectivity factor to use for cluster connectivity
+            validation. If None, defaults to CONNECTIVITY_FACTOR from config.
     """
     policy = get_system_policy(system_type)
     if policy.uses_surface:
@@ -227,7 +238,9 @@ def validate_structure_for_system_type(
             if not ok:
                 raise ValueError(msg)
     elif policy.has_adsorbate:
-        ok, msg = validate_combined_cluster_structure(atoms)
+        # Use the provided connectivity_factor, or default to CONNECTIVITY_FACTOR
+        cf = connectivity_factor if connectivity_factor is not None else CONNECTIVITY_FACTOR
+        ok, msg = validate_combined_cluster_structure(atoms, connectivity_factor=cf)
         if not ok:
             raise ValueError(msg)
 

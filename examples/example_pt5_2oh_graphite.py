@@ -11,6 +11,7 @@ from pathlib import Path
 
 from ase import Atoms
 
+from scgo.cluster_adsorbate.config import ClusterAdsorbateConfig
 from scgo.param_presets import get_torchsim_ga_params, get_ts_search_params
 from scgo.runner_api import run_go_ts
 from scgo.surface import make_graphite_surface_config
@@ -29,6 +30,11 @@ ADSORBATES = [
     Atoms(symbols=["O", "H"], positions=[[0.0, 0.0, 0.0], [0.0, 0.0, 0.96]]),
     Atoms(symbols=["O", "H"], positions=[[2.2, 0.0, 0.0], [2.2, 0.0, 0.96]]),
 ]
+
+# Use more lenient connectivity factor for Pt+OH systems
+CLUSTER_ADSORBATE_CONFIG = ClusterAdsorbateConfig(
+    structure_connectivity_factor=1.8,
+)
 
 
 def _build_go_params(surface_config) -> dict:
@@ -66,6 +72,7 @@ def main() -> None:
         surface_config=surface_config,
         system_type=SYSTEM_TYPE,
         adsorbates=ADSORBATES,
+        cluster_adsorbate_config=CLUSTER_ADSORBATE_CONFIG,
     )
 
 

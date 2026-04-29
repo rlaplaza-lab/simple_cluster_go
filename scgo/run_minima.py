@@ -515,6 +515,15 @@ def run_scgo_go_ts_pipeline(
     ts_kwargs_local.pop("verbosity", None)
     write_ts_json = bool(ts_kwargs_local.pop("write_timing_json", False))
 
+    # Extract connectivity_factor from cluster_adsorbate_config in go_params
+    from scgo.cluster_adsorbate.config import ClusterAdsorbateConfig
+    connectivity_factor: float | None = None
+    go_cluster_adsorbate_config = go_params.get("optimizer_params", {}).get("ga", {}).get("cluster_adsorbate_config")
+    if go_cluster_adsorbate_config is not None and isinstance(go_cluster_adsorbate_config, ClusterAdsorbateConfig):
+        connectivity_factor = go_cluster_adsorbate_config.structure_connectivity_factor
+    elif go_params.get("cluster_adsorbate_config") is not None and isinstance(go_params.get("cluster_adsorbate_config"), ClusterAdsorbateConfig):
+        connectivity_factor = go_params["cluster_adsorbate_config"].structure_connectivity_factor
+
     from scgo.ts_search import run_transition_state_search
 
     ts_results = run_transition_state_search(
@@ -523,6 +532,7 @@ def run_scgo_go_ts_pipeline(
         seed=seed,
         verbosity=verbosity,
         write_timing_json=write_ts_json,
+        connectivity_factor=connectivity_factor,
         **ts_kwargs_local,
     )
     ts_success = sum(1 for result in ts_results if result.get("status") == "success")

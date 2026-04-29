@@ -104,6 +104,7 @@ def _run_serial_neb_search(
     n_core_mobile: int | None = None,
     n_adsorbate_mobile: int | None = None,
     adsorbate_definition: Any | None = None,
+    connectivity_factor: float | None = None,
 ) -> list[dict[str, Any]]:
     """Run NEBs sequentially via :func:`find_transition_state` (one calc per pair)."""
     logger = get_logger(__name__)
@@ -140,6 +141,7 @@ def _run_serial_neb_search(
             surface_config=surface_config,
             n_slab=n_slab,
             adsorbate_definition=adsorbate_definition,
+            connectivity_factor=connectivity_factor,
         )
         validate_structure_for_system_type(
             prod_ep,
@@ -147,6 +149,7 @@ def _run_serial_neb_search(
             surface_config=surface_config,
             n_slab=n_slab,
             adsorbate_definition=adsorbate_definition,
+            connectivity_factor=connectivity_factor,
         )
 
         calculator: Any = None
@@ -343,6 +346,7 @@ def run_transition_state_search(
     system_type: SystemType | None = None,
     write_timing_json: bool = False,
     adsorbate_definition: Any | None = None,
+    connectivity_factor: float | None = None,
 ) -> list[dict[str, Any]]:
     """Run transition state search for clusters of given composition.
 
@@ -576,6 +580,7 @@ def run_transition_state_search(
             n_core_mobile=neb_n_core_m,
             n_adsorbate_mobile=neb_n_ads_m,
             adsorbate_definition=adsorbate_definition,
+            connectivity_factor=connectivity_factor,
         )
         cleanup_torch_cuda(logger=logger)
     else:
@@ -606,6 +611,7 @@ def run_transition_state_search(
             n_core_mobile=neb_n_core_m,
             n_adsorbate_mobile=neb_n_ads_m,
             adsorbate_definition=adsorbate_definition,
+            connectivity_factor=connectivity_factor,
         )
 
     ts_phase_wall = perf_counter() - t_ts0

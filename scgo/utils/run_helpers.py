@@ -147,6 +147,9 @@ def validate_algorithm_params(
             "n_slab",
             "write_timing_json",
             "detailed_timing",
+            "adsorbate_definition",
+            "adsorbate_fragment_template",
+            "cluster_adsorbate_config",
         },
         "ga": {
             "optimizer",
@@ -179,6 +182,9 @@ def validate_algorithm_params(
             "system_type",
             "write_timing_json",
             "detailed_timing",
+            "adsorbate_definition",
+            "adsorbate_fragment_template",
+            "cluster_adsorbate_config",
         },
     }
 
