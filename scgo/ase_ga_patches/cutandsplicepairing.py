@@ -151,7 +151,7 @@ class CutAndSplicePairing(OffspringCreator):
 
     def __init__(self, slab, n_top, blmin, number_of_variable_cell_vectors=0,
                  p1=1, p2=0.05, minfrac=None, cellbounds=None,
-                 test_dist_to_slab=True, use_tags=False, rng=None,
+                 test_dist_to_slab=True, use_tags=False, target_tags=None, rng=None,
                  verbose=False, system_type="gas_cluster"):
 
         rng = _ensure_rng(rng)
@@ -167,6 +167,7 @@ class CutAndSplicePairing(OffspringCreator):
         self.cellbounds = cellbounds
         self.test_dist_to_slab = test_dist_to_slab
         self.use_tags = use_tags
+        self.target_tags = target_tags
         self.last_attempt_count = 0
         self.last_cell_attempt_count = 0
         if len(self.slab) > 0 and system_type == "gas_cluster":
@@ -188,6 +189,8 @@ class CutAndSplicePairing(OffspringCreator):
         centers = []
         weights = []
         for tag in np.unique(tags):
+            if self.target_tags is not None and tag not in self.target_tags:
+                continue
             indices = np.where(tags == tag)[0]
             centers.append(np.mean(atoms.positions[indices], axis=0))
             weights.append(len(indices))
@@ -529,6 +532,8 @@ class CutAndSplicePairing(OffspringCreator):
         # Generate list of all atoms / atom groups:
         p1, p2, sym = [], [], []
         for i in np.unique(tags):
+            if self.target_tags is not None and i not in self.target_tags:
+                continue
             indices = np.where(tags == i)[0]
             s = "".join([symbols[j] for j in indices])
             sym.append(s)

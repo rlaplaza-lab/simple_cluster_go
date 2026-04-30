@@ -594,6 +594,7 @@ def create_ga_pairing(
             rng=child_rng_primary,
             system_type=resolved_system_type,
             use_tags=use_partition_tags,
+            target_tags=[0] if use_partition_tags else None,
         )
 
     expl_minfrac = (
@@ -610,6 +611,7 @@ def create_ga_pairing(
             rng=child_rng_primary,
             system_type=resolved_system_type,
             use_tags=use_partition_tags,
+            target_tags=[0] if use_partition_tags else None,
         )
 
     primary = CutAndSplicePairing(  # type: ignore[arg-type]
@@ -620,6 +622,7 @@ def create_ga_pairing(
         rng=child_rng_primary,
         system_type=resolved_system_type,
         use_tags=use_partition_tags,
+        target_tags=[0] if use_partition_tags else None,
     )
     exploratory = CutAndSplicePairing(  # type: ignore[arg-type]
         slab,
@@ -629,6 +632,7 @@ def create_ga_pairing(
         rng=create_child_rng(rng) if rng is not None else None,
         system_type=resolved_system_type,
         use_tags=use_partition_tags,
+        target_tags=[0] if use_partition_tags else None,
     )
     return DualCutAndSplicePairing(
         primary,
@@ -760,6 +764,32 @@ def create_mutation_operators(
             )
             operators.append(flattening)
             name_map["flattening"] = len(operators) - 1
+        else:
+            # For adsorbate systems, create core-only and adsorbate-only variants
+            # Core-only flattening (target core tag=0)
+            flattening_core: FlatteningMutation = FlatteningMutation(
+                blmin,
+                n_to_optimize,
+                thickness_factor=flattening_thickness_factor,
+                target_tags=[0],
+                rng=create_child_rng(rng) if rng is not None else None,  # type: ignore[arg-type]
+                max_inner_attempts=flattening_max_inner_attempts,
+                system_type=resolved_system_type,
+            )
+            operators.append(flattening_core)
+            name_map["flattening_core"] = len(operators) - 1
+            # Adsorbate-only flattening (target adsorbate tag=1)
+            flattening_ads: FlatteningMutation = FlatteningMutation(
+                blmin,
+                n_to_optimize,
+                thickness_factor=flattening_thickness_factor,
+                target_tags=[1],
+                rng=create_child_rng(rng) if rng is not None else None,  # type: ignore[arg-type]
+                max_inner_attempts=flattening_max_inner_attempts,
+                system_type=resolved_system_type,
+            )
+            operators.append(flattening_ads)
+            name_map["flattening_ads"] = len(operators) - 1
 
         rotational: RotationalMutation = RotationalMutation(
             blmin,
@@ -807,6 +837,34 @@ def create_mutation_operators(
             )
             operators.append(breathing)
             name_map["breathing"] = len(operators) - 1
+        else:
+            # For adsorbate systems, create core-only and adsorbate-only variants
+            # Core-only breathing (target core tag=0)
+            breathing_core: BreathingMutation = BreathingMutation(
+                blmin,
+                n_to_optimize,
+                scale_min=1.0 - (1.0 - breathing_scale_min) * move_scale,
+                scale_max=1.0 + (breathing_scale_max - 1.0) * move_scale,
+                target_tags=[0],
+                system_type=resolved_system_type,
+                rng=create_child_rng(rng) if rng is not None else None,  # type: ignore[arg-type]
+                max_inner_attempts=breathing_max_inner_attempts,
+            )
+            operators.append(breathing_core)
+            name_map["breathing_core"] = len(operators) - 1
+            # Adsorbate-only breathing (target adsorbate tag=1)
+            breathing_ads: BreathingMutation = BreathingMutation(
+                blmin,
+                n_to_optimize,
+                scale_min=1.0 - (1.0 - breathing_scale_min) * move_scale,
+                scale_max=1.0 + (breathing_scale_max - 1.0) * move_scale,
+                target_tags=[1],
+                system_type=resolved_system_type,
+                rng=create_child_rng(rng) if rng is not None else None,  # type: ignore[arg-type]
+                max_inner_attempts=breathing_max_inner_attempts,
+            )
+            operators.append(breathing_ads)
+            name_map["breathing_ads"] = len(operators) - 1
 
         if uses_surface(resolved_system_type) and n_slab > 0:
             slide: InPlaneSlideMutation = InPlaneSlideMutation(
@@ -819,6 +877,31 @@ def create_mutation_operators(
             )
             operators.append(slide)
             name_map["in_plane_slide"] = len(operators) - 1
+            # For adsorbate systems, create core-only and adsorbate-only variants
+            # Core-only in-plane slide (target core tag=0)
+            slide_core: InPlaneSlideMutation = InPlaneSlideMutation(
+                blmin,
+                n_to_optimize,
+                surface_normal_axis=surface_normal_axis,
+                target_tags=[0],
+                system_type=resolved_system_type,
+                rng=create_child_rng(rng) if rng is not None else None,  # type: ignore[arg-type]
+                max_inner_attempts=in_plane_slide_max_inner_attempts,
+            )
+            operators.append(slide_core)
+            name_map["in_plane_slide_core"] = len(operators) - 1
+            # Adsorbate-only in-plane slide (target adsorbate tag=1)
+            slide_ads: InPlaneSlideMutation = InPlaneSlideMutation(
+                blmin,
+                n_to_optimize,
+                surface_normal_axis=surface_normal_axis,
+                target_tags=[1],
+                system_type=resolved_system_type,
+                rng=create_child_rng(rng) if rng is not None else None,  # type: ignore[arg-type]
+                max_inner_attempts=in_plane_slide_max_inner_attempts,
+            )
+            operators.append(slide_ads)
+            name_map["in_plane_slide_ads"] = len(operators) - 1
 
     return operators, name_map
 

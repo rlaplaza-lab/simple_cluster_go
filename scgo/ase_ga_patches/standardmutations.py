@@ -69,7 +69,7 @@ class RattleMutation(OffspringCreator):
 
     def __init__(self, blmin, n_top, system_type: SystemType, rattle_strength=0.8,
                  rattle_prop=0.4, test_dist_to_slab=True, use_tags=False,
-                 verbose=False, rng=None):
+                 target_tags=None, verbose=False, rng=None):
         rng = _ensure_rng(rng)
         OffspringCreator.__init__(self, verbose, rng=rng)
         self.blmin = blmin
@@ -78,6 +78,7 @@ class RattleMutation(OffspringCreator):
         self.rattle_prop = rattle_prop
         self.test_dist_to_slab = test_dist_to_slab
         self.use_tags = use_tags
+        self.target_tags = target_tags
         self.system_type = system_type
         self._policy = get_system_policy(system_type)
 
@@ -125,10 +126,17 @@ class RattleMutation(OffspringCreator):
         pbc = atoms.get_pbc()
         st = 2. * self.rattle_strength
 
+        # Determine which tags to target
+        unique_tags = np.unique(tags)
+        if self.target_tags is not None:
+            target_tags_set = set(self.target_tags)
+            unique_tags = np.array([t for t in unique_tags if t in target_tags_set])
+            if len(unique_tags) == 0:
+                return None
+
         count = 0
         maxcount = 1000
         too_close = True
-        unique_tags = np.unique(tags)
         while too_close and count < maxcount:
             count += 1
             pos = pos_ref.copy()
@@ -175,6 +183,7 @@ class AnisotropicRattleMutation(OffspringCreator):
         rattle_prop=0.5,
         test_dist_to_slab=True,
         use_tags=False,
+        target_tags=None,
         rng=None,
         verbose=False,
     ):
@@ -187,6 +196,7 @@ class AnisotropicRattleMutation(OffspringCreator):
         self.rattle_prop = rattle_prop
         self.test_dist_to_slab = test_dist_to_slab
         self.use_tags = use_tags
+        self.target_tags = target_tags
         self.system_type = system_type
         self._policy = get_system_policy(system_type)
 
@@ -214,6 +224,14 @@ class AnisotropicRattleMutation(OffspringCreator):
         num = atoms.get_atomic_numbers()
         cell = atoms.get_cell()
         pbc = atoms.get_pbc()
+
+        # Determine which tags to target
+        unique_tags = np.unique(tags)
+        if self.target_tags is not None:
+            target_tags_set = set(self.target_tags)
+            unique_tags = np.array([t for t in unique_tags if t in target_tags_set])
+            if len(unique_tags) == 0:
+                return None
 
         count = 0
         maxcount = 1000
@@ -245,7 +263,7 @@ class AnisotropicRattleMutation(OffspringCreator):
             v = v / np.linalg.norm(v)
 
             # Guarantee at least one tag is moved, then sample the rest.
-            unique_tags_local = np.unique(tags)
+            unique_tags_local = unique_tags
             guaranteed = self.rng.integers(len(unique_tags_local))
             for idx, tag in enumerate(unique_tags_local):
                 if idx == guaranteed or self.rng.random() < self.rattle_prop:
@@ -434,13 +452,14 @@ class PermutationMutation(OffspringCreator):
     """
 
     def __init__(self, n_top, system_type: SystemType, probability=0.33, test_dist_to_slab=True,
-                 use_tags=False, blmin=None, rng=None, verbose=False):
+                 use_tags=False, target_tags=None, blmin=None, rng=None, verbose=False):
         rng = _ensure_rng(rng)
         OffspringCreator.__init__(self, verbose, rng=rng)
         self.n_top = n_top
         self.probability = probability
         self.test_dist_to_slab = test_dist_to_slab
         self.use_tags = use_tags
+        self.target_tags = target_tags
         self.blmin = blmin
         self.system_type = system_type
         self._policy = get_system_policy(system_type)
@@ -474,7 +493,14 @@ class PermutationMutation(OffspringCreator):
         pbc = atoms.get_pbc()
         symbols = atoms.get_chemical_symbols()
 
+        # Determine which tags to target
         unique_tags = np.unique(tags)
+        if self.target_tags is not None:
+            target_tags_set = set(self.target_tags)
+            unique_tags = np.array([t for t in unique_tags if t in target_tags_set])
+            if len(unique_tags) == 0:
+                return None
+
         n = len(unique_tags)
         swaps = int(np.ceil(n * self.probability / 2.))
 
@@ -489,7 +515,7 @@ class PermutationMutation(OffspringCreator):
             return None
 
         # Pre-compute valid swap pairs: indices (i, j) where sym[i] != sym[j].
-        valid_pairs = [(i, j) for i in range(n) for j in range(i + 1, n)
+        valid_pairs = [(i, j) for i in range(len(unique_tags)) for j in range(i + 1, len(unique_tags))
                        if sym[i] != sym[j]]
 
         count = 0
@@ -569,6 +595,7 @@ class ShellSwapMutation(OffspringCreator):
         outer_fraction=0.33,
         test_dist_to_slab=True,
         use_tags=False,
+        target_tags=None,
         blmin=None,
         max_pair_trials=12,
         rng=None,
@@ -581,6 +608,7 @@ class ShellSwapMutation(OffspringCreator):
         self.outer_fraction = outer_fraction
         self.test_dist_to_slab = test_dist_to_slab
         self.use_tags = use_tags
+        self.target_tags = target_tags
         self.blmin = blmin
         self.max_pair_trials = max_pair_trials
         self.system_type = system_type
@@ -615,6 +643,13 @@ class ShellSwapMutation(OffspringCreator):
         cell = top.get_cell()
         pbc = top.get_pbc()
         unique_tags = np.unique(tags)
+
+        # Determine which tags to target
+        if self.target_tags is not None:
+            target_tags_set = set(self.target_tags)
+            unique_tags = np.array([t for t in unique_tags if t in target_tags_set])
+            if len(unique_tags) == 0:
+                return None
 
         group_indices = []
         group_symbols = []
@@ -717,13 +752,14 @@ class MirrorMutation(OffspringCreator):
     """
 
     def __init__(self, blmin, n_top, system_type: SystemType, reflect=True,
-                 rng=None, verbose=False, max_tries=1000):
+                 target_tags=None, rng=None, verbose=False, max_tries=1000):
         rng = _ensure_rng(rng)
         OffspringCreator.__init__(self, verbose, rng=rng)
         self.blmin = blmin
         self.n_top = n_top
         self.max_tries = max_tries
         self.reflect = reflect
+        self.target_tags = target_tags
         self.system_type = system_type
         self._policy = get_system_policy(system_type)
 
@@ -754,6 +790,15 @@ class MirrorMutation(OffspringCreator):
         n_tries = self.max_tries
         counter = 0
         changed = False
+
+        # Determine which tags to target (if use_tags is enabled)
+        tags = top.get_tags() if hasattr(top, 'get_tags') else np.arange(len(top))
+        unique_tags = np.unique(tags)
+        if self.target_tags is not None:
+            target_tags_set = set(self.target_tags)
+            unique_tags = np.array([t for t in unique_tags if t in target_tags_set])
+            if len(unique_tags) == 0:
+                return None
 
         while tc and counter < n_tries:
             counter += 1
@@ -891,7 +936,7 @@ class RotationalMutation(OffspringCreator):
     """
 
     def __init__(self, blmin, system_type: SystemType, n_top=None, fraction=0.33, tags=None,
-                 min_angle=1.57, test_dist_to_slab=True,
+                 min_angle=1.57, test_dist_to_slab=True, target_tags=None,
                  rng=None, verbose=False, max_inner_attempts=10000):
         rng = _ensure_rng(rng)
         OffspringCreator.__init__(self, verbose, rng=rng)
@@ -901,6 +946,7 @@ class RotationalMutation(OffspringCreator):
         self.tags = tags
         self.min_angle = min_angle
         self.test_dist_to_slab = test_dist_to_slab
+        self.target_tags = target_tags
         self.system_type = system_type
         self._policy = get_system_policy(system_type)
         self.max_inner_attempts = max_inner_attempts
@@ -929,17 +975,31 @@ class RotationalMutation(OffspringCreator):
         gather_atoms_by_tag(mutant)
         pos = mutant.get_positions()
         tags = mutant.get_tags()
-        eligible_tags = tags if self.tags is None else self.tags
+
+        # Determine which tags to target
+        unique_tags = np.unique(tags)
+        if self.target_tags is not None:
+            target_tags_set = set(self.target_tags)
+            unique_tags = np.array([t for t in unique_tags if t in target_tags_set])
+            if len(unique_tags) == 0:
+                return None
+
+        eligible_tags = self.tags if self.tags is not None else unique_tags
+        # Filter eligible_tags to only include tags we're targeting
+        eligible_tags = [t for t in eligible_tags if t in unique_tags]
 
         indices = {}
-        for tag in np.unique(tags):
+        for tag in eligible_tags:
             hits = np.where(tags == tag)[0]
-            if len(hits) > 1 and tag in eligible_tags:
+            if len(hits) > 1:
                 indices[tag] = hits
 
         n_rot = int(np.ceil(len(indices) * self.fraction))
-        chosen_tags = self.rng.choice(list(indices.keys()), size=n_rot,
-                                      replace=False)
+        if n_rot > 0 and len(indices) > 0:
+            chosen_tags = self.rng.choice(list(indices.keys()), size=min(n_rot, len(indices)),
+                                          replace=False)
+        else:
+            chosen_tags = []
 
         too_close = True
         count = 0
@@ -1015,7 +1075,7 @@ class FlatteningMutation(OffspringCreator):
     """
 
     def __init__(self, blmin, n_top, system_type: SystemType, thickness_factor=0.5,
-                 test_dist_to_slab=True, rng=None, verbose=False,
+                 test_dist_to_slab=True, target_tags=None, rng=None, verbose=False,
                  max_inner_attempts=5000):
         rng = _ensure_rng(rng)
         OffspringCreator.__init__(self, verbose, rng=rng)
@@ -1023,6 +1083,7 @@ class FlatteningMutation(OffspringCreator):
         self.n_top = n_top
         self.thickness_factor = thickness_factor
         self.test_dist_to_slab = test_dist_to_slab
+        self.target_tags = target_tags
         self.max_inner_attempts = max_inner_attempts
         self.system_type = system_type
         self._policy = get_system_policy(system_type)
@@ -1191,7 +1252,16 @@ class FlatteningMutation(OffspringCreator):
         mutant = top.copy()
         pos = mutant.get_positions()
         atomic_numbers = mutant.get_atomic_numbers()
+        tags = mutant.get_tags() if hasattr(mutant, 'get_tags') else np.arange(N)
         cm = np.average(pos, axis=0)
+
+        # Determine which tags to target
+        unique_tags = np.unique(tags)
+        if self.target_tags is not None:
+            target_tags_set = set(self.target_tags)
+            unique_tags = np.array([t for t in unique_tags if t in target_tags_set])
+            if len(unique_tags) == 0:
+                return None
 
         avg_blmin = np.mean(list(self.blmin.values()))
         desired_thickness = max(0.05 * avg_blmin, avg_blmin * self.thickness_factor)
@@ -1255,7 +1325,7 @@ class BreathingMutation(OffspringCreator):
     """
 
     def __init__(self, blmin, n_top, system_type: SystemType, scale_min=0.9, scale_max=1.1,
-                 test_dist_to_slab=True, rng=None, verbose=False,
+                 test_dist_to_slab=True, target_tags=None, rng=None, verbose=False,
                  max_inner_attempts=1000):
         rng = _ensure_rng(rng)
         OffspringCreator.__init__(self, verbose, rng=rng)
@@ -1264,6 +1334,7 @@ class BreathingMutation(OffspringCreator):
         self.scale_min = scale_min
         self.scale_max = scale_max
         self.test_dist_to_slab = test_dist_to_slab
+        self.target_tags = target_tags
         self.system_type = system_type
         self._policy = get_system_policy(system_type)
         self.max_inner_attempts = max_inner_attempts
@@ -1407,7 +1478,7 @@ class InPlaneSlideMutation(OffspringCreator):
     """
 
     def __init__(self, blmin, n_top, system_type: SystemType, surface_normal_axis=2,
-                 max_displacement=2.0, rng=None, verbose=False,
+                 max_displacement=2.0, target_tags=None, rng=None, verbose=False,
                  max_inner_attempts=1000):
         rng = _ensure_rng(rng)
         OffspringCreator.__init__(self, verbose, rng=rng)
@@ -1415,10 +1486,12 @@ class InPlaneSlideMutation(OffspringCreator):
         self.n_top = n_top
         self.surface_normal_axis = surface_normal_axis
         self.max_displacement = max_displacement
+        self.target_tags = target_tags
         self.system_type = system_type
         self._policy = get_system_policy(system_type)
         self.max_inner_attempts = max_inner_attempts
         self.last_attempt_count = 0
+        self.test_dist_to_slab = True
         self.descriptor = "InPlaneSlideMutation"
         self.min_inputs = 1
 
@@ -1511,23 +1584,38 @@ class InPlaneSlideMutation(OffspringCreator):
         N = len(atoms) if self.n_top is None else self.n_top
         slab = atoms[:len(atoms) - N]
         top = atoms[-N:]
-        pos = top.get_positions().copy()
+        pos = top.get_positions()
         num = top.get_atomic_numbers()
         cell = top.get_cell()
         pbc = top.get_pbc()
+        tags = top.get_tags() if hasattr(top, 'get_tags') else np.arange(N)
 
+        # Determine which tags to target
+        unique_tags = np.unique(tags)
+        if self.target_tags is not None:
+            target_tags_set = set(self.target_tags)
+            unique_tags = np.array([t for t in unique_tags if t in target_tags_set])
+            if len(unique_tags) == 0:
+                return None
+
+        # Filter positions to only include targeted tags
+        mask = np.isin(tags, unique_tags)
+        if not np.any(mask):
+            return None
+
+        # Determine in-plane axes (excluding surface normal)
         in_plane = [i for i in range(3) if i != self.surface_normal_axis]
 
         self.last_attempt_count = 0
-        for shift in self._candidate_shift_vectors(slab, pos, in_plane):
+        for shift in self._candidate_shift_vectors(slab, pos[mask], in_plane):
             self.last_attempt_count += 1
             new_pos = pos.copy()
-            new_pos += shift
+            new_pos[mask] += shift
             cand = Atoms(num, positions=new_pos, cell=cell, pbc=pbc)
             if atoms_too_close(cand, self.blmin):
                 continue
-            if len(slab) > 0 and atoms_too_close_two_sets(slab, cand, self.blmin):
-                    continue
+            if self.test_dist_to_slab and len(slab) > 0 and atoms_too_close_two_sets(slab, cand, self.blmin):
+                continue
             return slab + cand
         return None
 
