@@ -265,6 +265,7 @@ def test_run_py_smoke(tmp_path):
     comp = ["Pt", "Pt"]
     results = run_scgo_trials(
         comp,
+        "gas_cluster",
         params=get_testing_params(),
         seed=0,
         output_dir=str(tmp_path / "campaign"),

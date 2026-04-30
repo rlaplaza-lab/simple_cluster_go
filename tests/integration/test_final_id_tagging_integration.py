@@ -12,7 +12,12 @@ def test_main_writes_final_id_and_db_contains_it(tmp_path):
     params["n_trials"] = 1
 
     results = run_scgo_trials(
-        ["Pt", "Pt"], params=params, seed=42, output_dir=str(tmp_path), verbosity=0
+        ["Pt", "Pt"],
+        "gas_cluster",
+        params=params,
+        seed=42,
+        output_dir=str(tmp_path),
+        verbosity=0,
     )
     assert len(results) > 0
 

@@ -136,8 +136,12 @@ def test_rattle_mutation_deterministic_and_accepts_generator(pt3_atoms, rng):
     pt = 78
     blmin = {(pt, pt): 0.1}
 
-    mut1 = RattleMutation(blmin=blmin, n_top=3, rattle_strength=0.1, rng=rng1)
-    mut2 = RattleMutation(blmin=blmin, n_top=3, rattle_strength=0.1, rng=rng2)
+    mut1 = RattleMutation(
+        blmin=blmin, n_top=3, system_type="gas_cluster", rattle_strength=0.1, rng=rng1
+    )
+    mut2 = RattleMutation(
+        blmin=blmin, n_top=3, system_type="gas_cluster", rattle_strength=0.1, rng=rng2
+    )
 
     a = pt3_atoms.copy()
     m1 = mut1.mutate(a)
@@ -152,10 +156,14 @@ def test_mutation_constructors_reject_legacy_randomstate():
     import numpy as _np
 
     with pytest.raises(TypeError):
-        RattleMutation(blmin={}, n_top=2, rng=_np.random.RandomState(1))
+        RattleMutation(
+            blmin={}, n_top=2, system_type="gas_cluster", rng=_np.random.RandomState(1)
+        )
 
     with pytest.raises(TypeError):
-        CustomPermutationMutation(n_top=2, rng=_np.random.RandomState(1))
+        CustomPermutationMutation(
+            n_top=2, system_type="gas_cluster", rng=_np.random.RandomState(1)
+        )
 
 
 def test_ga_go_rejects_legacy_randomstate():

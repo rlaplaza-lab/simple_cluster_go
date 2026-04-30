@@ -315,6 +315,7 @@ def _apply_surface_ts_geometry_gate(
 
 def run_transition_state_search(
     composition: list[str],
+    system_type: SystemType,
     output_dir: str | Path | None = None,
     params: dict | None = None,
     seed: int | None = None,
@@ -343,7 +344,6 @@ def run_transition_state_search(
     tag_ts_in_db: bool = True,
     ts_energy_tolerance: float = DEFAULT_ENERGY_TOLERANCE,
     surface_config: SurfaceSystemConfig | None = None,
-    system_type: SystemType | None = None,
     write_timing_json: bool = False,
     adsorbate_definition: Any | None = None,
     connectivity_factor: float | None = None,
@@ -397,21 +397,11 @@ def run_transition_state_search(
     cleanup_torch_cuda(logger=logger)
 
     validate_composition(composition, allow_empty=False)
-    if isinstance(system_type, str):
-        resolved_system_type: SystemType = (
-            "surface_cluster"
-            if surface_config is not None and system_type == "gas_cluster"
-            else system_type
-        )
-    else:
-        resolved_system_type = (
-            "surface_cluster" if surface_config is not None else "gas_cluster"
-        )
     validate_system_type_settings(
-        system_type=resolved_system_type,
+        system_type=system_type,
         surface_config=surface_config,
     )
-    system_policy = get_system_policy(resolved_system_type)
+    system_policy = get_system_policy(system_type)
     adsorbate_composition = list(composition)
     if system_policy.uses_surface:
         composition = full_adsorbate_slab_composition(
@@ -489,7 +479,7 @@ def run_transition_state_search(
         torchsim_params["max_steps"] = auto_niter_ts(composition)
 
     run_context: dict[str, Any] = {
-        "system_type": resolved_system_type,
+        "system_type": system_type,
         "calculator_name": calculator_name,
         "neb_fmax": neb_fmax,
         "neb_steps_resolved": int(neb_steps)
@@ -533,7 +523,7 @@ def run_transition_state_search(
 
     if verbosity >= 1:
         logger.info(f"Found {len(minima)} minima for {formula}")
-    _warn_on_surface_mobile_indices(minima, system_type=resolved_system_type)
+    _warn_on_surface_mobile_indices(minima, system_type=system_type)
 
     pairs = select_structure_pairs(
         minima,
@@ -575,7 +565,7 @@ def run_transition_state_search(
             neb_interpolation_mic=neb_interpolation_mic,
             neb_tangent_method=neb_tangent_method,
             torchsim_params=torchsim_params,
-            system_type=resolved_system_type,
+            system_type=system_type,
             n_slab=neb_n_slab,
             n_core_mobile=neb_n_core_m,
             n_adsorbate_mobile=neb_n_ads_m,
@@ -605,7 +595,7 @@ def run_transition_state_search(
             neb_interpolation_mic=neb_interpolation_mic,
             neb_tangent_method=neb_tangent_method,
             verbosity=verbosity,
-            system_type=resolved_system_type,
+            system_type=system_type,
             write_timing_json=write_timing_json,
             n_slab=neb_n_slab,
             n_core_mobile=neb_n_core_m,
@@ -648,7 +638,7 @@ def run_transition_state_search(
     _apply_surface_ts_geometry_gate(
         ts_results,
         surface_config=surface_config,
-        system_type=resolved_system_type,
+        system_type=system_type,
     )
 
     save_transition_state_results(
@@ -778,6 +768,7 @@ def integrate_ts_to_database(
 
 def run_transition_state_campaign(
     compositions: list[list[str]],
+    system_type: SystemType,
     output_dir: str | Path | None = None,
     params: dict | None = None,
     seed: int | None = None,
@@ -814,6 +805,7 @@ def run_transition_state_campaign(
             params=params,
             seed=seed,
             verbosity=verbosity,
+            system_type=system_type,
             **ts_kwargs,
         )
 

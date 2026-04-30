@@ -440,6 +440,7 @@ def run_go(
     t0 = perf_counter()
     minima = run_scgo_trials(
         comp,
+        st,
         params=eff_params,
         seed=eff_seed,
         verbosity=verbosity,
@@ -515,6 +516,7 @@ def run_go_campaign(
     t0 = perf_counter()
     campaign = run_scgo_campaign_arbitrary_compositions(
         full_compositions,
+        st,
         params=eff_params,
         seed=eff_seed,
         verbosity=verbosity,
@@ -599,6 +601,7 @@ def run_go_ts(
     t0 = perf_counter()
     summary = run_scgo_go_ts_pipeline(
         comp,
+        st,
         go_params=go_local,
         ts_kwargs=ts_kwargs,
         seed=eff_seed,
@@ -691,6 +694,7 @@ def run_go_ts_campaign(
         formula = get_cluster_formula(comp)
         out[formula] = run_scgo_go_ts_pipeline(
             comp,
+            st,
             go_params=go_local,
             ts_kwargs=ts_kwargs,
             seed=eff_seed,
@@ -735,6 +739,7 @@ def run_ts_search(
     merged = _coerce_ts_for_runner(
         ts_mat, fn_name="run_ts_search", system_type=st, surface_config=surface_config
     )
+    merged.pop("system_type", None)  # passed explicitly below
     if params is not None:
         merged["params"] = params
     out_path = _resolved_path(output_dir)
@@ -745,6 +750,7 @@ def run_ts_search(
         seed=eff_seed,
         verbosity=verbosity,
         adsorbate_definition=ads_def,
+        system_type=st,
         **merged,
     )
     if log_summary:
@@ -778,6 +784,7 @@ def run_ts_campaign(
     ts_kwargs = _coerce_ts_for_runner(
         ts_mat, fn_name="run_ts_campaign", system_type=st, surface_config=surface_config
     )
+    ts_kwargs.pop("system_type", None)  # passed as positional arg below
 
     full_compositions: list[list[str]] = []
     ads_def: AdsorbateDefinition | None = None
@@ -801,6 +808,7 @@ def run_ts_campaign(
         ts_kwargs["adsorbate_definition"] = ads_def
     campaign = _ts_campaign(
         full_compositions,
+        st,
         output_dir=out_path,
         params=params,
         seed=eff_seed,

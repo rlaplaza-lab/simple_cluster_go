@@ -14,7 +14,12 @@ def test_run_scgo_tags_final_minima(tmp_path):
     params["n_trials"] = 1
     # Run a trivial Pt2 search that completes quickly
     results = run_scgo_trials(
-        ["Pt", "Pt"], params=params, seed=42, output_dir=str(tmp_path), verbosity=0
+        ["Pt", "Pt"],
+        "gas_cluster",
+        params=params,
+        seed=42,
+        output_dir=str(tmp_path),
+        verbosity=0,
     )
     assert len(results) > 0
 

@@ -313,6 +313,7 @@ def test_run_scgo_trials_integration(tmp_path):
     # Use clean=True and output_dir for isolation
     results = run_scgo_trials(
         comp,
+        "gas_cluster",
         params=params,
         seed=999,
         clean=True,
@@ -338,10 +339,20 @@ def test_run_scgo_trials_deterministic_with_same_seed(tmp_path):
 
     # Use clean=True and output_dir for isolation; same dir for both runs
     results1 = run_scgo_trials(
-        comp, params=deepcopy(params), seed=1234, clean=True, output_dir=out
+        comp,
+        "gas_cluster",
+        params=deepcopy(params),
+        seed=1234,
+        clean=True,
+        output_dir=out,
     )
     results2 = run_scgo_trials(
-        comp, params=deepcopy(params), seed=1234, clean=True, output_dir=out
+        comp,
+        "gas_cluster",
+        params=deepcopy(params),
+        seed=1234,
+        clean=True,
+        output_dir=out,
     )
 
     assert len(results1) == len(results2)
@@ -405,6 +416,7 @@ def test_bh_high_energy_strategy(tmp_path, rng):
 
     results = run_scgo_trials(
         composition,
+        "gas_cluster",
         params=params,
         seed=42,
         verbosity=1,
@@ -450,6 +462,7 @@ def test_ga_diversity_strategy(tmp_path, rng):
 
     ref_results = run_scgo_trials(
         comp_ref,
+        "gas_cluster",
         params=params_ref,
         seed=42,
         clean=True,
@@ -469,6 +482,7 @@ def test_ga_diversity_strategy(tmp_path, rng):
 
     results = run_scgo_trials(
         composition,
+        "gas_cluster",
         params=params_div,
         seed=43,
         verbosity=1,
@@ -508,6 +522,7 @@ def test_mixed_fitness_strategies(tmp_path, rng):
 
     ref_results = run_scgo_trials(
         composition,
+        "gas_cluster",
         params=params_ref,
         seed=41,
         clean=True,
@@ -531,6 +546,7 @@ def test_mixed_fitness_strategies(tmp_path, rng):
     # Should work without errors
     results = run_scgo_trials(
         composition,
+        "gas_cluster",
         params=params,
         seed=42,
         verbosity=1,

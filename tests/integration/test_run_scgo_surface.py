@@ -51,6 +51,7 @@ def test_run_scgo_trials_passes_surface_config_when_ga_selected(
 
     minima = run_scgo_trials(
         composition=composition,
+        system_type="surface_cluster_adsorbate",
         params=params,
         seed=42,
         verbosity=0,

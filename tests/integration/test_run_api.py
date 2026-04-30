@@ -86,42 +86,42 @@ def test_parse_composition_arg_formats():
     [
         pytest.param(
             run_scgo_campaign_one_element,
-            ("", 2, 4),
+            ("", 2, 4, "gas_cluster"),
             id="one_element_empty_symbol",
         ),
         pytest.param(
             run_scgo_campaign_one_element,
-            ("Pt", 0, 3),
+            ("Pt", 0, 3, "gas_cluster"),
             id="one_element_min_atoms_zero",
         ),
         pytest.param(
             run_scgo_campaign_one_element,
-            ("Pt", 5, 3),
+            ("Pt", 5, 3, "gas_cluster"),
             id="one_element_min_gt_max",
         ),
         pytest.param(
             run_scgo_campaign_two_elements,
-            ("", "Pt", 2, 4),
+            ("", "Pt", 2, 4, "gas_cluster"),
             id="two_elements_empty_first_symbol",
         ),
         pytest.param(
             run_scgo_campaign_two_elements,
-            ("Pt", "", 2, 4),
+            ("Pt", "", 2, 4, "gas_cluster"),
             id="two_elements_empty_second_symbol",
         ),
         pytest.param(
             run_scgo_campaign_two_elements,
-            ("Pt", "Au", 0, 3),
+            ("Pt", "Au", 0, 3, "gas_cluster"),
             id="two_elements_min_atoms_zero",
         ),
         pytest.param(
             run_scgo_campaign_two_elements,
-            ("Pt", "Au", 5, 3),
+            ("Pt", "Au", 5, 3, "gas_cluster"),
             id="two_elements_min_gt_max",
         ),
         pytest.param(
             run_scgo_campaign_arbitrary_compositions,
-            ([],),
+            ([], "gas_cluster"),
             id="arbitrary_compositions_empty",
         ),
     ],
@@ -138,7 +138,7 @@ def test_rng_in_optimizer_params_raises():
     params["optimizer_params"]["ga"]["rng"] = "not-allowed"
 
     with pytest.raises(ValueError):
-        run_scgo_trials(["Pt"] * 4, params=params)
+        run_scgo_trials(["Pt"] * 4, "gas_cluster", params=params)
 
 
 def test_scgo_validations(rng):
@@ -204,8 +204,8 @@ def test_seed_in_params_respected():
     comp = ["Pt", "Pt"]  # Pt2 small test
 
     # Run twice with same params (no explicit seed argument) -> results deterministic
-    res1 = run_scgo_trials(comp, params=params, verbosity=0)
-    res2 = run_scgo_trials(comp, params=params, verbosity=0)
+    res1 = run_scgo_trials(comp, "gas_cluster", params=params, verbosity=0)
+    res2 = run_scgo_trials(comp, "gas_cluster", params=params, verbosity=0)
 
     # Compare basic properties - energies should be very close and compositions identical
     assert len(res1) == len(res2)
@@ -223,8 +223,12 @@ def test_campaign_respects_params_seed():
     params["seed"] = 54321
 
     # Run a tiny campaign (Pt2 only) twice and ensure deterministic results
-    res_a = run_scgo_campaign_one_element("Pt", 2, 2, params=params, verbosity=0)
-    res_b = run_scgo_campaign_one_element("Pt", 2, 2, params=params, verbosity=0)
+    res_a = run_scgo_campaign_one_element(
+        "Pt", 2, 2, "gas_cluster", params=params, verbosity=0
+    )
+    res_b = run_scgo_campaign_one_element(
+        "Pt", 2, 2, "gas_cluster", params=params, verbosity=0
+    )
 
     assert res_a == res_b
 
@@ -263,6 +267,7 @@ def test_run_scgo_one_element_go_ts_pipeline_smoke(monkeypatch, tmp_path):
     summary = run_scgo_one_element_go_ts_pipeline(
         "Pt",
         5,
+        "gas_cluster",
         go_params=get_testing_params(),
         ts_kwargs=coerce_ts_params_to_runner_kwargs(flat_ts, system_type="gas_cluster"),
         seed=42,
@@ -564,7 +569,7 @@ def test_run_ts_search_requires_ts_dict():
 def test_run_ts_campaign_normalizes_items(monkeypatch):
     captured: list[list[str]] = []
 
-    def _fake(compositions, **kwargs):
+    def _fake(compositions, system_type, **kwargs):
         captured.extend(compositions)
         return {}
 
@@ -607,7 +612,7 @@ def test_run_ts_campaign_requires_system_type():
 def test_run_go_ts_campaign_paths(monkeypatch, tmp_path):
     calls: list[tuple[list[str], object]] = []
 
-    def _fake_pipeline(composition, **kwargs):
+    def _fake_pipeline(composition, system_type, **kwargs):
         calls.append((list(composition), kwargs.get("output_dir")))
         return {"formula": "x", "ts_total_count": 0}
 
@@ -632,7 +637,7 @@ def test_run_go_ts_campaign_paths(monkeypatch, tmp_path):
 def test_run_go_ts_wires_profile_toggle(monkeypatch):
     captured: dict[str, object] = {}
 
-    def _fake_pipeline(composition, **kwargs):
+    def _fake_pipeline(composition, system_type, **kwargs):
         captured["go_params"] = kwargs["go_params"]
         return {"ts_results": []}
 
@@ -654,7 +659,7 @@ def test_run_go_ts_campaign_no_output_dir(
 ):
     calls: list[object] = []
 
-    def _fake_pipeline(composition, **kwargs):
+    def _fake_pipeline(composition, system_type, **kwargs):
         calls.append(kwargs.get("output_dir"))
         return {}
 
@@ -710,7 +715,7 @@ def test_run_go_ts_requires_ts_dict():
 def test_run_go_ts_uses_default_go_and_ts_presets_when_missing(monkeypatch):
     captured: dict[str, object] = {}
 
-    def _fake_pipeline(composition, **kwargs):
+    def _fake_pipeline(composition, system_type, **kwargs):
         captured["go_params"] = kwargs["go_params"]
         captured["ts_kwargs"] = kwargs["ts_kwargs"]
         return {"ts_results": []}
@@ -733,7 +738,7 @@ def test_run_go_ts_uses_default_go_and_ts_presets_when_missing(monkeypatch):
 def test_run_go_ts_default_presets_match_builders_for_key_fields(monkeypatch):
     captured: dict[str, object] = {}
 
-    def _fake_pipeline(composition, **kwargs):
+    def _fake_pipeline(composition, system_type, **kwargs):
         captured["go_params"] = kwargs["go_params"]
         captured["ts_kwargs"] = kwargs["ts_kwargs"]
         return {"ts_results": []}

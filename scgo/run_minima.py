@@ -51,28 +51,9 @@ def _select_algorithm(n_atoms: int, system_type: SystemType, logger: Any) -> str
     return chosen
 
 
-def _resolve_explicit_system_type(params: dict[str, Any]) -> SystemType:
-    candidates = []
-    for algo in ("simple", "bh", "ga"):
-        value = params.get("optimizer_params", {}).get(algo, {}).get("system_type")
-        if isinstance(value, str):
-            candidates.append(value)
-    if not candidates:
-        any_surface_config = any(
-            params.get("optimizer_params", {}).get(algo, {}).get("surface_config")
-            is not None
-            for algo in ("simple", "bh", "ga")
-        )
-        return "surface_cluster" if any_surface_config else "gas_cluster"
-    if len(set(candidates)) != 1:
-        raise ValueError(
-            "All optimizer_params system_type values must match exactly for one run."
-        )
-    return candidates[0]
-
-
 def run_scgo_trials(
     composition: list[str],
+    system_type: SystemType,
     params: dict | None = None,
     seed: int | None = None,
     verbosity: int = 1,
@@ -122,8 +103,7 @@ def run_scgo_trials(
     )
 
     # Algorithm selection: Use simple optimization for 1-2 atoms, BH for 3, GA for larger
-    resolved_system_type = _resolve_explicit_system_type(params)
-    chosen_go = _select_algorithm(n_atoms, resolved_system_type, logger)
+    chosen_go = _select_algorithm(n_atoms, system_type, logger)
 
     # Extract algorithm-specific parameters without mutation
     algo_params = params["optimizer_params"].get(chosen_go, {})
@@ -255,6 +235,7 @@ def run_scgo_campaign_one_element(
     element: str,
     min_atoms: int,
     max_atoms: int,
+    system_type: SystemType,
     params: dict | None = None,
     seed: int | None = None,
     verbosity: int = 1,
@@ -284,6 +265,7 @@ def run_scgo_campaign_one_element(
 
     return run_scgo_campaign_arbitrary_compositions(
         all_compositions,
+        system_type,
         params,
         seed=seed,
         verbosity=verbosity,
@@ -298,6 +280,7 @@ def run_scgo_campaign_two_elements(
     element2: str,
     min_atoms: int,
     max_atoms: int,
+    system_type: SystemType,
     params: dict | None = None,
     seed: int | None = None,
     verbosity: int = 1,
@@ -331,6 +314,7 @@ def run_scgo_campaign_two_elements(
 
     return run_scgo_campaign_arbitrary_compositions(
         all_compositions,
+        system_type,
         params,
         seed=seed,
         verbosity=verbosity,
@@ -342,6 +326,7 @@ def run_scgo_campaign_two_elements(
 
 def run_scgo_campaign_arbitrary_compositions(
     compositions: Iterable[list[str]],
+    system_type: SystemType,
     params: dict | None = None,
     seed: int | None = None,
     verbosity: int = 1,
@@ -408,6 +393,7 @@ def run_scgo_campaign_arbitrary_compositions(
         try:
             results = run_scgo_trials(
                 composition,
+                system_type,
                 params,
                 seed=comp_seed,
                 verbosity=verbosity,
@@ -457,6 +443,7 @@ def run_scgo_campaign_arbitrary_compositions(
 
 def run_scgo_go_ts_pipeline(
     composition: list[str],
+    system_type: SystemType,
     *,
     go_params: dict[str, Any],
     ts_kwargs: dict[str, Any],
@@ -496,6 +483,7 @@ def run_scgo_go_ts_pipeline(
         go_t0 = perf_counter()
         minima_list = run_scgo_trials(
             composition,
+            system_type,
             params=merged_ga,
             seed=seed,
             verbosity=verbosity,
@@ -513,6 +501,7 @@ def run_scgo_go_ts_pipeline(
     ts_kwargs_local.pop("base_dir", None)
     ts_kwargs_local.pop("seed", None)
     ts_kwargs_local.pop("verbosity", None)
+    ts_kwargs_local.pop("system_type", None)
     write_ts_json = bool(ts_kwargs_local.pop("write_timing_json", False))
 
     # Extract connectivity_factor from cluster_adsorbate_config in go_params
@@ -544,6 +533,7 @@ def run_scgo_go_ts_pipeline(
         verbosity=verbosity,
         write_timing_json=write_ts_json,
         connectivity_factor=connectivity_factor,
+        system_type=system_type,
         **ts_kwargs_local,
     )
     ts_success = sum(1 for result in ts_results if result.get("status") == "success")
@@ -580,6 +570,7 @@ def run_scgo_go_ts_pipeline(
 def run_scgo_one_element_go_ts_pipeline(
     element: str,
     n_atoms: int,
+    system_type: SystemType,
     *,
     go_params: dict[str, Any],
     ts_kwargs: dict[str, Any],
@@ -595,6 +586,7 @@ def run_scgo_one_element_go_ts_pipeline(
     composition = [element] * n_atoms
     return run_scgo_go_ts_pipeline(
         composition,
+        system_type,
         go_params=go_params,
         ts_kwargs=ts_kwargs,
         seed=seed,
