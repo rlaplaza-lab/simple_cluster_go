@@ -100,7 +100,6 @@ def set_fitness_in_atoms(atoms: Atoms, fitness: float, strategy: str) -> None:
         atoms: Atoms object to modify.
         fitness: Fitness value to store.
         strategy: Fitness strategy name.
-
     """
     atoms.info = getattr(atoms, "info", {})
     atoms.info["fitness"] = fitness

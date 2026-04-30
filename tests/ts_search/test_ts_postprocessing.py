@@ -516,6 +516,7 @@ def test_run_transition_state_search_skips_tagging_when_no_db(
 
     run_transition_state_search(
         ["Pt", "Pt"],
+        system_type="gas_cluster",
         output_dir=str(tmp_path),
         params={"calculator": "EMT", "calculator_kwargs": {}},
         tag_ts_in_db=True,
@@ -614,6 +615,7 @@ def test_run_transition_state_search_records_minima_provenance(monkeypatch, tmp_
     # Run TS search and enable DB tagging
     run_transition_state_search(
         ["Pt", "Pt"],
+        system_type="gas_cluster",
         output_dir=str(tmp_path),
         params={"calculator": "EMT", "calculator_kwargs": {}},
         tag_ts_in_db=True,
@@ -678,7 +680,10 @@ def test_run_transition_state_search_resolves_neb_steps_auto(monkeypatch):
 
     # Call runner with default neb_steps (which is 'auto')
     run_transition_state_search(
-        comp, params={"calculator": "EMT", "calculator_kwargs": {}}, verbosity=0
+        comp,
+        system_type="gas_cluster",
+        params={"calculator": "EMT", "calculator_kwargs": {}},
+        verbosity=0,
     )
 
 
@@ -731,6 +736,7 @@ def test_run_transition_state_search_resolves_torchsim_maxsteps_auto(monkeypatch
     # Pass explicit torchsim_params with 'max_steps' set to 'auto'
     run_transition_state_search(
         ["Pt", "Pt", "Pt", "Pt"],
+        system_type="gas_cluster",
         params={"calculator": "EMT", "calculator_kwargs": {}},
         use_torchsim=True,
         torchsim_params={"max_steps": "auto", "force_tol": 0.05},

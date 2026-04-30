@@ -171,6 +171,7 @@ def test_run_transition_state_search_full(mock_database_dir):
 
     results = run_transition_state_search(
         composition=["Cu", "Cu"],
+        system_type="gas_cluster",
         output_dir=mock_database_dir,
         params=params,
         seed=1,
@@ -205,6 +206,7 @@ def test_run_transition_state_search_with_climb(mock_database_dir):
 
     results = run_transition_state_search(
         composition=["Cu", "Cu"],
+        system_type="gas_cluster",
         output_dir=mock_database_dir,
         params=params,
         verbosity=0,
@@ -236,6 +238,7 @@ def test_run_transition_state_search_parallel_neb_requires_torchsim(mock_databas
     with pytest.raises(ValueError):
         run_transition_state_search(
             composition=["Cu", "Cu"],
+            system_type="gas_cluster",
             output_dir=mock_database_dir,
             params=params,
             verbosity=0,
@@ -280,6 +283,7 @@ def test_run_transition_state_search_parallel_neb_executes(
 
     results = run_transition_state_search(
         composition=["Cu", "Cu"],
+        system_type="gas_cluster",
         output_dir=mock_database_dir,
         params=params,
         verbosity=0,
@@ -345,6 +349,7 @@ def test_run_transition_state_search_parallel_neb_forwards_rng_and_perturb(
 
     _ = run_transition_state_search(
         composition=["Cu", "Cu"],
+        system_type="gas_cluster",
         output_dir=mock_database_dir,
         params=params,
         verbosity=0,
@@ -373,6 +378,7 @@ def test_run_transition_state_search_no_minima():
 
         results = run_transition_state_search(
             composition=["Cu", "Cu"],
+            system_type="gas_cluster",
             output_dir=tmpdir,
             params=params,
             verbosity=0,
@@ -387,6 +393,7 @@ def test_run_transition_state_search_energy_gap_filter(mock_database_dir):
 
     results = run_transition_state_search(
         composition=["Cu", "Cu"],
+        system_type="gas_cluster",
         output_dir=mock_database_dir,
         params=params,
         verbosity=0,
@@ -515,6 +522,7 @@ def test_run_transition_state_campaign():
 
         results = run_transition_state_campaign(
             compositions=[["Cu", "Cu"], ["Ni", "Ni"]],
+            system_type="gas_cluster",
             output_dir=tmpdir,
             params=params,
             verbosity=0,
@@ -569,6 +577,7 @@ def test_run_transition_state_campaign_detects_searches_dir():
 
         results = run_transition_state_campaign(
             compositions=[["Cu", "Cu"]],
+            system_type="gas_cluster",
             output_dir=tmpdir,
             params=params,
             verbosity=0,
@@ -584,6 +593,7 @@ def test_run_transition_state_search_linear_interpolation(mock_database_dir):
 
     results = run_transition_state_search(
         composition=["Cu", "Cu"],
+        system_type="gas_cluster",
         output_dir=mock_database_dir,
         params=params,
         seed=1,
@@ -713,6 +723,7 @@ def test_run_transition_state_search_tags_non_ga_db_files(tmp_path):
 
     results = run_transition_state_search(
         composition=["Pt", "Pt"],
+        system_type="gas_cluster",
         output_dir=str(tmp_path),
         params={"calculator": "EMT"},
         seed=1,
@@ -775,6 +786,7 @@ def test_run_transition_state_search_tags_non_ga_db_files(tmp_path):
 
     results2 = run_transition_state_search(
         composition=["Pt", "Pt"],
+        system_type="gas_cluster",
         output_dir=str(tmp_path),
         params={"calculator": "EMT"},
         seed=2,
@@ -844,6 +856,7 @@ def test_run_transition_state_search_torchsim(mock_database_dir):
 
     results = run_transition_state_search(
         composition=["Cu", "Cu"],
+        system_type="gas_cluster",
         output_dir=mock_database_dir,
         params={"calculator": "MACE", "calculator_kwargs": {}},
         verbosity=1,
@@ -951,6 +964,7 @@ def test_run_transition_state_search_auto_tags_mixed_db_formats(tmp_path):
     # Run TS search with tagging enabled (should discover both DBs)
     results = run_transition_state_search(
         composition=["Pt", "Pt"],
+        system_type="gas_cluster",
         output_dir=str(tmp_path),
         params={"calculator": "EMT"},
         seed=1,

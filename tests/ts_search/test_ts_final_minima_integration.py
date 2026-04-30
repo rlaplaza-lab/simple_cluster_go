@@ -88,6 +88,7 @@ def test_ts_search_uses_only_tagged_final_minima(tmp_path):
     params = {"calculator": "EMT", "calculator_kwargs": {}}
     results = run_transition_state_search(
         ["Pt"],
+        system_type="gas_cluster",
         output_dir=str(formula_dir),
         params=params,
         verbosity=0,

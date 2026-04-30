@@ -3,12 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal, TypedDict
-
-try:
-    from typing import NotRequired
-except ImportError:
-    from typing import NotRequired
+from typing import Literal, NotRequired, TypedDict
 
 from ase import Atoms
 
@@ -47,7 +42,7 @@ class AdsorbateDefinition(TypedDict, total=False):
     ``composition`` (or hierarchical rules do not apply). On surfaces, the
     cluster is then placed on the slab.
 
-    **Hierarchical** (``deposition_layout=\"core_then_fragment\"``): build a
+    **Hierarchical** (``deposition_layout="core_then_fragment"``): build a
     core cluster, place rigid fragment(s) with
     :func:`scgo.cluster_adsorbate.place_fragment_on_cluster`, then (for
     surface) deposit. Requires a fragment template or
