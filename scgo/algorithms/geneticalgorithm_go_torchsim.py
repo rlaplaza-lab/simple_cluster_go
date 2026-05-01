@@ -52,6 +52,7 @@ from scgo.database import (
 )
 from scgo.database.metadata import add_metadata, filter_by_metadata, update_metadata
 from scgo.initialization import compute_cell_side
+from scgo.initialization.initialization_config import CONNECTIVITY_FACTOR
 from scgo.surface.config import SurfaceSystemConfig
 from scgo.surface.constraints import attach_slab_constraints
 from scgo.system_types import (
@@ -345,7 +346,7 @@ def ga_go_torchsim(
     connectivity_factor = (
         cluster_adsorbate_config.structure_connectivity_factor
         if cluster_adsorbate_config is not None
-        else None
+        else CONNECTIVITY_FACTOR
     )
 
     if system_type == "gas_cluster" and surface_config is not None:
@@ -592,6 +593,7 @@ def ga_go_torchsim(
                 surface_config=surface_config,
                 n_slab=n_slab,
                 adsorbate_definition=adsorbate_definition,
+                connectivity_factor=connectivity_factor,
             )
             database_retry(
                 lambda _cand=cand: _insert_unrelaxed(_cand),
@@ -622,6 +624,7 @@ def ga_go_torchsim(
                         surface_config=surface_config,
                         n_slab=n_slab if surface_mode else None,
                         adsorbate_definition=adsorbate_definition,
+                        connectivity_factor=connectivity_factor,
                     )
 
                     # Copy forces if available
@@ -874,6 +877,7 @@ def ga_go_torchsim(
                             surface_config=surface_config,
                             n_slab=n_slab,
                             adsorbate_definition=adsorbate_definition,
+                            connectivity_factor=connectivity_factor,
                         )
                     except ValueError as exc:
                         # Invalid geometry after crossover/mutation: same as ``child is None`` —

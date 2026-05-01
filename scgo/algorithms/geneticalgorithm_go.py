@@ -42,6 +42,7 @@ from scgo.database import HPC_DATABASE_EXCEPTIONS, close_data_connection, setup_
 from scgo.database.metadata import add_metadata, filter_by_metadata
 from scgo.database.sync import retry_with_backoff
 from scgo.initialization import compute_cell_side
+from scgo.initialization.initialization_config import CONNECTIVITY_FACTOR
 from scgo.surface.config import SurfaceSystemConfig
 from scgo.surface.constraints import attach_slab_constraints
 from scgo.system_types import (
@@ -166,7 +167,7 @@ def ga_go(
     connectivity_factor = (
         cluster_adsorbate_config.structure_connectivity_factor
         if cluster_adsorbate_config is not None
-        else None
+        else CONNECTIVITY_FACTOR
     )
 
     resolved_system_type: SystemType = (

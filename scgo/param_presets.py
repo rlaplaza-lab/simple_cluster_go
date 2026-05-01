@@ -322,9 +322,34 @@ def get_torchsim_ga_params(
     :class:`~scgo.calculators.torchsim_helpers.TorchSimBatchRelaxer` uses the
     same MACE model name as the ASE calculator.
     """
-    from scgo.param_presets_torchsim import get_torchsim_ga_params_impl
+    import torch
 
-    return get_torchsim_ga_params_impl(seed, model_name=model_name)
+    from scgo.calculators.torchsim_helpers import TorchSimBatchRelaxer
+
+    params = _get_base_ga_benchmark_params(seed)
+    if model_name is not None:
+        params["calculator_kwargs"]["model_name"] = model_name
+
+    mace_model = params["calculator_kwargs"].get("model_name", "mace_matpes_0")
+    fmax_val = params["optimizer_params"]["ga"]["fmax"]
+    niter_local = params["optimizer_params"]["ga"]["niter_local_relaxation"]
+
+    params["optimizer_params"]["ga"].update(
+        {
+            "relaxer": TorchSimBatchRelaxer(
+                force_tol=fmax_val,
+                optimizer_name="fire",
+                mace_model_name=mace_model,
+                seed=seed,
+                max_steps=niter_local,
+                dtype=torch.float32,
+                autobatcher=True,
+                expected_max_atoms=600,
+            ),
+        },
+    )
+
+    return params
 
 
 def get_diversity_params(

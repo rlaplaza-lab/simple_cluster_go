@@ -123,7 +123,7 @@ def _prepare_run_context(
     params_prep = params or {}
     if params:
         params_prep = _with_surface_in_optimizers(params, surface_config=surface_config)
-    if params_prep:
+    if params_prep is not None:
         params_prep = _with_adsorbate_in_optimizers(
             params_prep,
             adsorbate_definition=ads_def,
@@ -192,6 +192,10 @@ def _with_system_type_in_optimizer_params(
         cfg["system_type"] = system_type
         if algo in ("ga", "bh"):
             cfg.setdefault("write_timing_json", effective)
+    # Add surface_config to all optimizer slots if it's in params
+    if "surface_config" in out:
+        for algo in _ALGO_KEYS:
+            op.setdefault(algo, {})["surface_config"] = out["surface_config"]
     return out
 
 
@@ -346,14 +350,14 @@ def _with_surface_in_optimizers(
 
 
 def _with_adsorbate_in_optimizers(
-    go_params: dict[str, Any],
+    go_params: dict[str, Any] | None,
     *,
     adsorbate_definition: Any | None = None,
     adsorbate_fragment_template: Any | None = None,
     cluster_adsorbate_config: Any | None = None,
 ) -> dict[str, Any]:
     """Copy ``go_params``; fan out explicit run adsorbate params to optimizer slots."""
-    out = copy.deepcopy(go_params)
+    out = copy.deepcopy(go_params) if go_params is not None else {}
 
     # If any adsorbate param is set, distribute to all optimizer slots
     if (
@@ -363,9 +367,7 @@ def _with_adsorbate_in_optimizers(
     ):
         op = out.setdefault("optimizer_params", {})
         for key in _ALGO_KEYS:
-            if key not in op:
-                continue
-            slot = op[key]
+            slot = op.setdefault(key, {})
             if not isinstance(slot, dict):
                 raise ValueError(
                     f"optimizer_params['{key}'] must be a dict when using adsorbate parameters"

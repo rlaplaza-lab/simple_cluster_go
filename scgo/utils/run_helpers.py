@@ -198,15 +198,6 @@ def validate_algorithm_params(
             )
 
 
-def _resolve_timing_params_into(
-    base_kwargs: dict[str, Any], algo_params: dict[str, Any]
-) -> None:
-    if "write_timing_json" in algo_params:
-        base_kwargs["write_timing_json"] = bool(algo_params["write_timing_json"])
-    if "detailed_timing" in algo_params:
-        base_kwargs["detailed_timing"] = bool(algo_params["detailed_timing"])
-
-
 def resolve_auto_params(
     algo_params: dict[str, Any],
     composition: list[str],
@@ -424,9 +415,6 @@ def prepare_algorithm_kwargs(
     if base_kwargs["fitness_strategy"] == "diversity":
         diversity_params = resolve_diversity_params(algo_params, params, chosen_go)
         base_kwargs.update(diversity_params)
-
-    if chosen_go in {"ga", "bh"}:
-        _resolve_timing_params_into(base_kwargs, algo_params)
 
     for key in (
         "adsorbate_definition",

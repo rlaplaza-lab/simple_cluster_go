@@ -14,6 +14,7 @@ from scgo.cluster_adsorbate.hierarchical import (
     build_hierarchical_core_fragment_cluster,
 )
 from scgo.initialization.geometry_helpers import _generate_rotation_matrix
+from scgo.initialization.initialization_config import CONNECTIVITY_FACTOR
 from scgo.surface.validation import validate_supported_cluster_deposit
 from scgo.utils.logging import get_logger
 from scgo.utils.parallel_workers import resolve_n_jobs_to_workers
@@ -174,11 +175,18 @@ def create_deposited_cluster(
         )
         if skip_supported_cluster_check:
             return combined
+
+        # Extract connectivity_factor from cluster_adsorbate_config if available
+        connectivity_factor = CONNECTIVITY_FACTOR
+        if cluster_adsorbate_config is not None:
+            connectivity_factor = cluster_adsorbate_config.structure_connectivity_factor
+
         ok, err = validate_supported_cluster_deposit(
             combined,
             n_slab,
             surface_normal_axis=config.surface_normal_axis,
             use_mic=bool(config.comparator_use_mic),
+            connectivity_factor=connectivity_factor,
         )
         if not ok:
             logger.debug(

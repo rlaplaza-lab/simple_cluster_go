@@ -17,6 +17,7 @@ from scgo.constants import (
     DEFAULT_ENERGY_TOLERANCE,
     DEFAULT_NEB_TANGENT_METHOD,
 )
+from scgo.initialization.initialization_config import CONNECTIVITY_FACTOR
 from scgo.surface.composition import full_adsorbate_slab_composition
 from scgo.surface.config import SurfaceSystemConfig
 from scgo.surface.constraints import (
@@ -274,6 +275,7 @@ def _apply_surface_ts_geometry_gate(
     *,
     surface_config: SurfaceSystemConfig | None,
     system_type: SystemType,
+    connectivity_factor: float | None = None,
 ) -> None:
     """Reject successful TS results that violate supported-deposit geometry."""
     if surface_config is None:
@@ -285,6 +287,8 @@ def _apply_surface_ts_geometry_gate(
     n_slab = len(surface_config.slab)
     use_mic = bool(surface_config.comparator_use_mic)
     axis = int(surface_config.surface_normal_axis)
+    # Use the provided connectivity_factor, or default to CONNECTIVITY_FACTOR
+    cf = connectivity_factor if connectivity_factor is not None else CONNECTIVITY_FACTOR
     checks = (
         ("reactant", "reactant_structure"),
         ("product", "product_structure"),
@@ -305,6 +309,7 @@ def _apply_surface_ts_geometry_gate(
                 n_slab,
                 surface_normal_axis=axis,
                 use_mic=use_mic,
+                connectivity_factor=cf,
             )
             if not ok:
                 result["status"] = "failed"
@@ -395,6 +400,10 @@ def run_transition_state_search(
     configure_logging(verbosity)
     logger = get_logger(__name__)
     cleanup_torch_cuda(logger=logger)
+
+    # Ensure connectivity_factor always has a valid value
+    if connectivity_factor is None:
+        connectivity_factor = CONNECTIVITY_FACTOR
 
     validate_composition(composition, allow_empty=False)
     validate_system_type_settings(
@@ -639,6 +648,7 @@ def run_transition_state_search(
         ts_results,
         surface_config=surface_config,
         system_type=system_type,
+        connectivity_factor=connectivity_factor,
     )
 
     save_transition_state_results(

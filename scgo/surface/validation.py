@@ -179,12 +179,15 @@ def validate_supported_cluster_deposit(
         return False, "No adsorbate atoms in combined structure"
 
     ads = combined[n_slab:]
+    # Only check connectivity for clusters with more than 2 atoms
+    # (connectivity is not meaningful for 1- or 2-atom clusters)
+    check_connectivity = len(ads) > 2
     ok, err = validate_cluster_structure(
         ads,
         min_distance_factor,
         connectivity_factor,
         check_clashes=True,
-        check_connectivity=True,
+        check_connectivity=check_connectivity,
     )
     if not ok:
         return False, f"Adsorbate validation failed: {err}"

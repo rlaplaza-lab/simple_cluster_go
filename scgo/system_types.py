@@ -234,6 +234,7 @@ def validate_structure_for_system_type(
                 n_slab_eff,
                 surface_normal_axis=surface_config.surface_normal_axis,
                 use_mic=bool(surface_config.comparator_use_mic),
+                connectivity_factor=connectivity_factor,
             )
             if not ok:
                 raise ValueError(msg)

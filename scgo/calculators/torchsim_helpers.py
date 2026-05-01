@@ -16,6 +16,7 @@ import functools
 import json
 import os
 import time
+import warnings
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -588,15 +589,20 @@ class TorchSimBatchRelaxer:
         # ts.static returns property dicts only.
         max_steps_now = runner_kwargs.get("max_steps", self.max_steps)
         if max_steps_now == 0:
-            logger.info(
+            logger.debug(
                 "Running TorchSim single-point evaluation via optimize(max_steps=0)."
             )
-            state = self._ts.optimize(  # type: ignore[call-arg]
-                system=system_in,
-                model=self.model,
-                optimizer=self.optimizer,
-                **runner_kwargs,
-            )
+            with warnings.catch_warnings():
+                warnings.filterwarnings(
+                    "ignore",
+                    message="All systems have reached the maximum number of steps",
+                )
+                state = self._ts.optimize(  # type: ignore[call-arg]
+                    system=system_in,
+                    model=self.model,
+                    optimizer=self.optimizer,
+                    **runner_kwargs,
+                )
         else:
             state = self._ts.optimize(  # type: ignore[call-arg]
                 system=system_in,

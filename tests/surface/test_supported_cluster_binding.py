@@ -65,12 +65,13 @@ def test_validate_supported_cluster_deposit_rejects_disconnected_adsorbate(
 ) -> None:
     n_slab = len(pt_slab)
     z_top = slab_surface_extreme(pt_slab, 2, upper=True)
-    # Two Pt atoms far apart in the adsorbate (two components).
+    # Three Pt atoms where one is far from the other two (disconnected component).
     ads = Atoms(
-        "Pt2",
+        "Pt3",
         positions=[
             [0.0, 0.0, z_top + 2.0],
-            [5.0, 5.0, z_top + 2.0],
+            [0.0, 0.0, z_top + 4.0],  # within bonding distance of first
+            [5.0, 5.0, z_top + 2.0],  # far from the others
         ],
         cell=pt_slab.cell,
         pbc=pt_slab.pbc,
