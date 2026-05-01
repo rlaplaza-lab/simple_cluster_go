@@ -489,6 +489,7 @@ def test_campaign_run_id_consistency(tmp_path):
         element="Pt",
         min_atoms=2,
         max_atoms=3,
+        system_type="gas_cluster",
         params=params,
         seed=42,
         verbosity=0,

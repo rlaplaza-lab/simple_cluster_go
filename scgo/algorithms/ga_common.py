@@ -877,32 +877,32 @@ def create_mutation_operators(
             )
             operators.append(slide)
             name_map["in_plane_slide"] = len(operators) - 1
-            # For adsorbate systems, create core-only and adsorbate-only variants
-            # Core-only in-plane slide (target core tag=0)
-            slide_core: InPlaneSlideMutation = InPlaneSlideMutation(
-                blmin,
-                n_to_optimize,
-                surface_normal_axis=surface_normal_axis,
-                target_tags=[0],
-                system_type=resolved_system_type,
-                rng=create_child_rng(rng) if rng is not None else None,  # type: ignore[arg-type]
-                max_inner_attempts=in_plane_slide_max_inner_attempts,
-            )
-            operators.append(slide_core)
-            name_map["in_plane_slide_core"] = len(operators) - 1
-            # Adsorbate-only in-plane slide (target adsorbate tag=1)
-            slide_ads: InPlaneSlideMutation = InPlaneSlideMutation(
-                blmin,
-                n_to_optimize,
-                surface_normal_axis=surface_normal_axis,
-                target_tags=[1],
-                system_type=resolved_system_type,
-                rng=create_child_rng(rng) if rng is not None else None,  # type: ignore[arg-type]
-                max_inner_attempts=in_plane_slide_max_inner_attempts,
-            )
-            operators.append(slide_ads)
-            name_map["in_plane_slide_ads"] = len(operators) - 1
-
+            if use_partition_tags:
+                # For adsorbate systems, create core-only and adsorbate-only variants
+                # Core-only in-plane slide (target core tag=0)
+                slide_core: InPlaneSlideMutation = InPlaneSlideMutation(
+                    blmin,
+                    n_to_optimize,
+                    surface_normal_axis=surface_normal_axis,
+                    target_tags=[0],
+                    system_type=resolved_system_type,
+                    rng=create_child_rng(rng) if rng is not None else None,  # type: ignore[arg-type]
+                    max_inner_attempts=in_plane_slide_max_inner_attempts,
+                )
+                operators.append(slide_core)
+                name_map["in_plane_slide_core"] = len(operators) - 1
+                # Adsorbate-only in-plane slide (target adsorbate tag=1)
+                slide_ads: InPlaneSlideMutation = InPlaneSlideMutation(
+                    blmin,
+                    n_to_optimize,
+                    surface_normal_axis=surface_normal_axis,
+                    target_tags=[1],
+                    system_type=resolved_system_type,
+                    rng=create_child_rng(rng) if rng is not None else None,  # type: ignore[arg-type]
+                    max_inner_attempts=in_plane_slide_max_inner_attempts,
+                )
+                operators.append(slide_ads)
+                name_map["in_plane_slide_ads"] = len(operators) - 1
     return operators, name_map
 
 
