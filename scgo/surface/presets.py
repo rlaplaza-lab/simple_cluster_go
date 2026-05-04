@@ -38,12 +38,12 @@ def make_graphite_surface_config(
     )
     return SurfaceSystemConfig(
         slab=slab,
-        adsorption_height_min=1.6,
-        adsorption_height_max=3.2,
+        adsorption_height_min=0.5,
+        adsorption_height_max=1.0,
         fix_all_slab_atoms=False,
         n_relax_top_slab_layers=1,
         comparator_use_mic=True,
-        max_placement_attempts=600,
+        max_placement_attempts=1000,
     )
 
 

@@ -37,91 +37,11 @@ def slab_surface_extreme(slab: Atoms, axis: int, *, upper: bool = True) -> float
     return float(np.max(pos[:, axis]) if upper else np.min(pos[:, axis]))
 
 
-def _in_plane_translation_near_slab_atom(
-    slab: Atoms, axis: int, rng: Generator, cluster_radius: float
-) -> np.ndarray:
-    """Random fractional shift biased towards slab atoms.
-
-    Chooses a random slab atom and places the cluster near it, with some randomness.
-    The cluster is placed within a distance that ensures connectivity.
-
-    Args:
-        slab: The slab atoms
-        axis: Surface normal axis
-        rng: Random number generator
-        cluster_radius: Approximate radius of the cluster
-
-    Returns:
-        Shift vector in the plane
-    """
-    cell = slab.get_cell()
-
-    # Get slab atom positions in the plane (excluding the surface normal axis)
-    slab_positions = slab.get_positions()
-
-    # Choose a random slab atom
-    n_slab = len(slab)
-    if n_slab == 0:
-        # Fallback to random placement
-        u, v = rng.random(), rng.random()
-        if axis == 0:
-            return np.asarray(u * cell[1] + v * cell[2], dtype=float)
-        elif axis == 1:
-            return np.asarray(u * cell[0] + v * cell[2], dtype=float)
-        else:
-            return np.asarray(u * cell[0] + v * cell[1], dtype=float)
-
-    # Choose a random slab atom
-    atom_idx = rng.integers(0, n_slab)
-    atom_pos = slab_positions[atom_idx]
-
-    # Create shift in the plane, biased towards this atom
-    # Add some randomness to avoid exact overlap, but keep it small to ensure connectivity
-    offset_scale = (
-        cluster_radius * 0.1
-    )  # Place very near the atom (reduced from 0.3 to 0.1 to improve connectivity)
-
-    # Random direction in the plane
-    if axis == 0:
-        # Plane is yz
-        angle = rng.uniform(0, 2 * np.pi)
-        dy = offset_scale * np.cos(angle)
-        dz = offset_scale * np.sin(angle)
-        return np.asarray([0, atom_pos[1] + dy, atom_pos[2] + dz], dtype=float)
-    elif axis == 1:
-        # Plane is xz
-        angle = rng.uniform(0, 2 * np.pi)
-        dx = offset_scale * np.cos(angle)
-        dz = offset_scale * np.sin(angle)
-        return np.asarray([atom_pos[0] + dx, 0, atom_pos[2] + dz], dtype=float)
-    else:
-        # Plane is xy (axis == 2)
-        angle = rng.uniform(0, 2 * np.pi)
-        dx = offset_scale * np.cos(angle)
-        dy = offset_scale * np.sin(angle)
-        return np.asarray([atom_pos[0] + dx, atom_pos[1] + dy, 0], dtype=float)
-
-
-def _in_plane_translation(
-    slab: Atoms, axis: int, rng: Generator, cluster_radius: float | None = None
-) -> np.ndarray:
+def _in_plane_translation(slab: Atoms, axis: int, rng: Generator) -> np.ndarray:
     """Random fractional shift along the two cell directions not dominated by ``axis``.
 
     For ``axis == 2``, uses ``cell[0]`` and ``cell[1]``. Uses ``[0, 1)`` fractions.
-    If cluster_radius is provided, biases placement towards slab atoms.
-
-    Args:
-        slab: The slab atoms
-        axis: Surface normal axis
-        rng: Random number generator
-        cluster_radius: Approximate radius of the cluster (optional)
-
-    Returns:
-        Shift vector
     """
-    if cluster_radius is not None and cluster_radius > 0:
-        return _in_plane_translation_near_slab_atom(slab, axis, rng, cluster_radius)
-
     cell = slab.get_cell()
     u, v = rng.random(), rng.random()
     if axis == 0:
@@ -159,71 +79,12 @@ def _place_cluster_above_slab(
 ) -> np.ndarray:
     """Rotate/translate centered cluster positions into a deposited position."""
     rotated_positions = cluster_positions @ _random_rotation_matrix(rng).T
-
-    # Estimate cluster radius for biasing placement towards slab atoms
-    cluster_radius = float(np.max(np.linalg.norm(rotated_positions, axis=1)))
-
-    translated_positions = rotated_positions + _in_plane_translation(
-        slab, axis, rng, cluster_radius
-    )
-
-    # Calculate minimum height needed for connectivity.
-    # The cluster extends from cluster_min to cluster_max along the axis.
-    # To ensure connectivity, we need at least one cluster atom to be within
-    # the connectivity threshold of a slab atom. The slab top is at slab_top,
-    # and slab atoms can be slightly below this (e.g., in lower layers).
-    # We use a conservative estimate: place the cluster so that its bottom
-    # is at most (connectivity_threshold - cluster_extent) above the slab top,
-    # where cluster_extent is the distance from the cluster center to its bottom.
-    # This ensures that even with some randomness in placement, connectivity is likely.
-    from scgo.initialization.geometry_helpers import get_covalent_radius
-    from scgo.initialization.initialization_config import CONNECTIVITY_FACTOR
-
-    # Get representative covalent radius for connectivity calculation
-    # Use the minimum of slab and cluster atom radii to be conservative
-    slab_symbols = slab.get_chemical_symbols()
-    slab_radius = (
-        get_covalent_radius(slab_symbols[0]) if slab_symbols else 1.36
-    )  # fallback for Pt
-
-    # For the cluster, we don't know the element yet, but we can estimate
-    # based on typical values. Use a conservative (smaller) radius to ensure
-    # connectivity even for smaller atoms.
-    cluster_radius_est = 1.0  # conservative estimate
-
-    # Use the smaller radius to be conservative (ensures connectivity for both)
-    rep_radius = min(slab_radius, cluster_radius_est)
-    connectivity_threshold = CONNECTIVITY_FACTOR * 2 * rep_radius
-
-    # Cluster extent below its center (cluster is centered at 0)
-    cluster_min = float(np.min(rotated_positions[:, axis]))
-
-    # To ensure connectivity, we want the closest approach between any cluster atom
-    # and any slab atom to be within the connectivity threshold.
-    # The slab top is at slab_top, and slab atoms can be up to ~2 Å below this.
-    # A conservative approach: place the cluster so that its bottom is within
-    # (connectivity_threshold - 2.0) of the slab top, ensuring overlap with slab atom positions.
-    # But we also need to respect the user-specified height range.
-
-    # Use a height that ensures connectivity while respecting the config range
-    # Place the cluster bottom at a fraction of the connectivity threshold above slab top
-    # This ensures atoms are close enough for bonding
-    target_height_above_slab = min(
-        config.adsorption_height_max,
-        max(config.adsorption_height_min, connectivity_threshold * 0.4),
-    )
-
+    translated_positions = rotated_positions + _in_plane_translation(slab, axis, rng)
     sampled_height = float(
         rng.uniform(config.adsorption_height_min, config.adsorption_height_max)
     )
-
-    # Use the minimum of sampled height and target height to ensure connectivity
-    # But don't go below the minimum
-    effective_height = max(
-        config.adsorption_height_min, min(sampled_height, target_height_above_slab)
-    )
-
-    translated_positions[:, axis] += slab_top + effective_height - cluster_min
+    cluster_min = float(np.min(translated_positions[:, axis]))
+    translated_positions[:, axis] += slab_top + sampled_height - cluster_min
     return translated_positions
 
 

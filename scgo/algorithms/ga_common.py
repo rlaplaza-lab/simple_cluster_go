@@ -658,6 +658,7 @@ def create_mutation_operators(
     mirror_max_tries: int = 1000,
     breathing_max_inner_attempts: int = 1000,
     in_plane_slide_max_inner_attempts: int = 1000,
+    in_plane_slide_max_displacement: float = 10.0,
     breathing_scale_min: float = 0.82,
     breathing_scale_max: float = 1.22,
     adsorbate_definition: AdsorbateDefinition | None = None,
@@ -683,6 +684,8 @@ def create_mutation_operators(
         mirror_max_tries: Max cutting-plane trials per mirror mutation call.
         breathing_max_inner_attempts: Max radial-scale trials per breathing call.
         in_plane_slide_max_inner_attempts: Max slide trials per slide call.
+        in_plane_slide_max_displacement: Maximum displacement magnitude (Å) per
+            in-plane direction for in-plane slide mutation.
         breathing_scale_min: Lower bound for radial scale factors (about the fragment CoM).
         breathing_scale_max: Upper bound for radial scale factors.
 
@@ -709,6 +712,15 @@ def create_mutation_operators(
         resolved_system_type, composition, adsorbate_definition
     )
     use_partition_tags = part is not None
+
+    # Estimate a physically meaningful max displacement for in-plane slide
+    # based on the expected cluster size. Use 3 * estimated cluster radius,
+    # where radius is approximated as n_to_optimize**(1/3) * avg_blmin.
+    # This ensures sufficient displacement range even when clusters are
+    # placed close to slab atoms.
+    avg_blmin = np.mean(list(blmin.values())) if blmin else 1.0
+    estimated_cluster_radius = n_to_optimize ** (1.0 / 3.0) * avg_blmin
+    default_max_displacement = 3.0 * estimated_cluster_radius
 
     rattle: RattleMutation = RattleMutation(
         blmin,
@@ -874,6 +886,9 @@ def create_mutation_operators(
                 system_type=resolved_system_type,
                 rng=create_child_rng(rng) if rng is not None else None,  # type: ignore[arg-type]
                 max_inner_attempts=in_plane_slide_max_inner_attempts,
+                max_displacement=max(
+                    in_plane_slide_max_displacement, default_max_displacement
+                ),
             )
             operators.append(slide)
             name_map["in_plane_slide"] = len(operators) - 1
@@ -884,10 +899,13 @@ def create_mutation_operators(
                     blmin,
                     n_to_optimize,
                     surface_normal_axis=surface_normal_axis,
-                    target_tags=[0],
                     system_type=resolved_system_type,
                     rng=create_child_rng(rng) if rng is not None else None,  # type: ignore[arg-type]
                     max_inner_attempts=in_plane_slide_max_inner_attempts,
+                    max_displacement=max(
+                        in_plane_slide_max_displacement, default_max_displacement
+                    ),
+                    target_tags=[0],
                 )
                 operators.append(slide_core)
                 name_map["in_plane_slide_core"] = len(operators) - 1
@@ -896,10 +914,13 @@ def create_mutation_operators(
                     blmin,
                     n_to_optimize,
                     surface_normal_axis=surface_normal_axis,
-                    target_tags=[1],
                     system_type=resolved_system_type,
                     rng=create_child_rng(rng) if rng is not None else None,  # type: ignore[arg-type]
                     max_inner_attempts=in_plane_slide_max_inner_attempts,
+                    max_displacement=max(
+                        in_plane_slide_max_displacement, default_max_displacement
+                    ),
+                    target_tags=[1],
                 )
                 operators.append(slide_ads)
                 name_map["in_plane_slide_ads"] = len(operators) - 1
