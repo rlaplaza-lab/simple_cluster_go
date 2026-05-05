@@ -30,6 +30,7 @@ def _build_go_params(surface_config) -> dict:
     """Load GO preset, then apply surface-specific knobs for this run."""
     go_params = get_torchsim_ga_params(SEED)
     go_params["calculator"] = "MACE"
+    go_params["connectivity_factor"] = 1.8  # override default
     go_params["optimizer_params"]["ga"].update(
         niter=NITER,
         population_size=POPULATION_SIZE,
@@ -46,11 +47,14 @@ def _build_ts_params() -> dict:
         seed=SEED,
     )
     ts_params["max_pairs"] = MAX_PAIRS
+    ts_params["connectivity_factor"] = 1.8  # override default
     return ts_params
 
 
 def main() -> None:
-    surface_config = make_graphite_surface_config()
+    surface_config = make_graphite_surface_config(
+        structure_connectivity_factor=1.8,
+    )
     go_params = _build_go_params(surface_config)
     ts_params = _build_ts_params()
     run_go_ts(

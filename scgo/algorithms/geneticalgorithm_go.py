@@ -103,6 +103,7 @@ def ga_go(
     adsorbate_definition: AdsorbateDefinition | None = None,
     adsorbate_fragment_template: Atoms | None = None,
     cluster_adsorbate_config: ClusterAdsorbateConfig | None = None,
+    connectivity_factor: float | None = None,
 ) -> list[tuple[float, Atoms]]:
     """Genetic Algorithm global optimization with adaptive mutations.
 
@@ -163,12 +164,14 @@ def ga_go(
     profile_counters: dict[str, int] = {"offspring_created": 0}
     per_generation: list[dict[str, Any]] | None = [] if detailed_timing else None
 
-    # Extract connectivity factor from cluster_adsorbate_config if available
-    connectivity_factor = (
-        cluster_adsorbate_config.structure_connectivity_factor
-        if cluster_adsorbate_config is not None
-        else CONNECTIVITY_FACTOR
-    )
+    # Extract connectivity factor from config or params
+    if connectivity_factor is None:
+        if cluster_adsorbate_config is not None:
+            connectivity_factor = cluster_adsorbate_config.structure_connectivity_factor
+        elif surface_config is not None:
+            connectivity_factor = surface_config.structure_connectivity_factor
+        else:
+            connectivity_factor = CONNECTIVITY_FACTOR
 
     resolved_system_type: SystemType = (
         "surface_cluster"

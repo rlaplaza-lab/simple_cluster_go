@@ -42,20 +42,19 @@ def test_ts_search_uses_only_tagged_final_minima(tmp_path):
         da.add_relaxed_step(a)
 
     # Ensure confid values are persisted in the DB key_value_pairs so marking can find exact matches
-    conn = sqlite3.connect(str(db_path))
-    cur = conn.cursor()
-    cur.execute("SELECT id, key_value_pairs FROM systems ORDER BY id ASC")
-    rows = cur.fetchall()
-    for row, cid in zip(rows, confid_list, strict=False):
-        row_id = row[0]
-        kvp = json.loads(row[1]) if row[1] else {}
-        kvp.update({"confid": cid})
-        cur.execute(
-            "UPDATE systems SET key_value_pairs = ? WHERE id = ?",
-            (json.dumps(kvp), row_id),
-        )
-    conn.commit()
-    conn.close()
+    with sqlite3.connect(str(db_path)) as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT id, key_value_pairs FROM systems ORDER BY id ASC")
+        rows = cur.fetchall()
+        for row, cid in zip(rows, confid_list, strict=False):
+            row_id = row[0]
+            kvp = json.loads(row[1]) if row[1] else {}
+            kvp.update({"confid": cid})
+            cur.execute(
+                "UPDATE systems SET key_value_pairs = ? WHERE id = ?",
+                (json.dumps(kvp), row_id),
+            )
+        conn.commit()
 
     from scgo.database.connection import close_data_connection
 
@@ -102,17 +101,16 @@ def test_ts_search_uses_only_tagged_final_minima(tmp_path):
     # Additionally verify DB rows now contain final flag for tagged confid
     assert_db_final_row(str(db_path), None, expect_final_id=False)
 
-    conn = sqlite3.connect(str(db_path))
-    cur = conn.cursor()
-    cur.execute("SELECT key_value_pairs FROM systems")
-    rows = cur.fetchall()
-    assert len(rows) > 0, "No rows written to systems"
+    with sqlite3.connect(str(db_path)) as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT key_value_pairs FROM systems")
+        rows = cur.fetchall()
+        assert len(rows) > 0, "No rows written to systems"
 
-    tagged = 0
-    for (kvp_json,) in rows:
-        kvp = json.loads(kvp_json) if kvp_json else {}
-        if kvp.get("final_unique_minimum"):
-            tagged += 1
+        tagged = 0
+        for (kvp_json,) in rows:
+            kvp = json.loads(kvp_json) if kvp_json else {}
+            if kvp.get("final_unique_minimum"):
+                tagged += 1
 
-    assert tagged == 2, f"Expected 2 tagged rows, found {tagged}"
-    conn.close()
+        assert tagged == 2, f"Expected 2 tagged rows, found {tagged}"

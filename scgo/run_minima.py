@@ -146,6 +146,7 @@ def run_scgo_trials(
         "diversity_max_references",
         "diversity_update_interval",
         "tag_final_minima",
+        "connectivity_factor",
         "adsorbate_definition",
         "adsorbate_fragment_template",
         "cluster_adsorbate_config",

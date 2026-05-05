@@ -8,15 +8,12 @@ from scgo.database.streaming import iter_database_minima
 
 def _create_dummy_db(db_path: Path) -> None:
     db_path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(db_path))
-    try:
+    with sqlite3.connect(str(db_path)) as conn:
         # Minimal table to emulate an ASE DB file (no scgo_metadata)
         conn.execute(
             "CREATE TABLE systems (id INTEGER PRIMARY KEY, energy REAL, key_value_pairs TEXT)"
         )
         conn.commit()
-    finally:
-        conn.close()
 
 
 def test_get_scgo_metadata_returns_empty_for_non_scgo_db(tmp_path: Path):

@@ -6,6 +6,7 @@ from dataclasses import dataclass
 
 from ase import Atoms
 
+from scgo.initialization.initialization_config import CONNECTIVITY_FACTOR
 from scgo.utils.logging import get_logger
 from scgo.utils.validation import validate_positive
 
@@ -73,6 +74,8 @@ class SurfaceSystemConfig:
         cluster_init_vacuum: Vacuum (Å) for isolated cluster seed generation.
         init_mode: Mode passed to :func:`scgo.initialization.create_initial_cluster`.
         max_placement_attempts: Max tries per structure for valid placement.
+        structure_connectivity_factor: Connectivity factor for cluster validation
+            (default 1.4). Can be overridden by go_params/ts_params['connectivity_factor'].
     """
 
     slab: Atoms
@@ -86,6 +89,7 @@ class SurfaceSystemConfig:
     cluster_init_vacuum: float = 8.0
     init_mode: str = "smart"
     max_placement_attempts: int = 200
+    structure_connectivity_factor: float = CONNECTIVITY_FACTOR
 
     def __post_init__(self) -> None:
         # Copy slab so post-init pbc adjustments do not mutate a shared Atoms.
@@ -98,6 +102,11 @@ class SurfaceSystemConfig:
         )
         validate_positive(
             "adsorption_height_max", self.adsorption_height_max, strict=True
+        )
+        validate_positive(
+            "structure_connectivity_factor",
+            self.structure_connectivity_factor,
+            strict=True,
         )
         if self.adsorption_height_min > self.adsorption_height_max:
             raise ValueError(

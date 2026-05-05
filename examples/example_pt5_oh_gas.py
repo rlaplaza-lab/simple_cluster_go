@@ -35,11 +35,13 @@ CLUSTER_ADSORBATE_CONFIG = ClusterAdsorbateConfig(
 def main() -> None:
     go_params = get_torchsim_ga_params(SEED)
     go_params["calculator"] = "MACE"
+    go_params["connectivity_factor"] = 1.8  # override default
     go_params["optimizer_params"]["ga"].update(
         niter=NITER, population_size=POPULATION_SIZE
     )
     ts_params = get_ts_search_params(system_type=SYSTEM_TYPE, seed=SEED)
     ts_params["max_pairs"] = MAX_PAIRS
+    ts_params["connectivity_factor"] = 1.8  # override default
     run_go_ts(
         COMPOSITION,
         go_params=go_params,

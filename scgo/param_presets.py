@@ -57,6 +57,7 @@ def get_default_params() -> dict[str, Any]:
         "imag_freq_threshold": 50.0,
         "n_trials": 1,
         "tag_final_minima": True,
+        "connectivity_factor": 1.4,  # Default connectivity factor for cluster validation
         "fitness_strategy": "low_energy",  # Default: minimize energy
         "diversity_reference_db": None,  # For diversity strategy
         "diversity_max_references": 100,  # Performance limit
@@ -162,6 +163,7 @@ def get_testing_params() -> dict[str, Any]:
         "validate_with_hessian": False,
         "calculator": "EMT",
         "seed": None,  # Will be overridden by function parameter
+        "connectivity_factor": 1.4,
         "optimizer_params": {
             "simple": {
                 "optimizer": "FIRE",
@@ -411,6 +413,8 @@ def get_ts_search_params(
     dictionary; high-level run APIs own those arguments.
     If ``seed`` is set, it is stored in the returned dict; :func:`run_go_ts` / ``run_ts_*``
     require it to be consistent with ``go_params['seed']`` and the ``seed=`` run argument.
+    The ``connectivity_factor`` key sets the global connectivity threshold for cluster
+    validation (default 1.4).
     """
     policy = get_system_policy(system_type)
 
@@ -421,6 +425,7 @@ def get_ts_search_params(
     params: dict[str, Any] = {
         "calculator": calculator,
         "calculator_kwargs": dict(calculator_kwargs),
+        "connectivity_factor": 1.4,
         "max_pairs": None,
         "energy_gap_threshold": 2.0,
         "similarity_tolerance": DEFAULT_COMPARATOR_TOL,

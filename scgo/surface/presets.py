@@ -5,6 +5,7 @@ from __future__ import annotations
 from ase import Atoms
 from ase.build import graphene
 
+from scgo.initialization.initialization_config import CONNECTIVITY_FACTOR
 from scgo.surface.config import SurfaceSystemConfig
 
 DEFAULT_GRAPHITE_SLAB_LAYERS = 5
@@ -31,6 +32,7 @@ def make_graphite_surface_config(
     slab_layers: int = DEFAULT_GRAPHITE_SLAB_LAYERS,
     slab_repeat_xy: int = DEFAULT_GRAPHITE_SLAB_REPEAT_XY,
     vacuum: float = DEFAULT_GRAPHITE_SLAB_VACUUM,
+    structure_connectivity_factor: float = CONNECTIVITY_FACTOR,
 ) -> SurfaceSystemConfig:
     """Graphite slab preset (top layer relaxes with adsorbate during GO/NEB)."""
     slab = build_graphite_slab(
@@ -44,6 +46,7 @@ def make_graphite_surface_config(
         n_relax_top_slab_layers=1,
         comparator_use_mic=True,
         max_placement_attempts=1000,
+        structure_connectivity_factor=structure_connectivity_factor,
     )
 
 

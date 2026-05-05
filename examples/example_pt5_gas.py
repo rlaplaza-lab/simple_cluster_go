@@ -27,6 +27,7 @@ def _build_go_params() -> dict:
     """Load GO preset, then tweak only the fields this run cares about."""
     go_params = get_torchsim_ga_params(SEED)
     go_params["calculator"] = "MACE"
+    go_params["connectivity_factor"] = 1.4  # default, but explicit
     go_params["optimizer_params"]["ga"].update(
         niter=NITER, population_size=POPULATION_SIZE
     )
@@ -37,6 +38,7 @@ def _build_ts_params() -> dict:
     """Load TS preset, then tweak only pairing/search budget fields."""
     ts_params = get_ts_search_params(system_type=SYSTEM_TYPE, seed=SEED)
     ts_params["max_pairs"] = MAX_PAIRS
+    ts_params["connectivity_factor"] = 1.4  # default, but explicit
     return ts_params
 
 

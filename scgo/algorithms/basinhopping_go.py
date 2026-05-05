@@ -163,6 +163,7 @@ def bh_go(
     write_timing_json: bool = False,
     detailed_timing: bool = False,
     cluster_adsorbate_config: ClusterAdsorbateConfig | None = None,
+    connectivity_factor: float | None = None,
     *,
     rng: np.random.Generator,
 ) -> list[tuple[float, Atoms]]:
@@ -221,12 +222,14 @@ def bh_go(
         system_type=system_type, surface_config=surface_config
     )
 
-    # Extract connectivity factor from cluster_adsorbate_config if available
-    connectivity_factor = (
-        cluster_adsorbate_config.structure_connectivity_factor
-        if cluster_adsorbate_config is not None
-        else CONNECTIVITY_FACTOR
-    )
+    # Extract connectivity factor from config or params
+    if connectivity_factor is None:
+        if cluster_adsorbate_config is not None:
+            connectivity_factor = cluster_adsorbate_config.structure_connectivity_factor
+        elif surface_config is not None:
+            connectivity_factor = surface_config.structure_connectivity_factor
+        else:
+            connectivity_factor = CONNECTIVITY_FACTOR
 
     policy = get_system_policy(system_type)
     surface_mode = policy.uses_surface

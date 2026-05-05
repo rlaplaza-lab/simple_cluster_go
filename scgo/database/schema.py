@@ -129,8 +129,7 @@ def get_scgo_metadata(db_path: str | Path) -> dict[str, str]:
     try:
         db_file = str(db_path)
         # Open read-only to avoid creating files or locking where possible.
-        conn = sqlite3.connect(f"file:{db_file}?mode=ro", uri=True, timeout=0.1)
-        try:
+        with sqlite3.connect(f"file:{db_file}?mode=ro", uri=True, timeout=0.1) as conn:
             cur = conn.execute(
                 "SELECT name FROM sqlite_master WHERE type='table' AND name='scgo_metadata'"
             )
@@ -138,8 +137,6 @@ def get_scgo_metadata(db_path: str | Path) -> dict[str, str]:
                 return {}
             rows = conn.execute("SELECT key, value FROM scgo_metadata").fetchall()
             return {r[0]: r[1] for r in rows}
-        finally:
-            conn.close()
     except (sqlite3.OperationalError, sqlite3.DatabaseError, FileNotFoundError):
         # On any read error (locked DB, non-existent file, etc.) treat as non-SCGO
         return {}
