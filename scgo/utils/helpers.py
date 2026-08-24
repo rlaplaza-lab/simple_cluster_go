@@ -27,6 +27,7 @@ from scipy.spatial import KDTree
 from scgo.constants import (
     DEFAULT_COMPARATOR_TOL,
     DEFAULT_ENERGY_TOLERANCE,
+    DEFAULT_FMAX_THRESHOLD,
     DEFAULT_PAIR_COR_MAX,
     MIN_ATOMIC_DISTANCE_WARNING,
     PENALTY_ENERGY,
@@ -446,7 +447,7 @@ def get_system_path_key(
 def is_true_minimum(
     atoms: Atoms,
     calculator: Calculator,
-    fmax_threshold: float = 0.05,
+    fmax_threshold: float = DEFAULT_FMAX_THRESHOLD,
     check_hessian: bool = True,
     imag_freq_threshold: float = 50.0,
 ) -> bool:

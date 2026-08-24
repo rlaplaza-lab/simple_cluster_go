@@ -9,6 +9,7 @@ from typing import Any
 from scgo.constants import (
     DEFAULT_COMPARATOR_TOL,
     DEFAULT_ENERGY_TOLERANCE,
+    DEFAULT_FMAX_THRESHOLD,
     DEFAULT_NEB_TANGENT_METHOD,
     DEFAULT_PAIR_COR_MAX,
     DEFAULT_TS_PAIR_COR_MAX,
@@ -53,7 +54,10 @@ __all__ = [
     "AVAILABLE_UMA_MODELS",
     "AVAILABLE_UPET_MODELS",
     "TS_DEFAULTS_BY_SYSTEM_TYPE",
+    "TS_NEB_FMAX",
+    "TS_POSTPROCESS_DEFAULTS",
     "default_calculator_kwargs",
+    "default_energy_gap_threshold",
     "get_default_params",
     "default_params_top_level_keys",
     "get_minimal_ga_params",
@@ -79,7 +83,10 @@ __all__ = [
 # step budgets may differ by type; force convergence must not.
 # 0.20 eV/Å is the attainable MACE CI-NEB floor for soft adsorbate MEPs; tighter
 # values often collapse interior saddles to endpoints before forces reach 0.05.
-_TS_NEB_FMAX: float = 0.20
+TS_NEB_FMAX: float = 0.20
+
+# Backwards-compatible alias (pre-0.9.0 private name).
+_TS_NEB_FMAX = TS_NEB_FMAX
 
 # --- Low-effort ("~25% of production") preset knobs -------------------------
 # Consumed by `get_low_effort_torchsim_ga_params` / `get_low_effort_ts_search_params`.
@@ -110,7 +117,7 @@ _LOW_EFFORT_NEB_FLOOR: int = 1000
 # ``assert defaults["neb_interpolation_mic"] is policy.neb_force_mic``).
 # Other knobs (n_images, steps, climb, alignment, pairing gates, ...) are
 # independent per type.
-# ``neb_fmax`` / ``torchsim_fmax`` are always ``_TS_NEB_FMAX`` (enforced in tests).
+# ``neb_fmax`` / ``torchsim_fmax`` are always ``TS_NEB_FMAX`` (enforced in tests).
 _GAS_TS_NEB_DEFAULTS: dict[str, Any] = {
     "neb_align_endpoints": True,
     "neb_interpolation_mic": False,
@@ -119,13 +126,13 @@ _GAS_TS_NEB_DEFAULTS: dict[str, Any] = {
     "neb_surface_max_lattice_shift": 1,
     "neb_n_images": 5,
     "neb_spring_constant": 0.1,
-    "neb_fmax": _TS_NEB_FMAX,
+    "neb_fmax": TS_NEB_FMAX,
     "neb_steps": "auto",
     "neb_climb": False,
     "neb_perturb_sigma": 0.0,
     "neb_interpolation_method": "idpp",
     "neb_tangent_method": DEFAULT_NEB_TANGENT_METHOD,
-    "torchsim_fmax": _TS_NEB_FMAX,
+    "torchsim_fmax": TS_NEB_FMAX,
     "torchsim_max_steps": "auto",
     "max_endpoint_mismatch": None,
     # Bare gas clusters get a looser clash gate and a tighter saddle-prominence
@@ -152,14 +159,14 @@ _SURFACE_TS_NEB_DEFAULTS: dict[str, Any] = {
     "neb_surface_max_lattice_shift": 1,
     "neb_n_images": 5,
     "neb_spring_constant": 0.1,
-    "neb_fmax": _TS_NEB_FMAX,
+    "neb_fmax": TS_NEB_FMAX,
     # Shared fmax with MIC/remap paths: keep a larger step budget than gas auto.
     "neb_steps": 2000,
     "neb_climb": False,
     "neb_perturb_sigma": 0.0,
     "neb_interpolation_method": "idpp",
     "neb_tangent_method": DEFAULT_NEB_TANGENT_METHOD,
-    "torchsim_fmax": _TS_NEB_FMAX,
+    "torchsim_fmax": TS_NEB_FMAX,
     "torchsim_max_steps": 2000,
     # Surface clusters newly gain the endpoint-displacement gate (was unset).
     "neb_prescreen_clash_distance": 0.7,
@@ -271,7 +278,7 @@ def _get_default_params_template() -> GLOptimizerParams:
         "calculator": "MACE",
         "seed": None,  # Will be overridden by function parameter
         "calculator_kwargs": {"model_name": "mace_matpes_0"},
-        "fmax_threshold": 0.05,
+        "fmax_threshold": DEFAULT_FMAX_THRESHOLD,
         "check_hessian": True,
         "imag_freq_threshold": 50.0,
         "n_jobs": DEFAULT_N_JOBS,  # Single CPU knob (see DEFAULT_N_JOBS); opt in with -1/-2
@@ -288,7 +295,7 @@ def _get_default_params_template() -> GLOptimizerParams:
         "optimizer_params": {
             "simple": {
                 "optimizer": "FIRE",
-                "fmax": 0.05,
+                "fmax": DEFAULT_FMAX_THRESHOLD,
                 "niter": 1,
                 "niter_local_relaxation": "auto",
                 "energy_tolerance": DEFAULT_ENERGY_TOLERANCE,
@@ -299,7 +306,7 @@ def _get_default_params_template() -> GLOptimizerParams:
             "bh": {
                 "optimizer": "FIRE",
                 "temperature": 1.0,  # Metropolis energy scale (eV), ASE-style
-                "fmax": 0.05,
+                "fmax": DEFAULT_FMAX_THRESHOLD,
                 "niter": "auto",
                 "dr": 0.2,
                 "move_fraction": 0.3,
@@ -322,7 +329,7 @@ def _get_default_params_template() -> GLOptimizerParams:
                 "niter_local_relaxation": "auto",
                 "mutation_probability": 0.4,
                 "offspring_fraction": 0.5,
-                "fmax": 0.05,
+                "fmax": DEFAULT_FMAX_THRESHOLD,
                 "vacuum": 10.0,
                 "energy_tolerance": DEFAULT_ENERGY_TOLERANCE,
                 "comparator_tol": DEFAULT_COMPARATOR_TOL,
@@ -375,6 +382,29 @@ def get_ts_defaults(system_type: SystemType) -> dict[str, Any]:
             f"{sorted(TS_DEFAULTS_BY_SYSTEM_TYPE)!r}."
         )
     return dict(TS_DEFAULTS_BY_SYSTEM_TYPE[system_type])
+
+
+def default_energy_gap_threshold(has_adsorbate: bool) -> float:
+    """Endpoint energy-gap cap (eV): adsorbate NEBs pair across a tighter window.
+
+    Single source for :func:`get_ts_search_params`,
+    ``coerce_ts_params_to_runner_kwargs`` callers, and the runner-side fallback.
+    """
+    return 0.75 if has_adsorbate else 2.0
+
+
+TS_POSTPROCESS_DEFAULTS: dict[str, Any] = {
+    "dedupe_minima": True,
+    "minima_energy_tolerance": DEFAULT_ENERGY_TOLERANCE,
+    "dedupe_ts": True,
+    "ts_energy_tolerance": DEFAULT_ENERGY_TOLERANCE,
+}
+"""System-type-agnostic TS post-processing defaults (single specification).
+
+Consumed by ``scgo.utils.ts_runner_kwargs.coerce_ts_params_to_runner_kwargs``;
+``run_transition_state_search`` keeps importing ``DEFAULT_ENERGY_TOLERANCE``
+directly for its signature.
+"""
 
 
 def get_default_params() -> GLOptimizerParams:
@@ -492,95 +522,68 @@ def _get_base_ga_benchmark_params(seed: int) -> GLOptimizerParams:
     return params
 
 
-def _attach_fairchem_torchsim_relaxer(
+def _attach_torchsim_relaxer(
     ga: dict[str, Any],
     calculator_kwargs: dict[str, Any],
     *,
-    max_steps: int | None,
-    autobatcher: bool | None = None,
-    expected_max_atoms: int | None = None,
-    dtype: Any | None = None,
-) -> None:
-    """Set ``ga["relaxer"]`` to a FairChem-backed :class:`~scgo.calculators.TorchSimBatchRelaxer`."""
-    from scgo.calculators.torchsim_helpers import TorchSimBatchRelaxer
-
-    fmax_val = float(ga.get("fmax", 0.05))
-    ga["relaxer"] = TorchSimBatchRelaxer(
-        model_kind="fairchem",
-        fairchem_model_name=calculator_kwargs["model_name"],
-        fairchem_task_name=calculator_kwargs.get("task_name"),
-        force_tol=fmax_val,
-        optimizer_name="fire",
-        max_steps=max_steps,
-        dtype=dtype,  # None -> model default; set torch.float32 for speed
-        autobatcher=autobatcher,
-        expected_max_atoms=expected_max_atoms,
-    )
-
-
-def _attach_upet_torchsim_relaxer(
-    ga: dict[str, Any],
-    calculator_kwargs: dict[str, Any],
-    *,
-    max_steps: int | None,
-    autobatcher: bool | None = None,
-    expected_max_atoms: int | None = None,
-    dtype: Any | None = None,
-) -> None:
-    """Set ``ga["relaxer"]`` to a UPET-backed :class:`~scgo.calculators.TorchSimBatchRelaxer`.
-
-    Device defaults to CUDA when available. ``autobatcher=None`` enables
-    TorchSim ``InFlightAutoBatcher`` on GPU (batched population relaxations).
-    Model dtype is synced from metatomic capabilities after load.
-    """
-    import torch
-
-    from scgo.calculators.torchsim_helpers import TorchSimBatchRelaxer
-
-    fmax_val = float(ga.get("fmax", 0.05))
-    on_cuda = torch.cuda.is_available()
-    ga["relaxer"] = TorchSimBatchRelaxer(
-        model_kind="upet",
-        upet_model_name=calculator_kwargs.get("model_name"),
-        upet_version=calculator_kwargs.get("version"),
-        upet_checkpoint_path=calculator_kwargs.get("checkpoint_path"),
-        upet_non_conservative=bool(calculator_kwargs.get("non_conservative", False)),
-        force_tol=fmax_val,
-        optimizer_name="fire",
-        max_steps=max_steps,
-        device=torch.device("cuda") if on_cuda else torch.device("cpu"),
-        dtype=dtype,  # None -> model default; set torch.float32 for speed
-        autobatcher=autobatcher,
-        expected_max_atoms=expected_max_atoms,
-        max_atoms_to_try=expected_max_atoms,
-    )
-
-
-def _attach_mace_torchsim_relaxer(
-    ga: dict[str, Any],
-    calculator_kwargs: dict[str, Any],
-    *,
+    relaxer_kind: str,
     seed: int | None = None,
     max_steps: int | None,
-    autobatcher: bool | None = True,
-    expected_max_atoms: int | None = 600,
+    autobatcher: bool | None = None,
+    expected_max_atoms: int | None = None,
     dtype: Any | None = None,
 ) -> None:
-    """Set ``ga["relaxer"]`` to a MACE-backed :class:`~scgo.calculators.TorchSimBatchRelaxer`."""
+    """Set ``ga["relaxer"]`` to a calculator-backed TorchSimBatchRelaxer.
+
+    One parameterized builder for the ``fairchem`` / ``upet`` / ``mace``
+    relaxer kinds. ``dtype=None`` keeps the model default (callers pass
+    ``torch.float32`` for speed); the UPET branch syncs its device from CUDA
+    availability and mirrors ``expected_max_atoms`` into
+    ``max_atoms_to_try``.
+    """
     from scgo.calculators.torchsim_helpers import TorchSimBatchRelaxer
 
-    fmax_val = float(ga.get("fmax", 0.05))
-    mace_model = calculator_kwargs.get("model_name", "mace_matpes_0")
-    ga["relaxer"] = TorchSimBatchRelaxer(
-        force_tol=fmax_val,
-        optimizer_name="fire",
-        mace_model_name=mace_model,
-        seed=seed,
-        max_steps=max_steps,
-        dtype=dtype,  # None -> model default; set torch.float32 for speed
-        autobatcher=autobatcher,
-        expected_max_atoms=expected_max_atoms,
-    )
+    fmax_val = float(ga.get("fmax", DEFAULT_FMAX_THRESHOLD))
+    common_kwargs: dict[str, Any] = {
+        "force_tol": fmax_val,
+        "optimizer_name": "fire",
+        "max_steps": max_steps,
+        "dtype": dtype,
+        "autobatcher": autobatcher,
+        "expected_max_atoms": expected_max_atoms,
+    }
+    if relaxer_kind == "fairchem":
+        ga["relaxer"] = TorchSimBatchRelaxer(
+            model_kind="fairchem",
+            fairchem_model_name=calculator_kwargs["model_name"],
+            fairchem_task_name=calculator_kwargs.get("task_name"),
+            **common_kwargs,
+        )
+    elif relaxer_kind == "upet":
+        import torch
+
+        on_cuda = torch.cuda.is_available()
+        ga["relaxer"] = TorchSimBatchRelaxer(
+            model_kind="upet",
+            upet_model_name=calculator_kwargs.get("model_name"),
+            upet_version=calculator_kwargs.get("version"),
+            upet_checkpoint_path=calculator_kwargs.get("checkpoint_path"),
+            upet_non_conservative=bool(
+                calculator_kwargs.get("non_conservative", False)
+            ),
+            device=torch.device("cuda") if on_cuda else torch.device("cpu"),
+            max_atoms_to_try=expected_max_atoms,
+            **common_kwargs,
+        )
+    elif relaxer_kind == "mace":
+        mace_model = calculator_kwargs.get("model_name", "mace_matpes_0")
+        ga["relaxer"] = TorchSimBatchRelaxer(
+            mace_model_name=mace_model,
+            seed=seed,
+            **common_kwargs,
+        )
+    else:
+        raise SCGOValidationError(f"Unknown relaxer_kind={relaxer_kind!r}")
 
 
 def _build_ga_calculator_params(
@@ -626,36 +629,16 @@ def _build_ga_calculator_params(
         autobatcher = None
         expected_max_atoms = None
 
-    if relaxer_kind == "fairchem":
-        _attach_fairchem_torchsim_relaxer(
-            ga,
-            params["calculator_kwargs"],
-            max_steps=None,
-            autobatcher=autobatcher,
-            expected_max_atoms=expected_max_atoms,
-            dtype=torch.float32,
-        )
-    elif relaxer_kind == "upet":
-        _attach_upet_torchsim_relaxer(
-            ga,
-            params["calculator_kwargs"],
-            max_steps=None,
-            autobatcher=autobatcher,
-            expected_max_atoms=expected_max_atoms,
-            dtype=torch.float32,
-        )
-    elif relaxer_kind == "mace":
-        _attach_mace_torchsim_relaxer(
-            ga,
-            params["calculator_kwargs"],
-            seed=seed,
-            max_steps=None,
-            autobatcher=autobatcher,
-            expected_max_atoms=expected_max_atoms,
-            dtype=torch.float32,
-        )
-    else:
-        raise SCGOValidationError(f"Unknown relaxer_kind={relaxer_kind!r}")
+    _attach_torchsim_relaxer(
+        ga,
+        params["calculator_kwargs"],
+        relaxer_kind=relaxer_kind,
+        seed=seed,
+        max_steps=None,
+        autobatcher=autobatcher,
+        expected_max_atoms=expected_max_atoms,
+        dtype=torch.float32,
+    )
 
     return params
 
@@ -891,7 +874,7 @@ def get_ts_search_params(
         "enforce_adsorbate_subgraph_integrity": True,
         "max_pairs": None,
         # Adsorbate NEBs need closer pairs; bare clusters keep the wider window.
-        "energy_gap_threshold": 0.75 if policy.has_adsorbate else 2.0,
+        "energy_gap_threshold": default_energy_gap_threshold(policy.has_adsorbate),
         "similarity_tolerance": DEFAULT_COMPARATOR_TOL,
         "similarity_pair_cor_max": DEFAULT_TS_PAIR_COR_MAX,
         "use_torchsim": True,

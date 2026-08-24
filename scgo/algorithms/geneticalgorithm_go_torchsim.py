@@ -65,6 +65,7 @@ from scgo.cluster_adsorbate.rigid import enforce_frozen_adsorbate_geometry
 from scgo.constants import (
     DEFAULT_COMPARATOR_TOL,
     DEFAULT_ENERGY_TOLERANCE,
+    DEFAULT_FMAX_THRESHOLD,
     DEFAULT_PAIR_COR_MAX,
 )
 from scgo.database import (
@@ -942,7 +943,7 @@ def ga_go(
     calculator: Any,
     *,
     niter: int = 10,
-    fmax: float = 0.05,
+    fmax: float = DEFAULT_FMAX_THRESHOLD,
     niter_local_relaxation: int = 250,
     optimizer: type[Optimizer] = FIRE,
     energy_tolerance: float = DEFAULT_ENERGY_TOLERANCE,

@@ -21,6 +21,7 @@ from scgo.cluster_adsorbate.config import ClusterAdsorbateConfig
 from scgo.cluster_adsorbate.constraints import attach_fix_bond_lengths
 from scgo.cluster_adsorbate.placement import place_fragment_on_cluster
 from scgo.cluster_adsorbate.validation import validate_combined_cluster_structure
+from scgo.constants import DEFAULT_FMAX_THRESHOLD
 from scgo.exceptions import SCGORuntimeError, SCGOValidationError
 from scgo.metadata.provenance import output_json_provenance
 from scgo.utils.rng_helpers import ensure_rng_or_create
@@ -50,7 +51,7 @@ def relax_metal_cluster_with_adsorbate(
     bond_pairs: Sequence[tuple[int, int]] = (),
     fix_core: bool = True,
     optimizer: type[Optimizer] = LBFGS,
-    fmax: float = 0.05,
+    fmax: float = DEFAULT_FMAX_THRESHOLD,
     steps: int = 200,
     preplaced: Atoms | None = None,
 ) -> tuple[Atoms, dict[str, Any]]:

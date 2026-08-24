@@ -15,7 +15,7 @@ import numpy as np
 from ase.calculators.emt import EMT
 
 from scgo.cluster_adsorbate.config import resolve_cluster_adsorbate_config
-from scgo.constants import SURFACE_GA_MIN_LOCAL_RELAX_STEPS
+from scgo.constants import DEFAULT_FMAX_THRESHOLD, SURFACE_GA_MIN_LOCAL_RELAX_STEPS
 from scgo.exceptions import (
     SCGOValidationError,
 )
@@ -730,7 +730,7 @@ def log_configuration(
         "SCGO config: validate_with_hessian=%s check_hessian=%s fmax_threshold=%s imag_freq_threshold=%s",
         params.get("validate_with_hessian", False),
         params.get("check_hessian", True),
-        params.get("fmax_threshold", 0.05),
+        params.get("fmax_threshold", DEFAULT_FMAX_THRESHOLD),
         params.get("imag_freq_threshold", 50.0),
     )
 

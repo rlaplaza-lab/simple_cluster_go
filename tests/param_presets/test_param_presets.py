@@ -63,9 +63,9 @@ def test_ts_defaults_keys_match_system_type_policies():
 def test_ts_defaults_fmax_matches_shared_constant(system_type):
     """Force-convergence thresholds are shared, not per system type."""
     defaults = get_ts_defaults(system_type)
-    shared = float(param_presets_module._TS_NEB_FMAX)
+    shared = float(param_presets_module.TS_NEB_FMAX)
     assert shared == TS_FMAX_CONVERGED, (
-        f"Production _TS_NEB_FMAX={shared} drifted from pinned "
+        f"Production TS_NEB_FMAX={shared} drifted from pinned "
         f"TS_FMAX_CONVERGED={TS_FMAX_CONVERGED}"
     )
     assert float(defaults["neb_fmax"]) == shared

@@ -772,9 +772,7 @@ def test_get_low_effort_upet_ga_params_relaxer_matches_nondefault_model(monkeypa
         captured["calculator_kwargs"] = dict(calculator_kwargs)
         ga["relaxer"] = SimpleNamespace(max_steps=kwargs.get("max_steps"))
 
-    monkeypatch.setattr(
-        "scgo.param_presets._attach_upet_torchsim_relaxer", _fake_attach
-    )
+    monkeypatch.setattr("scgo.param_presets._attach_torchsim_relaxer", _fake_attach)
     params = get_low_effort_upet_ga_params(
         system_type="gas_cluster",
         model_name="pet-mad-xl",

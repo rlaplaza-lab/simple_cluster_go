@@ -15,6 +15,7 @@ from typing import Any, Literal
 from ase import Atoms
 from ase.calculators.calculator import Calculator
 
+from scgo.constants import DEFAULT_FMAX_THRESHOLD
 from scgo.exceptions import (
     SCGODatabaseError,
     SCGOFileError,
@@ -244,7 +245,7 @@ def _run_go_trials(
             else get_calculator_class(params["calculator"])(**calculator_kwargs)
         ),
         validate_with_hessian=params.get("validate_with_hessian", False),
-        fmax_threshold=params.get("fmax_threshold", 0.05),
+        fmax_threshold=params.get("fmax_threshold", DEFAULT_FMAX_THRESHOLD),
         check_hessian=params.get("check_hessian", True),
         imag_freq_threshold=params.get("imag_freq_threshold", 50.0),
         validation_n_jobs=inherit_n_jobs(

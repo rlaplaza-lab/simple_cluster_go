@@ -27,6 +27,7 @@ from scipy.spatial.distance import pdist
 from scgo.calculators import torchsim_helpers as _tsh
 from scgo.constants import (
     DEFAULT_COMPARATOR_TOL,
+    DEFAULT_FMAX_THRESHOLD,
     DEFAULT_NEB_TANGENT_METHOD,
     DEFAULT_TS_PAIR_COR_MAX,
 )
@@ -1913,7 +1914,7 @@ def find_transition_state(
     n_images: int = 3,
     spring_constant: float = 0.1,
     optimizer: type[Optimizer] = FIRE,
-    fmax: float = 0.05,
+    fmax: float = DEFAULT_FMAX_THRESHOLD,
     neb_steps: int = 500,
     trajectory: str | None = None,
     verbosity: int = 1,

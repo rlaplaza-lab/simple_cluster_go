@@ -16,6 +16,7 @@ from ase.optimize import LBFGS
 from ase.optimize.optimize import Optimizer
 
 from scgo.cluster_adsorbate.config import ClusterAdsorbateConfig
+from scgo.constants import DEFAULT_FMAX_THRESHOLD
 from scgo.database import HPC_DATABASE_EXCEPTIONS, close_data_connection, setup_database
 from scgo.database.sync import PRESET_HPC, database_retry
 from scgo.exceptions import SCGOValidationError
@@ -82,7 +83,7 @@ def simple_go(
     output_dir: str,
     rng: np.random.Generator,
     niter: int = 1,
-    fmax: float = 0.05,
+    fmax: float = DEFAULT_FMAX_THRESHOLD,
     niter_local_relaxation: int = 250,
     optimizer: type[Optimizer] = LBFGS,
     verbosity: int = 1,
