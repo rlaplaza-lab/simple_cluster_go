@@ -11,6 +11,7 @@ from __future__ import annotations
 import itertools
 
 import numpy as np
+import pytest
 from ase import Atoms
 
 from scgo.ts_search.parallel_neb import (
@@ -278,3 +279,103 @@ def test_parallel_step0_reuses_energy_screen_forces(cu3_triangle, cu3_linear):
     # screen + post-loop PES refresh; step 0 reused the screen cache
     assert relaxer.calls == 2
     assert neb.get_force_calls() == 1
+
+
+def test_run_parallel_neb_forwards_bond_tolerance_to_interpolate(
+    monkeypatch, cu3_triangle, cu3_linear, tmp_path
+):
+    """The parallel runner forwards ``neb_interpolation_bond_tolerance_a`` (F13)."""
+    from unittest.mock import MagicMock, patch
+
+    from scgo.ts_search.parallel_neb import run_parallel_neb_search
+    from scgo.utils.ts_runner_kwargs import NebRunConfig
+
+    cfg_kwargs: dict = {
+        "neb_n_images": 3,
+        "neb_spring_constant": 0.1,
+        "neb_fmax": 0.05,
+        "neb_steps": 2,
+        "neb_climb": False,
+        "neb_interpolation_method": "linear",
+        "neb_align_endpoints": False,
+        "neb_perturb_sigma": 0.0,
+        "neb_interpolation_mic": False,
+        "neb_tangent_method": "aseneb",
+        "neb_surface_cell_remap": True,
+        "neb_surface_lattice_rotation": True,
+        "neb_surface_max_lattice_shift": 1,
+        "n_slab": 0,
+        "n_core_mobile": None,
+        "n_adsorbate_mobile": None,
+        "adsorbate_fragment_lengths": None,
+        "max_endpoint_mismatch": None,
+        "adsorbate_definition": None,
+        "connectivity_factor": None,
+        "allow_cluster_fragmentation": False,
+        "allow_adsorbate_surface_detachment": False,
+        "enforce_adsorbate_subgraph_integrity": True,
+        "system_type": "gas_cluster",
+        "surface_config": None,
+        "torchsim_params": {},
+        "neb_prescreen_clash_distance": 1.0,
+        "min_saddle_prominence": 0.10,
+        "neb_max_spurious_barrier": 8.0,
+        "layer_cluster_threshold_ang": 0.4,
+        "neb_interpolation_bond_tolerance_a": 0.37,
+    }
+    neb_cfg = NebRunConfig(**cfg_kwargs)
+
+    captured: dict = {}
+
+    def _fake_interpolate(a1, a2, **kwargs):
+        captured.update(kwargs)
+        return [a1.copy(), a2.copy()]
+
+    class _FakeRelaxer:
+        def relax_batch(self, atoms_list, steps=0):
+            out = []
+            for a in atoms_list:
+                ra = a.copy()
+                ra.arrays["forces"] = np.zeros((len(a), 3))
+                out.append((0.0, ra))
+            return out
+
+    class _StubBatch:
+        def __init__(self, neb_instances, *args, **kwargs):
+            self.neb_instances = neb_instances
+
+        def run_optimization(self, fmax=0.05, max_steps=100):
+            return [
+                {"converged": False, "final_fmax": None, "steps_taken": 1}
+                for _ in self.neb_instances
+            ]
+
+    with (
+        patch(
+            "scgo.ts_search.parallel_neb.prepare_neb_endpoints",
+            side_effect=lambda a, b, _cfg: (a.copy(), b.copy()),
+        ),
+        patch(
+            "scgo.ts_search.parallel_neb.interpolate_path",
+            side_effect=_fake_interpolate,
+        ),
+        patch("scgo.ts_search.parallel_neb.validate_initial_neb_path"),
+        patch(
+            "scgo.ts_search.parallel_neb._tsh.TorchSimBatchRelaxer",
+            return_value=_FakeRelaxer(),
+        ),
+        patch("scgo.ts_search.parallel_neb.ParallelNEBBatch", _StubBatch),
+        patch("scgo.ts_search.parallel_neb._finalize_neb_result", MagicMock()),
+        patch("scgo.ts_search.parallel_neb.save_neb_result"),
+    ):
+        results, _meta = run_parallel_neb_search(
+            [(0, 1)],
+            [(0.0, cu3_triangle), (0.5, cu3_linear)],
+            neb_cfg=neb_cfg,
+            run_dir=tmp_path,
+            rng=None,
+            verbosity=0,
+        )
+
+    assert results
+    assert captured["neb_interpolation_bond_tolerance_a"] == pytest.approx(0.37)

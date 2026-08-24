@@ -11,6 +11,7 @@ from ase import Atoms
 from ase.optimize import FIRE
 
 from scgo.calculators import torchsim_helpers as _tsh
+from scgo.constants import DEFAULT_FMAX_THRESHOLD
 from scgo.exceptions import SCGOValidationError
 from scgo.metadata.provenance import is_cuda_oom_error
 from scgo.utils.logging import get_logger
@@ -273,7 +274,7 @@ class ParallelNEBBatch:
 
     def run_optimization(
         self,
-        fmax: float = 0.05,
+        fmax: float = DEFAULT_FMAX_THRESHOLD,
         max_steps: int = 500,
     ) -> list[dict[str, Any]]:
         """Optimize NEBs using batched evaluations; return per-NEB summaries.
@@ -637,6 +638,9 @@ def run_parallel_neb_search(
             neb_surface_cell_remap=neb_cfg.neb_surface_cell_remap,
             neb_surface_lattice_rotation=neb_cfg.neb_surface_lattice_rotation,
             neb_surface_max_lattice_shift=neb_cfg.neb_surface_max_lattice_shift,
+            neb_interpolation_bond_tolerance_a=(
+                neb_cfg.neb_interpolation_bond_tolerance_a
+            ),
             verbosity=verbosity,
         )
         try:
