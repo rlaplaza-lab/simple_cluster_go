@@ -102,6 +102,14 @@ near-copies::
 On slabs, distance wrapping is on by default. Turn it off with
 ``comparator_use_mic=False`` when you build the surface.
 
+.. caution::
+
+   ``comparator_use_mic=False`` affects **GO uniqueness only**. Transition
+   states always use minimum-image distances on surface types — TS dedupe,
+   pair selection, and NEB interpolation force MIC via
+   :func:`~scgo.system_types.resolve_neb_mic`, and the runner logs a warning
+   when the knob disagrees.
+
 Transition states
 -----------------
 

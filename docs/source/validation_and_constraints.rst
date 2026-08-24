@@ -98,7 +98,18 @@ After global optimization,
 :func:`~scgo.minima_search.core.run_trials` applies the same structural gate to
 deduplicated unique candidates before the Hessian/vibration check. See
 :doc:`/uniqueness`. Surface candidates are checked against the prepared slab
-search config when the slab is the search target.
+search config when the slab is the search target, and the frozen bottom-layer
+prefix is passed as the deposit boundary (``n_slab_deposit``) so a detached /
+migrated search-mobile sheet is rejected exactly like at GA storage time. The
+basin-hopping inline gates apply the same deposit-aware boundary to the relaxed
+seed and every trial.
+
+.. note::
+
+   For slab-search adsorbate types (``surface_adsorbate``, and any
+   ``*_adsorbate`` type where the slab top layers are the search core), metal
+   cores are rejected up front: the mobile core **is** the supported slab top.
+   Pass adsorbates only (``core_symbols=[]``).
 
 The connectivity factor resolves the same way at every gate: explicit
 ``connectivity_factor``, then ``ClusterAdsorbateConfig``, then
@@ -119,6 +130,26 @@ soft ranking (``pair_score_*``) are documented under **Pair selection** in
 pool (then re-rank) via
 :func:`~scgo.ts_search.transition_state_io.resolve_ts_pair_select_cap`. Bare
 types do not. See **Budget and oversampling** in :doc:`/parameters`.
+
+Pairing regimes per system type (intentional):
+
+- ``surface_cluster`` uses the **bare-surface** regime: no core-RMS gate;
+  distinctness and mismatch gates only.
+- On ``surface_adsorbate`` runs with an inferred top-layer mobile block, the
+  inferred block is gated by ``pair_core_rms_max`` (default ``2.0`` Å). Whole
+  layer shifts can legitimately exceed this; raise the knob to relax.
+
+.. note::
+
+   The pre-screen geometry gates (images, clash distance, displacement) are
+   fixed-size knobs — they do not scale with the number of mobile atoms. Large
+   search-mobile layers may need manual retuning of
+   ``neb_prescreen_clash_distance`` / ``max_endpoint_mismatch``.
+
+.. note::
+
+   Optimized NEB bands are compared with plain Cartesian image differences;
+   minimum-image distances apply at interpolation and at the gates only.
 
 NEB pre-screen gates
 --------------------

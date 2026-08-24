@@ -1,5 +1,63 @@
 # Changelog
 
+## 0.9.0
+
+### Fixed
+
+- TS pre-pair minima dedupe is now **partition-aware** for slab-search types
+  (`surface`, `surface_adsorbate`): the comparison window is the mobile
+  partition `[fixed | top layers | adsorbate]` tail, matching the GO-phase
+  `search_mobile_count` contract. Distinct top-layer registries no longer
+  collapse because the frozen slab dominated (or diluted) the fingerprint, and
+  bare `surface` runs no longer compare the full frozen structure.
+- `layer_cluster_threshold_ang` is now actually applied on the TS path: NEB
+  endpoint `FixAtoms` attachment forwards the configured threshold instead of
+  silently using the module constant.
+- The IDPP priority screen honors the resolved per-system
+  `min_saddle_prominence` / `neb_max_spurious_barrier` knobs (previously
+  hardcoded screen defaults applied), and forwards
+  `neb_interpolation_bond_tolerance_a` to interpolation on both the IDPP
+  screen and the parallel NEB runner — matching the serial path.
+- Direct calls to `run_transition_state_search` that omit NEB knobs now resolve
+  them from the same per-system presets as `get_ts_search_params`
+  (adsorbates: spring `0.5`, steps `4000`, climb; surfaces: steps `2000`;
+  shared `neb_fmax=0.20`). High-level runner behavior is unchanged.
+- Surface TS runs warn when `comparator_use_mic=False`: the knob affects GO
+  comparators only; TS dedupe/pairing/NEB force MIC for surface types.
+- `run_trials` logs which value wins when a `comparator_n_top` override differs
+  from the resolved `search_mobile_count`.
+
+### Added
+
+- `tag_ts_in_db` is settable via `ts_params` (boolean, default `True`) and
+  flows through to the TS runner.
+- Strict `ts_params` key validation: unknown keys are rejected up front with an
+  error listing the offending and expected keys (mirrors GO behavior).
+- `DEFAULT_FMAX_THRESHOLD` constant replaces duplicated `0.05` literals;
+  dead `DEFAULT_PAIR_COR_CUM_DIFF` constant removed.
+
+### Changed
+
+- Metal cores are rejected on slab-search adsorbate types
+  (`validate_adsorbate_definition`): the slab top layers *are* the search core;
+  pass adsorbates only.
+- The `run_trials` final structural gate and the basin-hopping inline gates now
+  pass the frozen bottom-layer prefix (`n_slab_deposit`) for slab-search types,
+  so a detached/migrated search-mobile sheet is rejected exactly like at GA
+  storage time.
+- Shared default specifications: `default_energy_gap_threshold(has_adsorbate)`
+  single-sources the `0.75`/`2.0` pair-gap rule, `TS_POSTPROCESS_DEFAULTS`
+  single-sources the TS dedupe/tolerance defaults, `TS_NEB_FMAX` is the public
+  shared NEB force tolerance, and one parameterized
+  `_attach_torchsim_relaxer` builder replaces the three per-calculator
+  relaxer builders.
+
+### Removed
+
+- `NebRunConfig.binding_penetration_tolerance_a` field: the value still flows
+  via the explicit function argument into the post-NEB surface geometry gate;
+  the never-read dataclass field is gone.
+
 ## 0.8.0
 
 ### Added

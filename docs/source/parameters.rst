@@ -411,7 +411,17 @@ Passed as ``ts_params`` to ``run_ts_search``, ``run_ts_campaign``, ``run_go_ts``
    * - ``dedupe_minima``
      - ``True``
      - Drop duplicate GO minima before pairing (GO uniqueness; see
-       :doc:`/uniqueness`)
+       :doc:`/uniqueness`). For slab-search types the comparison window is
+       the mobile partition ``[fixed | top layers | adsorbate]`` tail —
+       matching GO-phase ``search_mobile_count`` semantics — so distinct
+       top-layer registries survive and the frozen bottom slab cannot dilute
+       the comparison. Other types compare the trailing mobile core +
+       adsorbate atoms. The ``minima_energy_tolerance`` semantics are
+       unchanged.
+   * - ``tag_ts_in_db``
+     - ``True``
+     - Tag unique successful saddles in the minima databases (consumed by TS
+       resume and downstream loading). Settable via ``ts_params``.
    * - ``connectivity_factor``
      - ``1.4``
      - Same connectivity spec as GO (float or per-element/pair dict); resolved
@@ -448,6 +458,24 @@ Passed as ``ts_params`` to ``run_ts_search``, ``run_ts_campaign``, ``run_go_ts``
    * - ``write_timing_json``
      - ``False``
      - Write ``{ts_run_dir}/timing.json``; enables ``go_ts_timing.json`` rollup in ``run_go_ts``
+
+Unknown ``ts_params`` keys are rejected up front with a
+:class:`~scgo.exceptions.SCGOValidationError` listing the offending keys and
+the expected set (mirroring the GO behavior) — a typo such as ``neb_fmx``
+fails fast instead of being silently ignored.
+
+Direct calls to :func:`~scgo.ts_search.run_transition_state_search` that omit
+NEB knobs resolve them from the same per-system presets
+(:func:`~scgo.param_presets.get_ts_defaults`) used by ``get_ts_search_params``:
+adsorbate types get spring constant ``0.5``, steps ``4000`` and climb; bare
+surfaces get steps ``2000``; MIC / cell remap / lattice rotation follow the
+system policy.
+
+.. note::
+
+   With ``neb_steps="auto"`` on surface types, the step budget is derived from
+   the **total expanded** atom count (slab included), not just the mobile
+   region — budget accordingly when using large slabs.
 
 **Pair selection**
 (:func:`~scgo.ts_search.transition_state_io.select_structure_pairs`;
@@ -680,6 +708,19 @@ logs include skip counts (energy gap, mismatch, core RMS, and so on).
    * - ``neb_tangent_method``
      - (default)
      - NEB tangent method
+   * - ``neb_interpolation_bond_tolerance_a``
+     - ``0.5``
+     - Post-interpolation FixBondLengths stretch diagnostic (Å); warns, never
+       raises. Applied on the serial, parallel, and IDPP-screen paths.
+   * - ``layer_cluster_threshold_ang``
+     - ``0.4``
+     - Layer-clustering threshold (Å) used when resolving which slab layers
+       count as distinct for NEB endpoint ``FixAtoms`` attachment
+       (``n_relax_top_slab_layers`` / ``n_fix_bottom_slab_layers`` modes).
+   * - ``binding_penetration_tolerance_a``
+     - ``0.1``
+     - Mobile-atoms-below-slab-top tolerance (Å) for the post-NEB surface
+       geometry gate.
    * - ``torchsim_fmax``
      - ``0.20``
      - TorchSim force tolerance (mapped internally). Keep equal to ``neb_fmax`` unless you intentionally diverge them
