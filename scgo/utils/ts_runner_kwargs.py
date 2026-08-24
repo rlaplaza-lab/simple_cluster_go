@@ -5,11 +5,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from scgo.constants import DEFAULT_ENERGY_TOLERANCE
 from scgo.exceptions import (
     SCGOValidationError,
 )
-from scgo.param_presets import get_ts_defaults
+from scgo.param_presets import TS_POSTPROCESS_DEFAULTS, get_ts_defaults
 from scgo.surface.config import SurfaceSystemConfig
 from scgo.system_types import ConnectivityFactorInput, SystemType, get_system_policy
 from scgo.utils.torchsim_policy import resolve_ts_torchsim_flags
@@ -40,7 +39,6 @@ class NebRunConfig:
     neb_prescreen_clash_distance: float
     min_saddle_prominence: float
     neb_max_spurious_barrier: float
-    binding_penetration_tolerance_a: float
     layer_cluster_threshold_ang: float
     neb_interpolation_bond_tolerance_a: float
     adsorbate_definition: Any | None
@@ -60,6 +58,86 @@ class NebRunConfig:
     # batch. Applied together with ``parallel_neb_max_bands`` (both bounds hold);
     # ``None`` means "no atom budget" (all bands in one batch).
     parallel_neb_max_batch_atoms: int | None = None
+
+
+# Keys without per-system defaults: pass through as-is (None when missing is
+# fine for the runner).
+_TS_PARAM_PASSTHROUGH_KEYS: tuple[str, ...] = (
+    "write_timing_json",
+    "max_pairs",
+    "energy_gap_threshold",
+    "similarity_tolerance",
+    "similarity_pair_cor_max",
+    "pair_core_rms_max",
+    "pair_score_gap_center",
+    "pair_score_gap_width",
+    "pair_score_cum_scale",
+    "pair_score_mismatch_scale",
+    "pair_score_core_rms_scale",
+    "pair_score_w_gap",
+    "pair_score_w_distinct",
+    "pair_score_w_mismatch",
+    "pair_score_w_core",
+    "connectivity_factor",
+    "cluster_adsorbate_config",
+    "allow_cluster_fragmentation",
+    "allow_adsorbate_surface_detachment",
+    "enforce_adsorbate_subgraph_integrity",
+)
+
+# NEB knobs that vary per system_type: fall back to the defaults table.
+# torchsim_* defaults are consumed only in torchsim_params above; they are
+# not valid top-level kwargs for run_transition_state_search.
+_TS_PARAM_NEB_KEYS: tuple[str, ...] = (
+    "neb_align_endpoints",
+    "neb_interpolation_mic",
+    "neb_n_images",
+    "neb_spring_constant",
+    "neb_fmax",
+    "neb_steps",
+    "neb_climb",
+    "neb_perturb_sigma",
+    "neb_interpolation_method",
+    "neb_tangent_method",
+    "neb_surface_cell_remap",
+    "neb_surface_lattice_rotation",
+    "neb_surface_max_lattice_shift",
+    "max_endpoint_mismatch",
+    "neb_prescreen_clash_distance",
+    "min_saddle_prominence",
+    "neb_max_spurious_barrier",
+    # Consumed by the post-NEB surface geometry gate, not the NebRunConfig.
+    "binding_penetration_tolerance_a",
+    "layer_cluster_threshold_ang",
+    "neb_interpolation_bond_tolerance_a",
+    "parallel_neb_max_bands",
+    "parallel_neb_max_batch_atoms",
+)
+
+# Generic (system-type-agnostic) defaults: single source in
+# ``scgo.param_presets.TS_POSTPROCESS_DEFAULTS``.
+_TS_PARAM_GENERIC_DEFAULTS: dict[str, Any] = dict(TS_POSTPROCESS_DEFAULTS)
+
+# Every key ``coerce_ts_params_to_runner_kwargs`` understands: the canonical
+# :func:`~scgo.param_presets.get_ts_search_params` output plus the explicit
+# runner-only keys. Anything else is a typo and rejected up front.
+_TS_PARAM_ALLOWLIST: frozenset[str] = (
+    frozenset(_TS_PARAM_PASSTHROUGH_KEYS)
+    | frozenset(_TS_PARAM_NEB_KEYS)
+    | frozenset(_TS_PARAM_GENERIC_DEFAULTS)
+    | {
+        "calculator",
+        "calculator_kwargs",
+        "use_torchsim",
+        "use_parallel_neb",
+        "torchsim_params",
+        "torchsim_fmax",
+        "torchsim_max_steps",
+        "surface_config",
+        "seed",
+        "tag_ts_in_db",
+    }
+)
 
 
 def coerce_ts_params_to_runner_kwargs(
@@ -84,6 +162,12 @@ def coerce_ts_params_to_runner_kwargs(
         raise SCGOValidationError(
             f"Unsupported system_type={system_type!r}; "
             f"expected one of {SystemType.__args__!r}."
+        )
+    unknown_keys = sorted(set(ts_params) - _TS_PARAM_ALLOWLIST)
+    if unknown_keys:
+        raise SCGOValidationError(
+            f"Unexpected ts_params keys: {unknown_keys}. Expected a subset "
+            f"of: {sorted(_TS_PARAM_ALLOWLIST)}."
         )
     ts_defaults = get_ts_defaults(system_type)
     use_ts, use_pn = resolve_ts_torchsim_flags(
@@ -176,69 +260,20 @@ def coerce_ts_params_to_runner_kwargs(
 
     # Keys without per-system defaults: pass through as-is (None when missing
     # is fine for the runner).
-    passthrough_keys = (
-        "write_timing_json",
-        "max_pairs",
-        "energy_gap_threshold",
-        "similarity_tolerance",
-        "similarity_pair_cor_max",
-        "pair_core_rms_max",
-        "pair_score_gap_center",
-        "pair_score_gap_width",
-        "pair_score_cum_scale",
-        "pair_score_mismatch_scale",
-        "pair_score_core_rms_scale",
-        "pair_score_w_gap",
-        "pair_score_w_distinct",
-        "pair_score_w_mismatch",
-        "pair_score_w_core",
-        "connectivity_factor",
-        "cluster_adsorbate_config",
-        "allow_cluster_fragmentation",
-        "allow_adsorbate_surface_detachment",
-        "enforce_adsorbate_subgraph_integrity",
-    )
-    for key in passthrough_keys:
+    for key in _TS_PARAM_PASSTHROUGH_KEYS:
         kwargs[key] = ts_params.get(key)
     kwargs["surface_config"] = resolved_surface_config
 
     # NEB knobs that vary per system_type: fall back to the defaults table.
-    # torchsim_* defaults are consumed only in torchsim_params above; they are
-    # not valid top-level kwargs for run_transition_state_search.
-    for key in (
-        "neb_align_endpoints",
-        "neb_interpolation_mic",
-        "neb_n_images",
-        "neb_spring_constant",
-        "neb_fmax",
-        "neb_steps",
-        "neb_climb",
-        "neb_perturb_sigma",
-        "neb_interpolation_method",
-        "neb_tangent_method",
-        "neb_surface_cell_remap",
-        "neb_surface_lattice_rotation",
-        "neb_surface_max_lattice_shift",
-        "max_endpoint_mismatch",
-        "neb_prescreen_clash_distance",
-        "min_saddle_prominence",
-        "neb_max_spurious_barrier",
-        "binding_penetration_tolerance_a",
-        "layer_cluster_threshold_ang",
-        "neb_interpolation_bond_tolerance_a",
-        "parallel_neb_max_bands",
-        "parallel_neb_max_batch_atoms",
-    ):
+    for key in _TS_PARAM_NEB_KEYS:
         kwargs[key] = ts_params.get(key, ts_defaults[key])
 
     # Generic (system-type-agnostic) defaults.
-    generic_defaults = {
-        "dedupe_minima": True,
-        "minima_energy_tolerance": DEFAULT_ENERGY_TOLERANCE,
-        "dedupe_ts": True,
-        "ts_energy_tolerance": DEFAULT_ENERGY_TOLERANCE,
-    }
-    for key, def_val in generic_defaults.items():
+    for key, def_val in _TS_PARAM_GENERIC_DEFAULTS.items():
         kwargs[key] = ts_params.get(key, def_val)
+
+    # Boolean with a runner-side ``True`` default: route it explicitly instead
+    # of the None-passthrough loop (a None there would override the default).
+    kwargs["tag_ts_in_db"] = bool(ts_params.get("tag_ts_in_db", True))
 
     return kwargs

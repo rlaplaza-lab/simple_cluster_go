@@ -31,8 +31,19 @@ def prepare_neb_endpoints(
     react = copy_atoms(atoms_i)
     prod = copy_atoms(atoms_j)
     if neb_cfg.surface_config is not None:
-        attach_slab_constraints_from_surface_config(react, neb_cfg.surface_config)
-        attach_slab_constraints_from_surface_config(prod, neb_cfg.surface_config)
+        # The configured layer-clustering threshold (``layer_cluster_threshold_ang``)
+        # drives which slab layers count as distinct when FixAtoms layers are
+        # resolved; forward it so the TS preset knob has effect.
+        attach_slab_constraints_from_surface_config(
+            react,
+            neb_cfg.surface_config,
+            layer_cluster_threshold_ang=neb_cfg.layer_cluster_threshold_ang,
+        )
+        attach_slab_constraints_from_surface_config(
+            prod,
+            neb_cfg.surface_config,
+            layer_cluster_threshold_ang=neb_cfg.layer_cluster_threshold_ang,
+        )
     n_slab_validate = neb_cfg.n_slab
     n_slab_deposit: int | None = None
     if neb_cfg.surface_config is not None:

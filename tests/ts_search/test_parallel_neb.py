@@ -58,7 +58,6 @@ def _gas_neb_cfg(**overrides) -> NebRunConfig:
         neb_prescreen_clash_distance=_clash,
         min_saddle_prominence=_prom,
         neb_max_spurious_barrier=_spurious,
-        binding_penetration_tolerance_a=0.1,
         layer_cluster_threshold_ang=0.4,
         neb_interpolation_bond_tolerance_a=0.5,
     )

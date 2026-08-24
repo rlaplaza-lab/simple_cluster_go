@@ -1029,7 +1029,6 @@ def test_prepare_neb_endpoints_slab_search_empty_core_uses_deposit_prefix() -> N
         neb_prescreen_clash_distance=0.5,
         min_saddle_prominence=0.0,
         neb_max_spurious_barrier=10.0,
-        binding_penetration_tolerance_a=0.5,
         layer_cluster_threshold_ang=0.4,
         neb_interpolation_bond_tolerance_a=0.5,
         adsorbate_definition=ads,

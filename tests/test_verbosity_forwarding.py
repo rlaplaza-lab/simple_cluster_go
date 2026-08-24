@@ -63,7 +63,6 @@ def _gas_neb_cfg(**overrides) -> NebRunConfig:
         "neb_prescreen_clash_distance": 1.0,
         "min_saddle_prominence": 0.10,
         "neb_max_spurious_barrier": 8.0,
-        "binding_penetration_tolerance_a": 0.1,
         "layer_cluster_threshold_ang": 0.4,
         "neb_interpolation_bond_tolerance_a": 0.5,
         "adsorbate_definition": None,

@@ -21,7 +21,7 @@ from scgo.database.discovery import list_discovered_db_paths_with_run
 from scgo.exceptions import SCGOValidationError
 from scgo.metadata.provenance import is_cuda_oom_error
 from scgo.metadata.run_dir import ensure_run_id, save_run_dir_record
-from scgo.param_presets import get_ts_defaults
+from scgo.param_presets import default_energy_gap_threshold, get_ts_defaults
 from scgo.surface.composition import full_adsorbate_slab_composition
 from scgo.surface.config import SurfaceSystemConfig
 from scgo.surface.constraints import (
@@ -120,6 +120,9 @@ def _prioritize_adsorbate_pairs_by_idpp(
     neb_surface_max_lattice_shift: int,
     max_endpoint_mismatch: float,
     neb_prescreen_clash_distance: float,
+    min_saddle_prominence: float,
+    neb_max_spurious_barrier: float,
+    neb_interpolation_bond_tolerance_a: float | None,
     parallel_neb_max_batch_atoms: int | None,
     parallel_neb_max_bands: int | None,
     logger: Any,
@@ -160,6 +163,7 @@ def _prioritize_adsorbate_pairs_by_idpp(
                 neb_surface_cell_remap=neb_surface_cell_remap,
                 neb_surface_lattice_rotation=neb_surface_lattice_rotation,
                 neb_surface_max_lattice_shift=neb_surface_max_lattice_shift,
+                neb_interpolation_bond_tolerance_a=neb_interpolation_bond_tolerance_a,
                 verbosity=verbosity,
             )
             validate_initial_neb_path(
@@ -210,6 +214,8 @@ def _prioritize_adsorbate_pairs_by_idpp(
                 energies,
                 reference_reactant_energy=float(minima[i][0]),
                 reference_product_energy=float(minima[j][0]),
+                min_saddle_prominence=min_saddle_prominence,
+                max_spurious_barrier=neb_max_spurious_barrier,
             )
         except (SCGOValidationError, ValueError, RuntimeError) as exc:
             logger.debug(
@@ -219,7 +225,9 @@ def _prioritize_adsorbate_pairs_by_idpp(
                 exc,
             )
             continue
-        priority = idpp_band_optimization_priority(energies)
+        priority = idpp_band_optimization_priority(
+            energies, min_saddle_prominence=min_saddle_prominence
+        )
         if priority[0] <= 0:
             continue
         ranked.append((priority, i, j))
@@ -559,17 +567,17 @@ def run_transition_state_search(
     pair_score_w_mismatch: float | None = None,
     pair_score_w_core: float | None = None,
     neb_n_images: int | None = None,
-    neb_spring_constant: float = 0.1,
-    neb_fmax: float = 0.20,
-    neb_steps: int | str = "auto",
+    neb_spring_constant: float | None = None,
+    neb_fmax: float | None = None,
+    neb_steps: int | str | None = None,
     neb_climb: bool | None = None,
-    neb_interpolation_method: str = "idpp",
-    neb_align_endpoints: bool = True,
-    neb_perturb_sigma: float = 0.0,
-    neb_interpolation_mic: bool = False,
-    neb_surface_cell_remap: bool = True,
-    neb_surface_lattice_rotation: bool = True,
-    neb_surface_max_lattice_shift: int = 1,
+    neb_interpolation_method: str | None = None,
+    neb_align_endpoints: bool | None = None,
+    neb_perturb_sigma: float | None = None,
+    neb_interpolation_mic: bool | None = None,
+    neb_surface_cell_remap: bool | None = None,
+    neb_surface_lattice_rotation: bool | None = None,
+    neb_surface_max_lattice_shift: int | None = None,
     neb_tangent_method: str = DEFAULT_NEB_TANGENT_METHOD,
     max_endpoint_mismatch: float | None = None,
     neb_prescreen_clash_distance: float | None = None,
@@ -610,8 +618,12 @@ def run_transition_state_search(
     Prefer :func:`scgo.param_presets.get_ts_search_params` (or ``run_ts_search`` /
     ``run_go_ts``) for production defaults: shared ``neb_fmax=0.20`` and parallel
     TorchSim NEB for every system type; bare gas uses 5 images; adsorbates use
-    7 images, climb, and ``energy_gap_threshold=0.75``. Signature ``neb_fmax``
-    matches those presets; ``use_parallel_neb`` defaults to ``True`` whenever
+    7 images, climb, and ``energy_gap_threshold=0.75``. NEB knobs left as
+    ``None`` (spring constant, fmax, steps, interpolation method, endpoint
+    alignment, MIC, surface remap/rotation/shift, images, climb) resolve from
+    the same per-system presets via :func:`~scgo.param_presets.get_ts_defaults`
+    — e.g. adsorbate types get spring ``0.5`` / steps ``4000``, bare surfaces
+    steps ``2000``. ``use_parallel_neb`` defaults to ``True`` whenever
     TorchSim is enabled (``None`` → on with TorchSim, off without). When
     ``neb_n_images``, ``neb_climb``, or ``energy_gap_threshold`` are omitted
     (``None``), values are taken from :func:`~scgo.param_presets.get_ts_defaults`
@@ -653,10 +665,13 @@ def run_transition_state_search(
         pair_score_w_core: Ranking weight for core RMS (adsorbate+core only).
         neb_n_images: Number of intermediate NEB images. ``None`` selects the
             system-aware preset (``5`` bare / ``7`` adsorbate).
-        neb_spring_constant: Spring constant for NEB band (eV/Å²). Default 0.1.
+        neb_spring_constant: Spring constant for NEB band (eV/Å²). ``None``
+            selects the system-aware preset (``0.1`` bare / ``0.5`` adsorbate).
         neb_fmax: Maximum force convergence for NEB (eV/Å). Default 0.20
             (shared across system types; same as presets).
-        neb_steps: Maximum NEB optimization steps. Default 'auto' (resolved with auto_niter_ts).
+        neb_steps: Maximum NEB optimization steps. ``None`` selects the
+            system-aware preset (``"auto"`` bare gas, resolved with
+            auto_niter_ts / ``2000`` surfaces / ``4000`` adsorbate).
         neb_climb: Use climbing image NEB for better TS convergence. ``None``
             selects the system-aware preset (``False`` bare / ``True`` adsorbate).
         neb_interpolation_method: Path interpolation method ('idpp' or 'linear'). Default 'idpp'.
@@ -712,10 +727,36 @@ def run_transition_state_search(
 
     system_policy = get_system_policy(system_type)
     ts_defaults = get_ts_defaults(system_type)
+    # Direct callers omitting NEB knobs resolve them from the same per-system
+    # presets that ``get_ts_search_params`` / ``coerce_ts_params_to_runner_kwargs``
+    # use, so a bare ``run_transition_state_search(...)`` call no longer runs
+    # with hardcoded signature defaults (k=0.1, steps="auto", ...).
     if neb_n_images is None:
         neb_n_images = int(ts_defaults["neb_n_images"])
+    if neb_spring_constant is None:
+        neb_spring_constant = float(ts_defaults["neb_spring_constant"])
+    if neb_fmax is None:
+        neb_fmax = float(ts_defaults["neb_fmax"])
+    if neb_steps is None:
+        neb_steps = ts_defaults["neb_steps"]
     if neb_climb is None:
         neb_climb = bool(ts_defaults["neb_climb"])
+    if neb_interpolation_method is None:
+        neb_interpolation_method = str(ts_defaults["neb_interpolation_method"])
+    if neb_align_endpoints is None:
+        neb_align_endpoints = bool(ts_defaults["neb_align_endpoints"])
+    if neb_perturb_sigma is None:
+        neb_perturb_sigma = float(ts_defaults["neb_perturb_sigma"])
+    if neb_interpolation_mic is None:
+        neb_interpolation_mic = bool(ts_defaults["neb_interpolation_mic"])
+    if neb_surface_cell_remap is None:
+        neb_surface_cell_remap = bool(ts_defaults["neb_surface_cell_remap"])
+    if neb_surface_lattice_rotation is None:
+        neb_surface_lattice_rotation = bool(ts_defaults["neb_surface_lattice_rotation"])
+    if neb_surface_max_lattice_shift is None:
+        neb_surface_max_lattice_shift = int(
+            ts_defaults["neb_surface_max_lattice_shift"]
+        )
     if neb_prescreen_clash_distance is None:
         neb_prescreen_clash_distance = float(
             ts_defaults["neb_prescreen_clash_distance"]
@@ -735,7 +776,7 @@ def run_transition_state_search(
             ts_defaults["neb_interpolation_bond_tolerance_a"]
         )
     if energy_gap_threshold is None:
-        energy_gap_threshold = 0.75 if system_policy.has_adsorbate else 2.0
+        energy_gap_threshold = default_energy_gap_threshold(system_policy.has_adsorbate)
     validate_composition(
         composition,
         allow_empty=system_policy.slab_is_search_target
@@ -752,6 +793,15 @@ def run_transition_state_search(
         )
     if system_policy.neb_force_mic:
         neb_interpolation_mic = True
+    if (
+        system_policy.uses_surface
+        and surface_config is not None
+        and not surface_config.comparator_use_mic
+    ):
+        logger.warning(
+            "comparator_use_mic=False affects GO comparators only; TS "
+            "dedupe/pairing/NEB force MIC for surface types (resolve_neb_mic)."
+        )
     if not system_policy.uses_surface:
         neb_surface_cell_remap = False
         neb_surface_lattice_rotation = False
@@ -904,10 +954,21 @@ def run_transition_state_search(
         original_count = len(minima)
         # Match NEB MIC geometry (resolve_neb_mic), not GA comparator knob.
         ts_dedupe_mic = resolve_neb_mic(system_type)
-        # Match GA ``n_to_optimize``: trailing mobile atoms (core + adsorbates).
-        dedupe_n_top = len(adsorbate_composition)
-        if neb_n_core_m is not None and neb_n_ads_m is not None:
-            dedupe_n_top = int(neb_n_core_m) + int(neb_n_ads_m)
+        if slab_search_partition is not None and minima:
+            # Slab-target types fingerprint only the [fixed | MOBILE] tail
+            # (top layers + adsorbates), matching GO-phase semantics
+            # (run_trials ``search_mobile_count`` / core.py:844-847): frozen
+            # bottom layers cannot move, so their geometry must not gate
+            # pre-pair uniqueness nor dilute the cumulative difference.
+            dedupe_n_top = max(
+                1, len(minima[0][1]) - int(slab_search_partition.n_fixed)
+            )
+        else:
+            # Match GA ``n_to_optimize``: trailing mobile atoms (core +
+            # adsorbates).
+            dedupe_n_top = len(adsorbate_composition)
+            if neb_n_core_m is not None and neb_n_ads_m is not None:
+                dedupe_n_top = int(neb_n_core_m) + int(neb_n_ads_m)
         minima = filter_unique_minima(
             minima,
             minima_energy_tolerance,
@@ -1065,6 +1126,9 @@ def run_transition_state_search(
             neb_surface_max_lattice_shift=neb_surface_max_lattice_shift,
             max_endpoint_mismatch=float(max_endpoint_mismatch),
             neb_prescreen_clash_distance=neb_prescreen_clash_distance,
+            min_saddle_prominence=float(min_saddle_prominence),
+            neb_max_spurious_barrier=float(neb_max_spurious_barrier),
+            neb_interpolation_bond_tolerance_a=neb_interpolation_bond_tolerance_a,
             parallel_neb_max_batch_atoms=parallel_neb_max_batch_atoms,
             parallel_neb_max_bands=parallel_neb_max_bands,
             logger=logger,
@@ -1126,7 +1190,6 @@ def run_transition_state_search(
         neb_prescreen_clash_distance=neb_prescreen_clash_distance,
         min_saddle_prominence=min_saddle_prominence,
         neb_max_spurious_barrier=neb_max_spurious_barrier,
-        binding_penetration_tolerance_a=binding_penetration_tolerance_a,
         layer_cluster_threshold_ang=layer_cluster_threshold_ang,
         neb_interpolation_bond_tolerance_a=neb_interpolation_bond_tolerance_a,
         adsorbate_definition=adsorbate_definition,

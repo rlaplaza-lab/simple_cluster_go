@@ -895,7 +895,6 @@ def test_serial_resume_skips_completed_pair(tmp_path, monkeypatch):
         neb_prescreen_clash_distance=1.0,
         min_saddle_prominence=0.10,
         neb_max_spurious_barrier=8.0,
-        binding_penetration_tolerance_a=0.35,
         layer_cluster_threshold_ang=0.8,
         neb_interpolation_bond_tolerance_a=0.0,
         adsorbate_definition=None,
@@ -2099,6 +2098,9 @@ def test_idpp_priority_screen_forwards_clash_distance(
         neb_surface_max_lattice_shift=0,
         max_endpoint_mismatch=float("inf"),
         neb_prescreen_clash_distance=1.0,
+        min_saddle_prominence=0.40,
+        neb_max_spurious_barrier=8.0,
+        neb_interpolation_bond_tolerance_a=None,
         parallel_neb_max_batch_atoms=None,
         parallel_neb_max_bands=None,
         logger=logging.getLogger("test"),
@@ -2157,7 +2159,6 @@ def test_neb_run_config_carries_promoted_thresholds():
 
     for system_type in TS_DEFAULTS_BY_SYSTEM_TYPE:
         cfg = _gas_neb_cfg(system_type=system_type)
-        assert cfg.binding_penetration_tolerance_a == 0.1
         assert cfg.layer_cluster_threshold_ang == 0.4
         assert cfg.neb_interpolation_bond_tolerance_a == 0.5
 

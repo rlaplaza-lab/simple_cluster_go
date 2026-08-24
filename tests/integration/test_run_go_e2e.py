@@ -107,7 +107,6 @@ EMT_E2E_CASES = [
             "neb_steps": 80,
             "max_pairs": 1,
             "neb_n_images": 5,
-            "climb": True,
         },
         # Gas-cluster CI budget legitimately yields no interior saddle for the
         # selected pair (its highest-energy image is an endpoint), so this case
@@ -377,9 +376,7 @@ def test_run_go_ts_h2_has_no_ts_pairs(tmp_path: Path) -> None:
         "use_torchsim": False,
         "use_parallel_neb": False,
         "max_pairs": 3,
-        "n_images": 7,
         "neb_steps": 200,
-        "climb": True,
     }
     summary = run_go_ts(
         ["H", "H"],
