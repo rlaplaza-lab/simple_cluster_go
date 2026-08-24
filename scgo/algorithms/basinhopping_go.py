@@ -28,6 +28,7 @@ from scgo.cluster_adsorbate.constraints import prepare_atoms_for_local_relax
 from scgo.constants import (
     DEFAULT_COMPARATOR_TOL,
     DEFAULT_ENERGY_TOLERANCE,
+    DEFAULT_FMAX_THRESHOLD,
     DEFAULT_PAIR_COR_MAX,
 )
 from scgo.database import HPC_DATABASE_EXCEPTIONS, setup_database
@@ -243,7 +244,7 @@ def bh_go(
     atoms: Atoms,
     output_dir: str,
     niter: int = 100,
-    fmax: float = 0.05,
+    fmax: float = DEFAULT_FMAX_THRESHOLD,
     niter_local_relaxation: int = 250,
     optimizer: type[Optimizer] = LBFGS,
     dr: float = 0.5,
@@ -376,6 +377,9 @@ def bh_go(
         )
 
     movable_indices = list(range(len(atoms)))
+    # Match GA storage / run_trials backstop: for slab-search types the frozen
+    # bottom prefix is the deposit boundary in structural gates.
+    n_slab_deposit: int | None = None
     if surface_mode:
         if n_slab <= 0:
             if surface_config is None:
@@ -392,6 +396,7 @@ def bh_go(
                 )
             part = resolve_slab_search_partition(surface_config)
             movable_indices = list(range(part.n_fixed, len(atoms)))
+            n_slab_deposit = int(part.n_fixed)
         else:
             movable_indices = list(range(n_slab, len(atoms)))
         if not movable_indices:
@@ -547,6 +552,7 @@ def bh_go(
                 allow_cluster_fragmentation=allow_cluster_fragmentation,
                 allow_adsorbate_surface_detachment=allow_adsorbate_surface_detachment,
                 enforce_adsorbate_subgraph_integrity=enforce_adsorbate_subgraph_integrity,
+                n_slab_deposit=n_slab_deposit,
             )
         except SCGOValidationError as exc:
             # The initial seed must not crash the whole run: the trial gate
@@ -667,6 +673,7 @@ def bh_go(
                     allow_cluster_fragmentation=allow_cluster_fragmentation,
                     allow_adsorbate_surface_detachment=allow_adsorbate_surface_detachment,
                     enforce_adsorbate_subgraph_integrity=enforce_adsorbate_subgraph_integrity,
+                    n_slab_deposit=n_slab_deposit,
                 )
             except SCGOValidationError as exc:
                 # A single invalid trial must not abort the whole run: count it as

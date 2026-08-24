@@ -1113,3 +1113,110 @@ class TestValidateCandidatesParallel:
         assert ok is True
         assert len(minima) == 4
         assert {e for e, _ in minima} == {0.0, 1.0, 2.0, 3.0}
+
+
+def _prepared_slab_search_config():
+    """Return a prepared slab-search config plus (n_fixed, n_full)."""
+    from scgo.surface.partition import prepare_slab_search_surface_config
+
+    slab = fcc111("Pt", size=(2, 2, 3), vacuum=6.0, orthogonal=True)
+    slab.pbc = [True, True, False]
+    cfg = main_mod.SurfaceSystemConfig(
+        slab=slab,
+        fix_all_slab_atoms=False,
+        n_relax_top_slab_layers=1,
+        comparator_use_mic=True,
+    )
+    cfg, part = prepare_slab_search_surface_config(cfg)
+    return cfg, int(part.n_fixed), len(cfg.slab)
+
+
+def _slab_adsorbate_candidate(cfg, n_fixed: int, n_full: int, *, migrate_sheet: bool):
+    """Build a slab + OH candidate; optionally sink part of the mobile sheet."""
+    from ase import Atoms
+
+    atoms = cfg.slab.copy()
+    pos = atoms.get_positions()
+    if migrate_sheet:
+        pos[n_fixed : n_fixed + 2, 2] -= 7.5
+        atoms.set_positions(pos)
+    anchor = pos[n_full - 1]
+    atoms += Atoms(
+        "OH",
+        positions=[
+            [anchor[0], anchor[1], anchor[2] + 1.6],
+            [anchor[0], anchor[1], anchor[2] + 2.56],
+        ],
+    )
+    return atoms
+
+
+def test_final_structural_gate_honors_n_slab_deposit():
+    """Backstop gate drops a migrated search-mobile sheet (G1) like GA storage.
+
+    With the frozen-prefix ``n_slab_deposit`` supplied, sheet atoms sinking
+    below the fixed-stack top violate the penetration boundary and the
+    candidate is dropped. Without it (the old behavior) those atoms sit inside
+    the unchecked full-slab prefix and the candidate is kept.
+    """
+    cfg, n_fixed, n_full = _prepared_slab_search_config()
+
+    ads_def = AdsorbateDefinition(
+        core_symbols=[],
+        adsorbate_symbols=["O", "H"],
+        adsorbate_fragment_lengths=[2],
+    )
+    gate_kwargs = {
+        "system_type": "surface_adsorbate",
+        "adsorbate_definition": ads_def,
+    }
+    good = (-0.1, _slab_adsorbate_candidate(cfg, n_fixed, n_full, migrate_sheet=False))
+    bad = (0.1, _slab_adsorbate_candidate(cfg, n_fixed, n_full, migrate_sheet=True))
+
+    kept_with_deposit = main_mod._gate_structurally_valid_candidates(
+        [good, bad],
+        "surface_adsorbate",
+        cfg,
+        n_full,
+        gate_kwargs,
+        None,
+        n_slab_deposit=n_fixed,
+    )
+    assert sorted(e for e, _ in kept_with_deposit) == [-0.1]
+
+    kept_without_deposit = main_mod._gate_structurally_valid_candidates(
+        [good, bad],
+        "surface_adsorbate",
+        cfg,
+        n_full,
+        gate_kwargs,
+        None,
+        n_slab_deposit=None,
+    )
+    assert sorted(e for e, _ in kept_without_deposit) == [-0.1, 0.1]
+
+
+def test_bh_surface_gates_accept_conforming_trials(tmp_path, rng):
+    """BH smoke on a slab-search surface: conforming trials pass the gates."""
+    from ase.calculators.emt import EMT
+
+    from scgo.algorithms.basinhopping_go import bh_go
+
+    cfg, n_fixed, _n_full = _prepared_slab_search_config()
+    atoms = cfg.slab.copy()
+    atoms.calc = EMT()
+
+    minima = bh_go(
+        atoms,
+        output_dir=str(tmp_path / "bh_surface"),
+        niter=1,
+        temperature=0.0,
+        dr=0.15,
+        niter_local_relaxation=3,
+        system_type="surface",
+        surface_config=cfg,
+        n_slab=n_fixed,
+        verbosity=0,
+        rng=rng,
+    )
+    assert len(minima) >= 1

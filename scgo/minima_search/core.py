@@ -28,7 +28,7 @@ from scgo.algorithms import bh_go, ga_go, simple_go
 from scgo.cluster_adsorbate.hierarchical import (
     build_hierarchical_core_fragment_cluster,
 )
-from scgo.constants import DEFAULT_ENERGY_TOLERANCE
+from scgo.constants import DEFAULT_ENERGY_TOLERANCE, DEFAULT_FMAX_THRESHOLD
 from scgo.database import SCGODatabaseManager
 from scgo.exceptions import (
     SCGODatabaseError,
@@ -527,13 +527,17 @@ def _gate_structurally_valid_candidates(
     global_optimizer_kwargs: dict[str, Any],
     cluster_adsorbate_config: object,
     *,
+    n_slab_deposit: int | None = None,
     verbosity: int = 1,
 ) -> list[tuple[float, Atoms]]:
     """Run the final structural gate over dedup'd candidates.
 
     ``n_slab`` is applied uniformly when given; for non-surface systems it is
     ``None`` and resolved per-candidate from the ``n_slab_atoms`` tag.
-    Default verbosity logs one drop summary; per-candidate detail is DEBUG.
+    ``n_slab_deposit`` (slab-search types) marks the frozen bottom-layer prefix
+    so the layer-stacking cutoff treats mobile top layers as search core —
+    matching the GA storage gate. Default verbosity logs one drop summary;
+    per-candidate detail is DEBUG.
     """
     valid: list[tuple[float, Atoms]] = []
     dropped: list[tuple[float, str]] = []
@@ -561,6 +565,7 @@ def _gate_structurally_valid_candidates(
                 enforce_adsorbate_subgraph_integrity=global_optimizer_kwargs.get(
                     "enforce_adsorbate_subgraph_integrity", True
                 ),
+                n_slab_deposit=n_slab_deposit,
             )
         except SCGOValidationError as exc:
             dropped.append((energy, str(exc)))
@@ -812,7 +817,7 @@ def run_trials(
     rng: np.random.Generator,
     calculator_for_global_optimization: Calculator | None = None,
     validate_with_hessian: bool = True,
-    fmax_threshold: float = 0.05,
+    fmax_threshold: float = DEFAULT_FMAX_THRESHOLD,
     check_hessian: bool = True,
     imag_freq_threshold: float = 50.0,
     validation_n_jobs: int | None = None,
@@ -991,6 +996,15 @@ def run_trials(
         energy_tol = DEFAULT_ENERGY_TOLERANCE
     comparator_n_top = global_optimizer_kwargs.get("comparator_n_top")
     if comparator_n_top is not None:
+        if search_mobile_count is not None and int(comparator_n_top) != int(
+            search_mobile_count
+        ):
+            logger.info(
+                "comparator_n_top=%d overrides search_mobile_count=%d as the "
+                "dedupe n_top window",
+                int(comparator_n_top),
+                int(search_mobile_count),
+            )
         dedupe_n_top = int(comparator_n_top)
     elif search_mobile_count is not None:
         dedupe_n_top = int(search_mobile_count)
@@ -1026,9 +1040,13 @@ def run_trials(
             )
             structurally_valid = list(unique_candidates)
         else:
+            gate_n_slab_deposit: int | None = None
             if gate_policy.slab_is_search_target:
-                prepared_sc, _ = prepare_slab_search_surface_config(sc)
+                prepared_sc, gate_part = prepare_slab_search_surface_config(sc)
                 gate_surface_config = prepared_sc
+                # Match GA storage: the frozen bottom prefix defines the deposit
+                # boundary so mobile top layers count as search core.
+                gate_n_slab_deposit = int(gate_part.n_fixed)
             else:
                 gate_surface_config = sc
             gate_n_slab = len(gate_surface_config.slab)
@@ -1039,6 +1057,7 @@ def run_trials(
                 gate_n_slab,
                 global_optimizer_kwargs,
                 gate_cluster_adsorbate_config_raw,
+                n_slab_deposit=gate_n_slab_deposit,
                 verbosity=verbosity,
             )
     else:
