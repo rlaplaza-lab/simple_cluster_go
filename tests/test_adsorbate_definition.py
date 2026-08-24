@@ -177,3 +177,45 @@ def test_validate_adsorbate_definition_fragment_length_sum_mismatch() -> None:
             adsorbate_definition=ads,
             context="test",
         )
+
+
+def test_validate_adsorbate_definition_rejects_metal_core_on_slab_search() -> None:
+    """``surface_adsorbate`` searches the slab top layer; metal cores are invalid."""
+    ads = AdsorbateDefinition(
+        core_symbols=["Pt", "Pt"],
+        adsorbate_symbols=["O", "H"],
+    )
+    with pytest.raises(SCGOValidationError, match="does not support metal cores"):
+        validate_adsorbate_definition(
+            system_type="surface_adsorbate",
+            composition=["Pt", "Pt", "O", "H"],
+            adsorbate_definition=ads,
+            context="test",
+        )
+
+
+def test_validate_adsorbate_definition_allows_adsorbate_only_slab_search() -> None:
+    validate_adsorbate_definition(
+        system_type="surface_adsorbate",
+        composition=["O", "H"],
+        adsorbate_definition=AdsorbateDefinition(
+            core_symbols=[],
+            adsorbate_symbols=["O", "H"],
+            adsorbate_fragment_lengths=[2],
+        ),
+        context="test",
+    )
+
+
+def test_validate_adsorbate_definition_keeps_gas_cores_valid() -> None:
+    """Gas adsorbate types keep their metal-core support."""
+    validate_adsorbate_definition(
+        system_type="gas_cluster_adsorbate",
+        composition=["Pt", "Pt", "O", "H"],
+        adsorbate_definition=AdsorbateDefinition(
+            core_symbols=["Pt", "Pt"],
+            adsorbate_symbols=["O", "H"],
+            adsorbate_fragment_lengths=[2],
+        ),
+        context="test",
+    )

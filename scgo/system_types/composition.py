@@ -355,6 +355,12 @@ def validate_adsorbate_definition(
         composition, adsorbate_definition, context=context
     )
 
+    if policy.slab_is_search_target and core_list:
+        raise SCGOValidationError(
+            f"{context}: system_type={system_type!r} does not support metal cores "
+            "(slab top layers are the search core). Pass adsorbates only."
+        )
+
     fba = adsorbate_definition.fragment_bond_axis
     if fba is not None and (len(fba) != 2 or not all(isinstance(x, int) for x in fba)):
         raise SCGOValidationError(
