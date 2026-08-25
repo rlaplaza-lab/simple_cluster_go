@@ -13,7 +13,6 @@ from ase import Atoms
 from ase.optimize import FIRE
 from ase_ga.data import DataConnection
 
-from scgo.calculators.mace_helpers import torch_load_weights_only_false
 from scgo.ts_search.transition_state_io import load_minima_by_composition
 from scgo.ts_search.transition_state_run import run_transition_state_search
 from tests.helpers import create_preparedb, mark_test_minima_as_final
@@ -59,7 +58,10 @@ def test_full_workflow_cu4_mace_database_persistence():
         # Initialize MACE calculator for relaxation
         # torch>=2.6 defaults torch.load(weights_only=True), which rejects the
         # pickled MACE checkpoint; use the same scoped patch as production.
+        # Imported lazily so UMA/UPET collection does not require mace.
         from mace.calculators import mace_mp
+
+        from scgo.calculators.mace_helpers import torch_load_weights_only_false
 
         with torch_load_weights_only_false():
             mace_calc = mace_mp(model="small", default_dtype="float32")
@@ -485,6 +487,8 @@ def test_ts_search_reproducibility_with_mace():
             # Create deterministic Cu4 database
             db = create_preparedb(Atoms("Cu4"), db_path, population_size=50)
             from mace.calculators import mace_mp
+
+            from scgo.calculators.mace_helpers import torch_load_weights_only_false
 
             # Scoped weights_only=False patch: see the persistence test above.
             with torch_load_weights_only_false():

@@ -137,17 +137,42 @@ def _module_level_imported_modules(path: Path) -> set[str]:
     return names
 
 
+_MACE_HELPERS_MODULE = "scgo.calculators.mace_helpers"
+_MACE_ROOT_PACKAGE = "mace"
+
+
+def _imports_mace_at_module_level(names: set[str]) -> set[str]:
+    """Return imported module names that pull ``mace`` in at import time.
+
+    Matches both the exact helpers module and any dotted path ending in it,
+    plus direct ``mace`` / ``mace.*`` imports.
+    """
+    hits: set[str] = set()
+    for name in names:
+        is_helpers = name == _MACE_HELPERS_MODULE or name.endswith(
+            "." + _MACE_HELPERS_MODULE
+        )
+        is_mace = name == _MACE_ROOT_PACKAGE or name.startswith(
+            _MACE_ROOT_PACKAGE + "."
+        )
+        if is_helpers or is_mace:
+            hits.add(name)
+    return hits
+
+
 def test_mace_helpers_not_imported_at_collection_time() -> None:
     """``mace_helpers`` imports ``mace`` at module load.
 
     A top-level test import fails UMA/UPET collection even when tests are
     marked ``requires_mace`` (``pytest -m`` still imports the module).
+    Direct ``mace`` / ``mace.*`` imports are equally fatal.
     """
     offenders: list[str] = []
     for path in sorted(TESTS_ROOT.rglob("test_*.py")):
-        if "mace_helpers" in _module_level_imported_modules(path):
-            offenders.append(str(path.relative_to(TESTS_ROOT)))
+        hits = _imports_mace_at_module_level(_module_level_imported_modules(path))
+        if hits:
+            offenders.append(f"{path.relative_to(TESTS_ROOT)}: {sorted(hits)}")
     assert not offenders, (
-        "module-level import of scgo.calculators.mace_helpers "
+        "module-level import of mace machinery "
         "(breaks UMA/UPET collection):\n" + "\n".join(f"  - {o}" for o in offenders)
     )
