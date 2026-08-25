@@ -57,15 +57,13 @@ def _validate_block_role(role: str) -> str:
 
 @dataclass(frozen=True)
 class ComparatorBlock:
-    """A named group of atom indices for block-aware comparison.
-
-    Attributes:
-        role: One of :data:`BLOCK_ROLES`.
-        indices: Strictly increasing atom indices into the full Atoms object.
-    """
+    """A named group of atom indices for block-aware comparison."""
 
     role: str
+    """One of :data:`BLOCK_ROLES`."""
+
     indices: tuple[int, ...]
+    """Strictly increasing atom indices into the full Atoms object."""
 
     def __post_init__(self) -> None:
         _validate_block_role(self.role)
