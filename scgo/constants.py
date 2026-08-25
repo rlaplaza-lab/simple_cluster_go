@@ -27,6 +27,32 @@ Tighter than :data:`DEFAULT_PAIR_COR_MAX` because TS pairing must reject near-
 duplicates before NEB, while GO uniqueness tolerates more structural variation.
 """
 
+DEFAULT_CROSS_WEIGHT: float = 1.0
+"""Default weight on cross-block distance terms in block-aware uniqueness."""
+
+DEFAULT_SUPPORTED_SLAB_WEIGHT: float = 0.2
+"""Default mobile-slab weight for supported-deposit (``surface_cluster*``) types.
+
+Relaxed support layers barely move relative to globally optimized deposits, so
+their near-constant distances must not dominate deposit/adsorbate uniqueness.
+Set ``comparator_component_weights={"mobile_slab": 0.0}`` to exclude them.
+"""
+
+SUPPORTED_CLUSTER_COMPARATOR_TOL: float = 0.010
+"""Tighter cumulative tolerance for supported-deposit (``surface_cluster*``) types.
+
+Block-aware fingerprints keep deposit/adsorbate differences undiluted by slab
+padding, so the legacy ``DEFAULT_COMPARATOR_TOL`` slack is no longer needed.
+Applied only when the effective value still equals the generic default.
+"""
+
+SUPPORTED_CLUSTER_PAIR_COR_MAX: float = 0.45
+"""Tighter max-distance gate for supported-deposit (``surface_cluster*``) types.
+
+See :data:`SUPPORTED_CLUSTER_COMPARATOR_TOL`. Applied only when the effective
+value still equals :data:`DEFAULT_PAIR_COR_MAX`.
+"""
+
 DEFAULT_FMAX_THRESHOLD: float = 0.05
 """Default local-relaxation / Hessian-validation force threshold (eV/Å)."""
 

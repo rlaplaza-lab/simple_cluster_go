@@ -78,6 +78,7 @@ from scgo.system_types import (
     validate_minimum_structure,
 )
 from scgo.utils.comparators import (
+    ComparatorBlocks,
     EnergyAndStructureComparator,
     UniquenessSettings,
     create_geometry_comparator,
@@ -1478,9 +1479,15 @@ def create_structure_comparator(
     settings: UniquenessSettings | None = None,
     *,
     mic: bool = False,
+    blocks: ComparatorBlocks | None = None,
 ) -> EnergyAndStructureComparator:
     resolved = settings if settings is not None else UniquenessSettings()
-    geometry = create_geometry_comparator(n_top=n_atoms, mic=mic, settings=resolved)
+    geometry = create_geometry_comparator(
+        n_top=n_atoms,
+        mic=mic,
+        settings=resolved,
+        blocks=blocks,
+    )
     return EnergyAndStructureComparator(energy_tolerance, geometry)
 
 
@@ -1545,6 +1552,7 @@ def setup_diversity_scorer(
     base_dir: str,
     mic: bool = False,
     uniqueness: UniquenessSettings | None = None,
+    blocks: ComparatorBlocks | None = None,
 ) -> DiversityScorer | None:
     """Setup DiversityScorer for diversity fitness strategy.
 
@@ -1558,6 +1566,7 @@ def setup_diversity_scorer(
         base_dir: Base directory for resolving reference DB glob patterns.
         mic: Whether the diversity comparator uses the minimum-image convention.
         uniqueness: Geometry tolerances for diversity scoring (GO defaults when omitted).
+        blocks: Optional block-aware partition mirroring the uniqueness comparator.
 
     Returns:
         DiversityScorer instance when fitness_strategy is "diversity" and at least
@@ -1599,6 +1608,7 @@ def setup_diversity_scorer(
         n_top=n_to_optimize,
         mic=mic,
         settings=uniqueness,
+        blocks=blocks,
     )
     return DiversityScorer(reference_structures, comparator_for_diversity)
 

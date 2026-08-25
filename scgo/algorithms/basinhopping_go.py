@@ -45,7 +45,12 @@ from scgo.system_types import (
     resolve_structure_mic,
     validate_minimum_structure,
 )
-from scgo.utils.comparators import UniquenessSettings, create_geometry_comparator
+from scgo.system_types.dedup_geometry import resolve_uniqueness_geometry
+from scgo.utils.comparators import (
+    ComparatorBlocks,
+    UniquenessSettings,
+    create_geometry_comparator,
+)
 from scgo.utils.fitness_strategies import (
     FitnessStrategy,
     calculate_fitness,
@@ -256,6 +261,8 @@ def bh_go(
     comparator_tol: float = DEFAULT_COMPARATOR_TOL,
     comparator_pair_cor_max: float = DEFAULT_PAIR_COR_MAX,
     comparator_n_top: int | None = None,
+    comparator_component_weights: dict[str, float] | None = None,
+    comparator_cross_weight: float = 1.0,
     verbosity: int = 1,
     run_id: str | None = None,
     clean: bool = False,
@@ -435,15 +442,35 @@ def bh_go(
         int(comparator_n_top) if comparator_n_top is not None else len(movable_indices)
     )
     comp_mic = resolve_structure_mic(system_type, surface_config)
-    geometry = UniquenessSettings(
+    user_geometry = UniquenessSettings(
         comparator_tol=comparator_tol,
         comparator_pair_cor_max=comparator_pair_cor_max,
+        component_weights=comparator_component_weights,
+        cross_weight=comparator_cross_weight,
     )
-    comparator = create_geometry_comparator(
-        n_top=effective_n_top,
-        mic=comp_mic,
-        settings=geometry,
-    )
+    # comparator_n_top forces the legacy trailing-window comparison; otherwise
+    # dedupe uses type-aware role blocks (mirroring the GA).
+    resolved_geo = None
+    uniqueness_blocks: ComparatorBlocks | None = None
+    geometry: UniquenessSettings = user_geometry
+    if comparator_n_top is None:
+        resolved_geo = resolve_uniqueness_geometry(
+            system_type=system_type,
+            n_atoms=len(atoms),
+            surface_config=surface_config,
+            adsorbate_definition=adsorbate_definition,
+            settings=user_geometry,
+        )
+        uniqueness_blocks = resolved_geo.blocks
+        geometry = resolved_geo.settings
+    if resolved_geo is not None:
+        comparator = resolved_geo.build_comparator(n_top=effective_n_top, mic=comp_mic)
+    else:
+        comparator = create_geometry_comparator(
+            n_top=effective_n_top,
+            mic=comp_mic,
+            settings=geometry,
+        )
 
     # Load reference structures and create DiversityScorer for diversity strategy
     diversity_scorer = setup_diversity_scorer(
@@ -456,6 +483,7 @@ def bh_go(
         base_dir=output_dir,
         mic=comp_mic,
         uniqueness=geometry,
+        blocks=uniqueness_blocks,
     )
 
     # Detach calculator temporarily for DB setup to avoid pickling issues

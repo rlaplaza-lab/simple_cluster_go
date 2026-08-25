@@ -36,6 +36,7 @@ from scgo.metadata.atoms import get_tag, set_tags
 from scgo.metadata.provenance import is_cuda_oom_error, output_json_provenance
 from scgo.system_types import SystemType, get_system_policy
 from scgo.utils.comparators import (
+    ComparatorBlocks,
     PureInteratomicDistanceComparator,
     get_shared_mobile_atom_indices,
 )
@@ -168,8 +169,14 @@ def calculate_structure_similarity(
     use_mic: bool = False,
     n_slab: int | None = None,
     comparator: PureInteratomicDistanceComparator | None = None,
+    blocks: ComparatorBlocks | None = None,
+    component_weights: dict[str, float] | None = None,
+    cross_weight: float = 1.0,
 ) -> tuple[float, float, bool]:
     """Return ``(cum_diff, max_diff, are_similar)`` for two Atoms objects.
+
+    When ``blocks`` is given it supersedes the mobile-index slicing: the full
+    structures are compared with a block-aware weighted comparator.
 
     Raises:
         SCGOValidationError: If the two structures have different atom counts.
@@ -178,6 +185,26 @@ def calculate_structure_similarity(
         raise SCGOValidationError(
             f"Atoms objects have different lengths: {len(atoms1)} vs {len(atoms2)}"
         )
+
+    if blocks is not None:
+        block_comparator = comparator
+        if (
+            block_comparator is None
+            or block_comparator.blocks is None
+            or block_comparator.blocks != blocks
+        ):
+            block_comparator = PureInteratomicDistanceComparator(
+                n_top=len(atoms1),
+                tol=tolerance,
+                pair_cor_max=pair_cor_max,
+                mic=use_mic,
+                blocks=blocks,
+                component_weights=component_weights,
+                cross_weight=cross_weight,
+            )
+        cum_diff, max_diff = block_comparator.get_differences(atoms1, atoms2)
+        are_similar = block_comparator.looks_like(atoms1, atoms2)
+        return cum_diff, max_diff, are_similar
 
     if ignore_fixed_atoms:
         comparison_indices = get_shared_mobile_atom_indices(

@@ -3,12 +3,20 @@
 This module provides comparators for determining if two cluster structures are
 geometrically equivalent, based on sorted interatomic distance analysis as
 described in Vilhelmsen and Hammer, PRL 108, 126101 (2012).
+
+Structures may optionally be compared in a **block-aware** mode: the atoms are
+partitioned into role blocks (``mobile_slab`` / ``deposit`` / ``adsorbate``)
+whose intra-block fingerprints are combined with configurable weights, and
+cross-block element-pair distance lists capture binding geometry (e.g. an
+adsorbate registry on top of relaxed slab layers) that pure intra-element
+fingerprints cannot see.
 """
 
 from __future__ import annotations
 
+import math
 from collections import Counter
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -16,10 +24,11 @@ import numpy as np
 from ase import Atoms
 from ase.constraints import FixAtoms
 from ase.geometry import get_distances
-from scipy.spatial.distance import pdist
+from scipy.spatial.distance import cdist, pdist
 
 from scgo.constants import (
     DEFAULT_COMPARATOR_TOL,
+    DEFAULT_CROSS_WEIGHT,
     DEFAULT_ENERGY_TOLERANCE,
     DEFAULT_PAIR_COR_MAX,
 )
@@ -30,6 +39,111 @@ from scgo.metadata.atoms import get_tag
 
 _SORTED_DIST_FP_INFO_KEY = "_scgo_sorted_dist_fp"
 _SORTED_DIST_FP_ATTR_KEY = "_scgo_sorted_dist_fp_cache"
+_BLOCK_FP_SLOT_PREFIX = "blocks"
+
+BLOCK_ROLES: tuple[str, ...] = ("mobile_slab", "deposit", "adsorbate")
+"""Canonical role names for block-aware structure comparison."""
+
+
+def _validate_block_role(role: str) -> str:
+    role_s = str(role)
+    if role_s not in BLOCK_ROLES:
+        raise SCGOValidationError(
+            f"Unknown comparator block role {role!r}; expected one of "
+            f"{list(BLOCK_ROLES)}."
+        )
+    return role_s
+
+
+@dataclass(frozen=True)
+class ComparatorBlock:
+    """A named group of atom indices for block-aware comparison.
+
+    Attributes:
+        role: One of :data:`BLOCK_ROLES`.
+        indices: Strictly increasing atom indices into the full Atoms object.
+    """
+
+    role: str
+    indices: tuple[int, ...]
+
+    def __post_init__(self) -> None:
+        _validate_block_role(self.role)
+        idx = tuple(int(i) for i in self.indices)
+        # Pair each index with its successor; strict=False is intentional so a
+        # single-element tuple yields no pairs.
+        if (
+            not idx
+            or any(b <= a for a, b in zip(idx, idx[1:], strict=False))
+            or idx[0] < 0
+        ):
+            raise SCGOValidationError(
+                f"ComparatorBlock indices must be non-empty and strictly "
+                f"increasing non-negative integers, got {self.indices!r}."
+            )
+        object.__setattr__(self, "indices", idx)
+
+    def __len__(self) -> int:
+        return len(self.indices)
+
+
+@dataclass(frozen=True)
+class ComparatorBlocks:
+    """Ordered, disjoint role blocks used by block-aware comparison."""
+
+    blocks: tuple[ComparatorBlock, ...]
+
+    def __post_init__(self) -> None:
+        if not self.blocks:
+            raise SCGOValidationError("ComparatorBlocks requires at least one block.")
+        roles = [b.role for b in self.blocks]
+        if len(set(roles)) != len(roles):
+            raise SCGOValidationError(
+                f"ComparatorBlocks roles must be unique, got {roles!r}."
+            )
+        seen: set[int] = set()
+        for block in self.blocks:
+            overlap = seen.intersection(block.indices)
+            if overlap:
+                raise SCGOValidationError(
+                    f"ComparatorBlocks overlap at indices {sorted(overlap)[:5]}..."
+                )
+            seen.update(block.indices)
+
+    @classmethod
+    def from_ranges(cls, ranges: Sequence[tuple[str, int, int]]) -> ComparatorBlocks:
+        """Build contiguous blocks from ``(role, start, stop)`` triples."""
+        return cls(
+            blocks=tuple(
+                ComparatorBlock(role=str(role), indices=tuple(range(start, stop)))
+                for role, start, stop in ranges
+            )
+        )
+
+    def signature(self) -> str:
+        """Stable string identity for fingerprint cache slotting."""
+        parts = []
+        for block in self.blocks:
+            idx = block.indices
+            if list(idx) == list(range(idx[0], idx[-1] + 1)):
+                span = f"{idx[0]}-{idx[-1]}"
+            else:
+                span = ",".join(str(i) for i in idx)
+            parts.append(f"{block.role}:{span}")
+        return ";".join(parts)
+
+
+def _block_unit_sort_key(key: tuple) -> tuple:
+    """Canonical ordering for fingerprint unit keys (stable descriptors)."""
+    kind_rank = 0 if key[0] == "intra" else 1
+    return (kind_rank, *key[1:])
+
+
+def iter_ordered_units(
+    units: dict[tuple, np.ndarray],
+) -> list[tuple[tuple, np.ndarray]]:
+    """Return fingerprint units in canonical order (intra before cross)."""
+    return sorted(units.items(), key=lambda item: _block_unit_sort_key(item[0]))
 
 
 def _sorted_dist_cache_slot(n_top: int, mic: bool) -> str:
@@ -210,6 +324,126 @@ def get_sorted_dist_list(
     return pair_cor
 
 
+def _sorted_subset_distances(
+    pos_i: np.ndarray,
+    pos_j: np.ndarray,
+    *,
+    same_set: bool,
+    cell: np.ndarray | None,
+    pbc: tuple[bool, ...] | None,
+    mic: bool,
+) -> np.ndarray:
+    """Return sorted pairwise distances within one subset or between two."""
+    if mic:
+        if same_set:
+            _, d = get_distances(pos_i, pos_i, cell=cell, pbc=pbc)
+            d = np.triu(d, k=1)
+            flat = d[np.triu_indices(len(pos_i), k=1)]
+        else:
+            _, d = get_distances(pos_i, pos_j, cell=cell, pbc=pbc)
+            flat = d.ravel()
+    elif same_set:
+        flat = pdist(pos_i)
+    else:
+        flat = cdist(pos_i, pos_j).ravel()
+    flat = np.asarray(flat, dtype=np.float64)
+    return np.sort(flat)
+
+
+def _compute_block_distance_units(
+    atoms: Atoms,
+    mic: bool,
+    blocks: ComparatorBlocks,
+) -> dict[tuple, np.ndarray]:
+    """Compute per-unit sorted distance fingerprints for block-aware comparison.
+
+    Units are keyed ``("intra", block_pos, atomic_number)`` for sorted distances
+    among same-element pairs inside one block, and
+    ``("cross", i, j, z_i, z_j)`` (``i < j`` block positions) for sorted
+    distances between element subsets of two different blocks. Cross units make
+    binding geometry (e.g. adsorbate registry on relaxed slab layers) visible
+    to the comparator.
+    """
+    positions = atoms.arrays["positions"]
+    numbers = atoms.arrays["numbers"]
+    cell = atoms.cell.array if (mic or np.any(atoms.pbc)) else None
+    pbc = tuple(bool(x) for x in atoms.pbc)
+
+    sub_positions = [positions[np.asarray(b.indices)] for b in blocks.blocks]
+    sub_numbers = [numbers[np.asarray(b.indices)] for b in blocks.blocks]
+
+    units: dict[tuple, np.ndarray] = {}
+    for bi in range(len(blocks.blocks)):
+        for z in np.unique(sub_numbers[bi]):
+            idx = np.flatnonzero(sub_numbers[bi] == z)
+            if idx.size < 2:
+                continue
+            units[("intra", bi, int(z))] = _sorted_subset_distances(
+                sub_positions[bi][idx],
+                sub_positions[bi][idx],
+                same_set=True,
+                cell=cell,
+                pbc=pbc,
+                mic=mic,
+            )
+    for bi in range(len(blocks.blocks)):
+        for bj in range(bi + 1, len(blocks.blocks)):
+            for zi in np.unique(sub_numbers[bi]):
+                for zj in np.unique(sub_numbers[bj]):
+                    idx_i = np.flatnonzero(sub_numbers[bi] == zi)
+                    idx_j = np.flatnonzero(sub_numbers[bj] == zj)
+                    if idx_i.size == 0 or idx_j.size == 0:
+                        continue
+                    units[("cross", bi, bj, int(zi), int(zj))] = (
+                        _sorted_subset_distances(
+                            sub_positions[bi][idx_i],
+                            sub_positions[bj][idx_j],
+                            same_set=False,
+                            cell=cell,
+                            pbc=pbc,
+                            mic=mic,
+                        )
+                    )
+    return units
+
+
+def _block_units_cache_slot(blocks: ComparatorBlocks, mic: bool) -> str:
+    return f"{_BLOCK_FP_SLOT_PREFIX}:{blocks.signature()}|{int(bool(mic))}"
+
+
+def get_block_distance_units(
+    atoms: Atoms,
+    mic: bool,
+    blocks: ComparatorBlocks,
+) -> dict[tuple, np.ndarray]:
+    """Compute (and cache) block-aware distance fingerprint units for ``atoms``.
+
+    Results are cached alongside the legacy fingerprints on ``atoms``, keyed by
+    the block signature and ``mic`` so different partitions can coexist.
+    """
+    mic_b = bool(mic)
+    slot = _block_units_cache_slot(blocks, mic_b)
+    fp_store = _get_sorted_dist_cache_store(atoms)
+    cached = fp_store.get(slot)
+    if isinstance(cached, dict) and isinstance(cached.get("units"), dict):
+        dirty = _atoms_geometry_dirty_token(atoms, mic=mic_b)
+        if cached.get("dirty_token") == dirty:
+            return cached["units"]
+        content_key = _sorted_dist_content_key(atoms, mic=mic_b)
+        if cached.get("content_key") == content_key:
+            cached["dirty_token"] = dirty
+            return cached["units"]
+    else:
+        content_key = _sorted_dist_content_key(atoms, mic=mic_b)
+    units = _compute_block_distance_units(atoms, mic_b, blocks)
+    fp_store[slot] = {
+        "content_key": content_key,
+        "dirty_token": _atoms_geometry_dirty_token(atoms, mic=mic_b),
+        "units": units,
+    }
+    return units
+
+
 def get_mobile_atom_indices(atoms: Atoms) -> np.ndarray:
     """Return indices for atoms not constrained by ``FixAtoms``.
 
@@ -325,6 +559,15 @@ class PureInteratomicDistanceComparator:
             has PBC (does not auto-enable MIC from ``atoms.pbc``). Set True for
             adsorbates on periodic slabs via
             :func:`scgo.system_types.resolve_structure_mic`.
+        blocks: Optional :class:`ComparatorBlocks` partition enabling weighted,
+            block-aware comparison (see :meth:`get_differences`). When ``None``
+            the legacy trailing-``n_top`` window comparison is used.
+        component_weights: Optional per-role weights applied to intra-block
+            cumulative differences; missing roles default to 1.0. A weight of
+            ``0`` fully excludes a block (including its cross terms).
+        cross_weight: Base weight for cross-block cumulative differences; each
+            cross unit is scaled by ``sqrt(w_i * w_j)`` of its endpoint role
+            weights (ignored without ``blocks``).
     """
 
     def __init__(
@@ -334,12 +577,43 @@ class PureInteratomicDistanceComparator:
         pair_cor_max: float = DEFAULT_PAIR_COR_MAX,
         dE: float = DEFAULT_ENERGY_TOLERANCE,
         mic: bool = False,
+        blocks: ComparatorBlocks | None = None,
+        component_weights: Mapping[str, float] | None = None,
+        cross_weight: float = 1.0,
     ):
         self.tol = tol
         self.pair_cor_max = pair_cor_max
         self.dE = dE  # Not used, but kept for API consistency
         self.n_top = n_top or 0
         self.mic = mic
+        self.blocks = blocks
+        self.cross_weight = float(cross_weight)
+        self.component_weights: dict[str, float] = {}
+        if self.blocks is not None:
+            present_roles = {block.role for block in self.blocks.blocks}
+            for role, weight in (component_weights or {}).items():
+                _validate_block_role(role)
+                weight_f = float(weight)
+                if not np.isfinite(weight_f) or weight_f < 0.0:
+                    raise SCGOValidationError(
+                        f"Comparator weight for role {role!r} must be a "
+                        f"non-negative finite float, got {weight!r}."
+                    )
+                if role not in present_roles:
+                    raise SCGOValidationError(
+                        f"Comparator weight given for role {role!r} which is "
+                        f"not among the provided blocks {sorted(present_roles)}."
+                    )
+                self.component_weights[role] = weight_f
+        elif component_weights:
+            raise SCGOValidationError(
+                "component_weights requires blocks to be set on the comparator."
+            )
+
+    def _role_weight(self, role: str) -> float:
+        if not self.component_weights:
+            return 1.0
+        return float(self.component_weights.get(role, 1.0))
 
     def looks_like(self, a1: Atoms, a2: Atoms) -> bool:
         """Determines if two structures are structurally similar.
@@ -381,7 +655,80 @@ class PureInteratomicDistanceComparator:
                 "The two configurations must have the same number of atoms",
             )
 
+        if self.blocks is not None:
+            return self.__compare_block_structure__(a1, a2)
         return self.__compare_structure__(a1, a2)
+
+    def __compare_block_structure__(self, a1: Atoms, a2: Atoms) -> tuple[float, float]:
+        """Block-aware structural comparison.
+
+        Each intra-block unit contributes its normalized cumulative difference
+        scaled by its element's atom fraction within the block (the legacy
+        formula restricted to the block) times the role weight. Each
+        cross-block unit carries an effective weight ``cross_weight *
+        sqrt(w_i * w_j)`` of its endpoint role weights, so a block with weight
+        ``0`` is fully excluded — both directly and through cross terms — while
+        uniform weights reduce to ``cross_weight``. Both contributions are
+        further scaled by the unit's size share (element atom fraction within
+        the block, or element-pair share of the block-pair distances).
+        ``max_diff`` is the maximum single-distance difference across all
+        non-excluded units.
+
+        Structures whose per-block element counts differ are reported as a
+        maximal non-match ``(inf, inf)``.
+        """
+        n = len(a1)
+        for block in self.blocks.blocks:
+            if block.indices[-1] >= n:
+                raise SCGOValidationError(
+                    f"ComparatorBlock {block.role!r} index {block.indices[-1]} "
+                    f"out of range for structures of length {n}."
+                )
+        idx_arrays = [np.asarray(b.indices) for b in self.blocks.blocks]
+        for i_arr in idx_arrays:
+            if Counter(a1.numbers[i_arr]) != Counter(a2.numbers[i_arr]):
+                return (float("inf"), float("inf"))
+
+        units1 = get_block_distance_units(a1, mic=self.mic, blocks=self.blocks)
+        units2 = get_block_distance_units(a2, mic=self.mic, blocks=self.blocks)
+
+        total_cum_diff = 0.0
+        max_diff = 0.0
+        for key, c1 in iter_ordered_units(units1):
+            c2 = units2.get(key)
+            if c2 is None or len(c1) != len(c2):
+                raise SCGOValidationError(
+                    "Mismatch in number of distances being compared."
+                )
+            if len(c1) == 0:
+                continue
+
+            d = np.abs(c1 - c2)
+
+            if key[0] == "intra":
+                _, bi, elem = key
+                weight = self._role_weight(self.blocks.blocks[bi].role)
+                frac = float(np.sum(a1.numbers[idx_arrays[bi]] == elem)) / len(
+                    idx_arrays[bi]
+                )
+            else:
+                _, bi, bj, _zi, _zj = key
+                weight = self.cross_weight * math.sqrt(
+                    self._role_weight(self.blocks.blocks[bi].role)
+                    * self._role_weight(self.blocks.blocks[bj].role)
+                )
+                n_pairs_block = len(idx_arrays[bi]) * len(idx_arrays[bj])
+                frac = len(c1) / float(n_pairs_block)
+
+            if weight <= 0.0:
+                continue
+
+            denom = float(np.sum(c1))
+            normalized = float(np.sum(d)) / denom if denom > 1e-10 else 0.0
+            total_cum_diff += weight * normalized * frac
+            max_diff = max(max_diff, float(np.max(d)))
+
+        return (total_cum_diff, max_diff)
 
     def __compare_structure__(self, a1: Atoms, a2: Atoms) -> tuple[float, float]:
         """Private method to perform the core structural comparison.
@@ -462,8 +809,12 @@ class PureInteratomicDistanceComparator:
 
 @dataclass(frozen=True)
 class UniquenessSettings:
+    """Geometry tolerances plus optional block-aware weighting knobs."""
+
     comparator_tol: float = DEFAULT_COMPARATOR_TOL
     comparator_pair_cor_max: float = DEFAULT_PAIR_COR_MAX
+    component_weights: Mapping[str, float] | None = None
+    cross_weight: float = 1.0
 
 
 def uniqueness_settings_from_mapping(
@@ -472,11 +823,27 @@ def uniqueness_settings_from_mapping(
     params = params or {}
     tol = params.get("comparator_tol")
     pair_cor = params.get("comparator_pair_cor_max")
+    weights_raw = params.get("comparator_component_weights")
+    weights: dict[str, float] | None = None
+    if weights_raw is not None:
+        weights = {str(role): float(w) for role, w in dict(weights_raw).items()}
+        for role, weight in weights.items():
+            _validate_block_role(role)
+            weight_f = weights[role]
+            if not np.isfinite(weight_f) or weight_f < 0.0:
+                raise SCGOValidationError(
+                    f"comparator_component_weights[{role!r}] must be a "
+                    f"non-negative finite float, got {weight!r}."
+                )
+    cross_raw = params.get("comparator_cross_weight")
+    cross_weight = DEFAULT_CROSS_WEIGHT if cross_raw is None else float(cross_raw)
     return UniquenessSettings(
         comparator_tol=DEFAULT_COMPARATOR_TOL if tol is None else float(tol),
         comparator_pair_cor_max=DEFAULT_PAIR_COR_MAX
         if pair_cor is None
         else float(pair_cor),
+        component_weights=weights,
+        cross_weight=cross_weight,
     )
 
 
@@ -485,6 +852,7 @@ def create_geometry_comparator(
     n_top: int,
     mic: bool = False,
     settings: UniquenessSettings | None = None,
+    blocks: ComparatorBlocks | None = None,
 ) -> PureInteratomicDistanceComparator:
     resolved = settings if settings is not None else UniquenessSettings()
     return PureInteratomicDistanceComparator(
@@ -492,6 +860,9 @@ def create_geometry_comparator(
         tol=resolved.comparator_tol,
         pair_cor_max=resolved.comparator_pair_cor_max,
         mic=mic,
+        blocks=blocks,
+        component_weights=resolved.component_weights,
+        cross_weight=resolved.cross_weight,
     )
 
 

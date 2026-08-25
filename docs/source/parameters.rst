@@ -287,15 +287,21 @@ Production and TorchSim/UMA/UPET benchmark presets default to ``-2``.
      - ``0.02`` eV
      - Energy window for in-search and campaign uniqueness (see :doc:`/uniqueness`)
    * - ``comparator_tol``
-     - ``0.015``
+     - ``0.015`` (``0.010`` for supported clusters)
      - Overall shape mismatch still counted as the same isomer
    * - ``comparator_pair_cor_max``
-     - ``0.7`` Å
+     - ``0.7`` Å (``0.45`` for supported clusters)
      - Largest allowed difference in any one interatomic distance
    * - ``comparator_n_top``
      - ``None``
      - Leave ``None``; uses the moving atoms for this system type
        (see :doc:`/uniqueness`)
+   * - ``comparator_component_weights``
+     - ``None``
+     - Per-role block weights, e.g. ``{"mobile_slab": 0.2}`` (see :doc:`/uniqueness`)
+   * - ``comparator_cross_weight``
+     - ``1.0``
+     - Weight of cross-block binding-geometry distance terms
    * - ``use_adaptive_mutations``
      - ``True``
      - Auto-adjust mutation rate
@@ -363,15 +369,21 @@ Production and TorchSim/UMA/UPET benchmark presets default to ``-2``.
      - ``"random"``
      - Atom move strategy
    * - ``comparator_tol``
-     - ``0.015``
+     - ``0.015`` (``0.010`` for supported clusters)
      - Overall shape mismatch still counted as the same isomer
    * - ``comparator_pair_cor_max``
-     - ``0.7`` Å
+     - ``0.7`` Å (``0.45`` for supported clusters)
      - Largest allowed difference in any one interatomic distance
    * - ``comparator_n_top``
      - ``None``
      - Leave ``None``; uses the moving atoms for this system type
        (see :doc:`/uniqueness`)
+   * - ``comparator_component_weights``
+     - ``None``
+     - Per-role block weights, e.g. ``{"mobile_slab": 0.2}`` (see :doc:`/uniqueness`)
+   * - ``comparator_cross_weight``
+     - ``1.0``
+     - Weight of cross-block binding-geometry distance terms
    * - ``write_timing_json``
      - ``False``
      - Write ``{run_dir}/timing.json``; enables ``go_ts_timing.json`` rollup in ``run_go_ts``

@@ -63,7 +63,8 @@ from scgo.system_types import (
     validate_minimum_structure,
     validate_system_type_settings,
 )
-from scgo.utils.comparators import uniqueness_settings_from_mapping
+from scgo.system_types.dedup_geometry import resolve_uniqueness_geometry
+from scgo.utils.comparators import ComparatorBlocks, uniqueness_settings_from_mapping
 from scgo.utils.fitness_strategies import resolve_fitness_strategy
 from scgo.utils.helpers import (
     adsorbate_primary_cell_shift,
@@ -1010,13 +1011,43 @@ def run_trials(
         dedupe_n_top = int(search_mobile_count)
     else:
         dedupe_n_top = len(composition)
+
+    # Block-aware geometry mirrors the GA/BH in-search comparators; an explicit
+    # comparator_n_top forces the legacy trailing-window comparison instead.
+    # Adsorbate types without any split info stay on the legacy rule too.
+    dedupe_blocks: ComparatorBlocks | None = None
+    dedupe_weights: dict[str, float] | None = None
+    dedupe_cross_weight = 1.0
+    dedupe_settings = uniqueness
+    ads_def_for_dedupe = global_optimizer_kwargs.get("adsorbate_definition")
+    ads_info_available = (
+        not get_system_policy(system_type_for_mic).has_adsorbate
+        or ads_def_for_dedupe is not None
+    )
+    if comparator_n_top is None and ads_info_available:
+        resolved_geo = resolve_uniqueness_geometry(
+            system_type=system_type_for_mic,
+            n_atoms=len(all_minima_for_filtering[0][1]),
+            surface_config=surface_cfg,
+            adsorbate_definition=ads_def_for_dedupe,
+            settings=uniqueness,
+        )
+        dedupe_blocks = resolved_geo.blocks
+        dedupe_settings = resolved_geo.settings
+        if dedupe_blocks is not None:
+            dedupe_weights = resolved_geo.component_weights
+            dedupe_cross_weight = resolved_geo.cross_weight
+
     unique_candidates = filter_unique_minima(
         all_minima_for_filtering,
         float(energy_tol),
         n_top=dedupe_n_top,
         mic=dedupe_mic,
-        comparator_tol=uniqueness.comparator_tol,
-        comparator_pair_cor_max=uniqueness.comparator_pair_cor_max,
+        comparator_tol=dedupe_settings.comparator_tol,
+        comparator_pair_cor_max=dedupe_settings.comparator_pair_cor_max,
+        blocks=dedupe_blocks,
+        component_weights=dedupe_weights,
+        cross_weight=dedupe_cross_weight,
     )
     logger.info("Found %s unique candidates", len(unique_candidates))
 

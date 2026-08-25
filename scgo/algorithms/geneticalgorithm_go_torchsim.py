@@ -29,11 +29,11 @@ from tqdm import tqdm
 
 from scgo.algorithms.ga_common import (
     ClusterStartGenerator,
+    EnergyAndStructureComparator,
     SurfaceClusterStartGenerator,
     SurfaceSlabStartGenerator,
     create_ga_pairing,
     create_mutation_operators,
-    create_structure_comparator,
     extract_constraint_index_lists,
     ga_run_metadata_extras,
     log_early_stopping_info,
@@ -93,7 +93,12 @@ from scgo.system_types import (
     uses_surface,
     validate_minimum_structure,
 )
-from scgo.utils.comparators import UniquenessSettings
+from scgo.system_types.dedup_geometry import resolve_uniqueness_geometry
+from scgo.utils.comparators import (
+    ComparatorBlocks,
+    UniquenessSettings,
+    create_geometry_comparator,
+)
 from scgo.utils.fitness_strategies import (
     FitnessStrategy,
 )
@@ -950,6 +955,8 @@ def ga_go(
     comparator_tol: float = DEFAULT_COMPARATOR_TOL,
     comparator_pair_cor_max: float = DEFAULT_PAIR_COR_MAX,
     comparator_n_top: int | None = None,
+    comparator_component_weights: dict[str, float] | None = None,
+    comparator_cross_weight: float = 1.0,
     mutation_probability: float = 0.4,
     population_size: int = 10,
     offspring_fraction: float = 0.5,
@@ -1282,13 +1289,37 @@ def ga_go(
     )
 
     comp_mic = resolve_structure_mic(system_type, surface_config)
-    geometry = UniquenessSettings(
-        comparator_tol=comparator_tol,
-        comparator_pair_cor_max=comparator_pair_cor_max,
-    )
     uniqueness_n_top = (
         int(comparator_n_top) if comparator_n_top is not None else n_to_optimize
     )
+    user_geometry = UniquenessSettings(
+        comparator_tol=comparator_tol,
+        comparator_pair_cor_max=comparator_pair_cor_max,
+        component_weights=comparator_component_weights,
+        cross_weight=comparator_cross_weight,
+    )
+    # comparator_n_top forces the legacy trailing-window comparison (documented
+    # escape hatch); otherwise dedupe uses type-aware role blocks.
+    resolved_geo = None
+    uniqueness_blocks: ComparatorBlocks | None = None
+    geometry: UniquenessSettings = user_geometry
+    if comparator_n_top is None:
+        if policy.slab_is_search_target:
+            # search_composition already contains the mobile top-layer atoms.
+            n_total = int(n_fixed) + len(search_composition)
+        elif surface_mode:
+            n_total = len(surface_config.slab) + len(search_composition)
+        else:
+            n_total = len(composition)
+        resolved_geo = resolve_uniqueness_geometry(
+            system_type=system_type,
+            n_atoms=n_total,
+            surface_config=surface_config,
+            adsorbate_definition=adsorbate_definition,
+            settings=user_geometry,
+        )
+        uniqueness_blocks = resolved_geo.blocks
+        geometry = resolved_geo.settings
     diversity_scorer = setup_diversity_scorer(
         fitness_strategy=fitness_strategy,
         diversity_reference_db=diversity_reference_db,
@@ -1299,10 +1330,19 @@ def ga_go(
         base_dir=output_dir,
         mic=comp_mic,
         uniqueness=geometry,
+        blocks=uniqueness_blocks,
     )
-    comp = create_structure_comparator(
-        uniqueness_n_top, energy_tolerance, geometry, mic=comp_mic
-    )
+    if resolved_geo is not None:
+        structure_comparator = resolved_geo.build_comparator(
+            n_top=uniqueness_n_top, mic=comp_mic
+        )
+    else:
+        structure_comparator = create_geometry_comparator(
+            n_top=uniqueness_n_top,
+            mic=comp_mic,
+            settings=geometry,
+        )
+    comp = EnergyAndStructureComparator(energy_tolerance, structure_comparator)
 
     t0_batch_build = perf_counter()
     if surface_mode:

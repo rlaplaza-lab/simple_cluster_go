@@ -15,6 +15,7 @@ from scgo.constants import (
     DEFAULT_COMPARATOR_TOL,
     DEFAULT_ENERGY_TOLERANCE,
     DEFAULT_NEB_TANGENT_METHOD,
+    DEFAULT_PAIR_COR_MAX,
     DEFAULT_TS_PAIR_COR_MAX,
 )
 from scgo.database.discovery import list_discovered_db_paths_with_run
@@ -38,7 +39,11 @@ from scgo.system_types import (
     validate_minimum_structure,
     validate_system_type_settings,
 )
-from scgo.utils.comparators import get_shared_mobile_atom_indices
+from scgo.system_types.dedup_geometry import (
+    ResolvedUniquenessGeometry,
+    resolve_uniqueness_geometry,
+)
+from scgo.utils.comparators import UniquenessSettings, get_shared_mobile_atom_indices
 from scgo.utils.helpers import (
     auto_niter_ts,
     copy_atoms,
@@ -544,6 +549,19 @@ def _apply_surface_ts_geometry_gate(
                 save_neb_result(result, str(pair_dir), pair_id, verbosity=verbosity)
 
 
+def _block_dedupe_kwargs(
+    geo: ResolvedUniquenessGeometry | None,
+) -> dict[str, Any]:
+    """Keyword args forwarding a resolved geometry to dedupe helpers."""
+    if geo is None or geo.blocks is None:
+        return {"blocks": None, "component_weights": None, "cross_weight": 1.0}
+    return {
+        "blocks": geo.blocks,
+        "component_weights": geo.component_weights,
+        "cross_weight": geo.cross_weight,
+    }
+
+
 def run_transition_state_search(
     composition: list[str],
     system_type: SystemType,
@@ -950,6 +968,37 @@ def run_transition_state_search(
 
     minima = minima_by_formula.get(formula, [])
 
+    # Type-aware uniqueness geometry shared by pre-pair minima filtering and
+    # final TS clustering. Resolved twice with different gate sets (GO rule vs
+    # TS similarity knobs); blocks/weights are identical, only tolerances vary.
+    ts_minima_geo: ResolvedUniquenessGeometry | None = None
+    ts_similarity_geo: ResolvedUniquenessGeometry | None = None
+    if minima:
+        # Adsorbate types without any split info (no definition, no NEB dims)
+        # stay on the legacy trailing-window rule; everything else resolves.
+        policy_has_ads = get_system_policy(system_type).has_adsorbate
+        ads_info_available = (
+            not policy_has_ads
+            or adsorbate_definition is not None
+            or neb_n_ads_m is not None
+        )
+        if ads_info_available:
+            common_geo_kwargs: dict[str, Any] = {
+                "system_type": system_type,
+                "n_atoms": len(minima[0][1]),
+                "surface_config": surface_config,
+                "adsorbate_definition": adsorbate_definition,
+            }
+            ts_minima_geo = resolve_uniqueness_geometry(**common_geo_kwargs)
+            if dedupe_ts:
+                ts_similarity_geo = resolve_uniqueness_geometry(
+                    settings=UniquenessSettings(
+                        comparator_tol=similarity_tolerance,
+                        comparator_pair_cor_max=similarity_pair_cor_max,
+                    ),
+                    **common_geo_kwargs,
+                )
+
     if dedupe_minima:
         original_count = len(minima)
         # Match NEB MIC geometry (resolve_neb_mic), not GA comparator knob.
@@ -974,6 +1023,17 @@ def run_transition_state_search(
             minima_energy_tolerance,
             n_top=dedupe_n_top,
             mic=ts_dedupe_mic,
+            **_block_dedupe_kwargs(ts_minima_geo),
+            comparator_tol=(
+                ts_minima_geo.settings.comparator_tol
+                if ts_minima_geo
+                else DEFAULT_COMPARATOR_TOL
+            ),
+            comparator_pair_cor_max=(
+                ts_minima_geo.settings.comparator_pair_cor_max
+                if ts_minima_geo
+                else DEFAULT_PAIR_COR_MAX
+            ),
         )
         if verbosity >= 1 and len(minima) != original_count:
             log_info_v(
@@ -1323,6 +1383,7 @@ def run_transition_state_search(
             surface_aware=system_policy.uses_surface,
             n_slab=neb_n_slab if neb_n_slab > 0 else None,
             path_key=path_key_formula,
+            **_block_dedupe_kwargs(ts_similarity_geo),
         )
 
         if tag_ts_in_db and unique_ts:

@@ -8,6 +8,7 @@ from typing import Any
 
 from scgo.constants import (
     DEFAULT_COMPARATOR_TOL,
+    DEFAULT_CROSS_WEIGHT,
     DEFAULT_ENERGY_TOLERANCE,
     DEFAULT_FMAX_THRESHOLD,
     DEFAULT_NEB_TANGENT_METHOD,
@@ -317,6 +318,8 @@ def _get_default_params_template() -> GLOptimizerParams:
                 "comparator_tol": DEFAULT_COMPARATOR_TOL,
                 "comparator_pair_cor_max": DEFAULT_PAIR_COR_MAX,
                 "comparator_n_top": None,
+                "comparator_component_weights": None,
+                "comparator_cross_weight": DEFAULT_CROSS_WEIGHT,
                 "fitness_strategy": None,  # None = inherit from top-level
                 "diversity_reference_db": None,  # For diversity strategy
                 "diversity_max_references": None,  # None = inherit from top-level
@@ -335,6 +338,8 @@ def _get_default_params_template() -> GLOptimizerParams:
                 "comparator_tol": DEFAULT_COMPARATOR_TOL,
                 "comparator_pair_cor_max": DEFAULT_PAIR_COR_MAX,
                 "comparator_n_top": None,
+                "comparator_component_weights": None,
+                "comparator_cross_weight": DEFAULT_CROSS_WEIGHT,
                 "use_adaptive_mutations": True,
                 "stagnation_trigger": 4,
                 "stagnation_full_trigger": 8,

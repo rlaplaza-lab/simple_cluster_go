@@ -12,7 +12,9 @@ from ase import Atoms
 from scgo.exceptions import SCGOValidationError
 from scgo.utils.comparators import (
     PureInteratomicDistanceComparator,
+    get_block_distance_units,
     get_sorted_dist_list,
+    iter_ordered_units,
 )
 from scgo.utils.logging import get_logger
 
@@ -46,6 +48,7 @@ class DiversityScorer:
         self.comparator = comparator
         self.reference_structures = list(reference_structures)
         self._ref_descriptors = self._compute_descriptors(reference_structures)
+        self._weight_vector_cache: dict[int, np.ndarray] = {}
 
     def _compute_descriptors(
         self,
@@ -80,9 +83,9 @@ class DiversityScorer:
     def _atoms_to_descriptor(self, atoms: Atoms) -> np.ndarray:
         """Convert Atoms to flat descriptor vector.
 
-        Flattens sorted interatomic distances into a consistent vector format
-        for efficient vectorized operations. Order: by atomic number (ascending),
-        then by sorted distances.
+        Legacy mode flattens sorted interatomic distances ordered by atomic
+        number. Block-aware mode concatenates the comparator's distance units
+        in canonical order (intra-block before cross-block).
 
         Args:
             atoms: Atoms object to convert.
@@ -90,20 +93,75 @@ class DiversityScorer:
         Returns:
             1D numpy array of sorted interatomic distances.
         """
-        dist_dict = get_sorted_dist_list(
-            atoms, mic=self.comparator.mic, n_top=self.comparator.n_top
-        )
-
-        descriptor_parts = [
-            dist_dict[atomic_num] for atomic_num in sorted(dist_dict.keys())
-        ]
-
-        if descriptor_parts:
-            descriptor = np.concatenate(descriptor_parts)
+        if self.comparator.blocks is not None:
+            units = get_block_distance_units(
+                atoms,
+                mic=self.comparator.mic,
+                blocks=self.comparator.blocks,
+            )
+            parts = [np.asarray(u, dtype=float) for _, u in iter_ordered_units(units)]
         else:
-            descriptor = np.array([])
+            dist_dict = get_sorted_dist_list(
+                atoms, mic=self.comparator.mic, n_top=self.comparator.n_top
+            )
+            parts = [dist_dict[atomic_num] for atomic_num in sorted(dist_dict.keys())]
 
+        descriptor = np.concatenate(parts) if parts else np.array([])
         return descriptor
+
+    def _slice_weight_vector(self, descriptor_length: int) -> np.ndarray:
+        """Per-element weights aligned with one block-aware descriptor row.
+
+        Intra-block slices carry their role weight; cross-block slices carry
+        ``cross_weight * sqrt(w_i * w_j)`` of their endpoint role weights
+        (mirroring :meth:`PureInteratomicDistanceComparator.
+        __compare_block_structure__`). Legacy descriptors get all ones. The
+        vector is derived from the first reference structure's fingerprint
+        layout and cached per descriptor length.
+        """
+        comparator = self.comparator
+        if comparator.blocks is None:
+            return np.ones(descriptor_length, dtype=float)
+
+        cached = self._weight_vector_cache.get(descriptor_length)
+        if cached is not None:
+            return cached
+
+        if not self.reference_structures:
+            return np.ones(descriptor_length, dtype=float)
+        units = get_block_distance_units(
+            self.reference_structures[0],
+            mic=comparator.mic,
+            blocks=comparator.blocks,
+        )
+        weights = np.empty(descriptor_length, dtype=float)
+        offset = 0
+        for key, unit in iter_ordered_units(units):
+            length = len(unit)
+            if key[0] == "intra":
+                role = comparator.blocks.blocks[key[1]].role
+                weights[offset : offset + length] = comparator._role_weight(role)
+            else:
+                role_i = comparator.blocks.blocks[key[1]].role
+                role_j = comparator.blocks.blocks[key[2]].role
+                weights[offset : offset + length] = (
+                    comparator.cross_weight
+                    * (
+                        comparator._role_weight(role_i)
+                        * comparator._role_weight(role_j)
+                    )
+                    ** 0.5
+                )
+            offset += length
+        if offset != descriptor_length:
+            logger.warning(
+                "Diversity weight/layout mismatch (%d vs %d); using uniform weights",
+                offset,
+                descriptor_length,
+            )
+            weights = np.ones(descriptor_length, dtype=float)
+        self._weight_vector_cache[descriptor_length] = weights
+        return weights
 
     def score(self, atoms: Atoms) -> float:
         """Compute average dissimilarity to all references.
@@ -135,7 +193,8 @@ class DiversityScorer:
             return self._score_pairwise(atoms)
 
         differences = np.abs(candidate_desc - self._ref_descriptors)
-        cum_diffs = np.sum(differences, axis=1)
+        slice_weights = self._slice_weight_vector(len(candidate_desc))
+        cum_diffs = (slice_weights * differences).sum(axis=1)
         max_diffs = np.max(differences, axis=1)
         combined_dissimilarities = cum_diffs + 0.5 * max_diffs
         avg_dissimilarity = np.mean(combined_dissimilarities)

@@ -1,5 +1,42 @@
 # Changelog
 
+## 0.9.2
+
+### Added
+
+- **Block-aware, component-weighted structure uniqueness.** De-duplication no
+  longer treats every mobile atom identically. Structures are partitioned into
+  role blocks — `mobile_slab` / `deposit` / `adsorbate` — whose intra-block
+  fingerprints are combined with per-role weights, and new cross-block
+  element-pair distance terms make binding geometry (e.g. adsorbate registry
+  on relaxed slab layers, deposit–support contact) visible to the comparator.
+  Previously these differences were invisible: sorted intra-element lists
+  cannot see a monatomic adsorbate at all, and a same-element support swamped
+  the deposit's distances in one shared bucket.
+
+  - New knobs on `ga` / `bh`: `comparator_component_weights` (per-role weights;
+    `0` fully excludes a block, including its cross terms) and
+    `comparator_cross_weight`. An explicit `comparator_n_top` still forces the
+    legacy trailing-window comparison as an escape hatch.
+  - Type-aware defaults resolved from the system type:
+    `surface` / `surface_adsorbate` keep full weight on the mobile top layers
+    (they are the region of interest); `surface_cluster*` with relaxed support
+    includes those layers at weight `0.2` so near-rigid lattice motion cannot
+    dilute deposit/adsorbate discrimination (`0` restores the old exclusion).
+  - The same geometry drives GA population dedupe, BH dedupe, the end-of-
+    campaign `filter_unique_minima` pass, diversity-fitness scoring, and TS
+    minima pre-pair filtering + final saddle clustering.
+
+### Changed
+
+- **Tighter default uniqueness gates for supported clusters**
+  (`surface_cluster`, `surface_cluster_adsorbate`): block-aware fingerprints
+  keep deposit/adsorbate differences undiluted by slab padding, so the legacy
+  slack is unnecessary. Defaults move from `comparator_tol=0.015` /
+  `comparator_pair_cor_max=0.7 Å` to `0.010` / `0.45 Å` for these system types,
+  in GO and in TS pre-pair minima filtering. Explicit non-default user values
+  always win; set the old values explicitly to restore prior behavior.
+
 ## 0.9.1
 
 ### Fixed

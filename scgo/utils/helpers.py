@@ -40,7 +40,10 @@ from scgo.metadata.atoms import (
     get_tag,
     set_tags,
 )
-from scgo.utils.comparators import PureInteratomicDistanceComparator
+from scgo.utils.comparators import (
+    ComparatorBlocks,
+    PureInteratomicDistanceComparator,
+)
 from scgo.utils.composition import get_composition_counts
 from scgo.utils.logging import get_logger
 
@@ -737,6 +740,9 @@ def filter_unique_minima(
     mic: bool = False,
     comparator_tol: float = DEFAULT_COMPARATOR_TOL,
     comparator_pair_cor_max: float = DEFAULT_PAIR_COR_MAX,
+    blocks: ComparatorBlocks | None = None,
+    component_weights: dict[str, float] | None = None,
+    cross_weight: float = 1.0,
 ) -> list[tuple[float, Atoms]]:
     """Filters a list of (energy, Atoms) tuples to identify unique structures.
 
@@ -751,6 +757,10 @@ def filter_unique_minima(
              matching :func:`scgo.algorithms.ga_common.create_structure_comparator`.
         comparator_tol: Cumulative structural difference tolerance.
         comparator_pair_cor_max: Maximum single-distance difference tolerance.
+        blocks: Optional role-block partition; when given it supersedes
+            ``n_top`` as the comparison window (indices are absolute).
+        component_weights: Per-role weights for block-aware comparison.
+        cross_weight: Weight of cross-block distance terms.
 
     Returns:
         A new list of (energy, Atoms) tuples containing only the unique
@@ -776,6 +786,9 @@ def filter_unique_minima(
         tol=comparator_tol,
         pair_cor_max=comparator_pair_cor_max,
         mic=mic,
+        blocks=blocks,
+        component_weights=component_weights,
+        cross_weight=cross_weight,
     )
 
     sorted_minima: list[tuple[float, Atoms]] = sorted(

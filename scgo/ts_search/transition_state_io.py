@@ -33,7 +33,7 @@ from scgo.surface.validation import (
     validate_stored_slab_adsorbate_metadata,
 )
 from scgo.ts_search.ts_statistics import compute_ts_statistics
-from scgo.utils.comparators import PureInteratomicDistanceComparator
+from scgo.utils.comparators import ComparatorBlocks, PureInteratomicDistanceComparator
 from scgo.utils.helpers import get_cluster_formula, validate_pair_id
 from scgo.utils.logging import get_logger
 
@@ -789,6 +789,9 @@ def _cluster_ts_candidates_globally(
     *,
     use_mic: bool = False,
     n_slab: int | None = None,
+    blocks: ComparatorBlocks | None = None,
+    component_weights: dict[str, float] | None = None,
+    cross_weight: float = 1.0,
 ) -> list[list[tuple[float, Atoms, str, tuple[int, int], dict[str, Any]]]]:
     """Cluster TS candidates by energy + geometry in one deterministic pass."""
     if not candidates:
@@ -812,6 +815,9 @@ def _cluster_ts_candidates_globally(
                 pair_cor_max=similarity_pair_cor_max,
                 use_mic=use_mic,
                 n_slab=n_slab,
+                blocks=blocks,
+                component_weights=component_weights,
+                cross_weight=cross_weight,
             )
             if are_similar:
                 matched_idx = idx
@@ -839,6 +845,9 @@ def write_final_unique_ts(
     surface_aware: bool = False,
     n_slab: int | None = None,
     path_key: str | None = None,
+    blocks: ComparatorBlocks | None = None,
+    component_weights: dict[str, float] | None = None,
+    cross_weight: float = 1.0,
 ) -> list[dict[str, Any]]:
     """Deduplicate successful TS geometries globally and write unique `.xyz` files.
 
@@ -902,6 +911,9 @@ def write_final_unique_ts(
         similarity_pair_cor_max,
         use_mic=surface_aware,
         n_slab=n_slab,
+        blocks=blocks,
+        component_weights=component_weights,
+        cross_weight=cross_weight,
     )
 
     rank = 0
