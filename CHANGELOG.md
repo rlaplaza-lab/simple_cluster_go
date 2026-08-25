@@ -1,5 +1,34 @@
 # Changelog
 
+## 0.9.1
+
+### Fixed
+
+- Kaggle GPU CI (full mode) is green again:
+  - `test_parallel_neb_relax_batch_keeps_distinct_ir4_interiors` relied on
+    crossed endpoint labelings of a *regular* tetrahedron to bend IDPP away
+    from linear. Canonical endpoint alignment (fingerprint + Kabsch + spatial
+    rematch, 0.9.0) correctly removes that artifact — the pair is one minimum
+    up to atom permutation and every interpolation of it is identical. The test
+    now exercises distinct interiors via the production ``perturb_sigma`` knob,
+    and a new regression test pins the degenerate-pair rejection.
+  - The heavy bare-surface example cases straddle the suite-default 3600s
+    per-test timeout on a T4 (observed ~1100s–>3600s for the same seed across
+    runs: GPU-nondeterministic GA trajectories). The GO+TS example matrix now
+    carries an explicit ``pytest.mark.timeout(5400)``, keeping worst-case suite
+    wall time below the Kaggle kernel cap.
+
+### Added
+
+- Degenerate NEB paths are rejected before optimization:
+  ``validate_initial_neb_path`` now enforces a minimum aligned endpoint mobile
+  displacement (``MIN_NEB_ENDPOINT_DISPLACEMENT_A = 0.30`` Å, all system
+  types). Endpoints closer than this are the same minimum up to
+  permutation/symmetry; their bands have zero length, cannot develop an
+  interior saddle, and previously burned full NEB step budgets before being
+  discarded as "converged but no usable TS". Such pairs are now skipped at
+  setup with an explicit "degenerate interpolation" error.
+
 ## 0.9.0
 
 ### Fixed

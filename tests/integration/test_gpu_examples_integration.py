@@ -348,6 +348,11 @@ def _run_go_ts_gpu_example(tmp_path: Path, case: GpuExampleCase) -> None:
 @pytest.mark.integration
 @pytest.mark.requires_cuda
 @pytest.mark.requires_mace
+# Heavy surface GO campaigns straddle the suite-default 3600s per-test cap on a
+# T4 (observed 1100s-3600s+ for the identical seed across runs: GPU-nondeterministic
+# trajectories diverge). Give every example case explicit headroom instead; the
+# worst-case suite total stays below the 3h Kaggle kernel cap.
+@pytest.mark.timeout(5400)
 def test_run_go_ts_gpu_example_smoke_mace(tmp_path: Path, case: GpuExampleCase) -> None:
     """End-to-end GO+TS for each example system type under MACE (Kaggle mace suite)."""
     _run_go_ts_gpu_example(tmp_path, case)
@@ -360,6 +365,7 @@ def test_run_go_ts_gpu_example_smoke_mace(tmp_path: Path, case: GpuExampleCase) 
 @pytest.mark.integration
 @pytest.mark.requires_cuda
 @pytest.mark.requires_upet
+@pytest.mark.timeout(5400)
 def test_run_go_ts_gpu_example_smoke_upet(tmp_path: Path, case: GpuExampleCase) -> None:
     """End-to-end GO+TS for each example system type under UPET (Kaggle upet suite)."""
     _run_go_ts_gpu_example(tmp_path, case)

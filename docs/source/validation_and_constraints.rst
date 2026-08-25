@@ -161,9 +161,13 @@ every system type.
 runs only when ``max_endpoint_mismatch`` is set (bare ``gas_cluster`` leaves it
 ``None``):
 
-- ``validate_initial_neb_path`` always checks interior-image clashes (minimum
-  mobile pairwise distance vs ``neb_prescreen_clash_distance``). The aligned
-  endpoint-displacement gate also runs when ``max_endpoint_mismatch`` is set.
+- ``validate_initial_neb_path`` always checks that the aligned endpoints are
+  actually distinct (maximum mobile displacement at least
+  ``MIN_NEB_ENDPOINT_DISPLACEMENT_A`` = 0.3 Å; a label-swap or symmetry image of
+  the same minimum has no transition path) and that interior images do not
+  clash (minimum mobile pairwise distance vs ``neb_prescreen_clash_distance``).
+  An upper aligned endpoint-displacement gate also runs when
+  ``max_endpoint_mismatch`` is set.
 - ``validate_initial_neb_energy_profile`` runs only when
   ``max_endpoint_mismatch`` is set (barrier cap ``neb_max_spurious_barrier``;
   drift and ``min_saddle_prominence`` checks when endpoint energies are

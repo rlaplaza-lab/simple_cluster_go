@@ -735,9 +735,12 @@ system type. ``validate_initial_neb_energy_profile`` runs only when
 ``max_endpoint_mismatch`` is set (bare ``gas_cluster`` leaves it ``None`` and
 skips the energy-profile screen):
 
-- Interior-image clash check (minimum mobile pairwise distance vs
-  ``neb_prescreen_clash_distance``) always runs; the aligned
-  endpoint-displacement gate also runs when ``max_endpoint_mismatch`` is set.
+- Degenerate-path check (aligned endpoint mobile displacement must reach
+  ``MIN_NEB_ENDPOINT_DISPLACEMENT_A`` = 0.3 Å; below it the two endpoints are
+  the same minimum up to permutation/symmetry and no transition path exists)
+  always runs. The interior-image clash check (minimum mobile pairwise distance
+  vs ``neb_prescreen_clash_distance``) also always runs; an upper aligned
+  endpoint-displacement gate applies when ``max_endpoint_mismatch`` is set.
 - Energy-profile check (barrier cap ``neb_max_spurious_barrier``; endpoint-energy
   drift ``> 0.5`` eV and interior-max prominence below ``min_saddle_prominence``)
   runs only when ``max_endpoint_mismatch`` is set and endpoint energies are

@@ -72,6 +72,12 @@ if TYPE_CHECKING:
 # endpoint-drift checks also reject unphysical NEB results.
 MAX_SPURIOUS_NEB_BARRIER_EV: float = 8.0
 
+# Below this aligned endpoint motion a pair is the same minimum up to
+# permutation / symmetry: no path exists, so the band can never relax onto an
+# interior saddle (all images coincide; IDPP and linear are identical). Such
+# pairs are rejected before any GPU NEB budget is spent on them.
+MIN_NEB_ENDPOINT_DISPLACEMENT_A: float = 0.30
+
 
 def _detach_calc(atoms: Atoms | None) -> None:
     """Remove calculator from structure when present."""
@@ -1568,12 +1574,17 @@ def validate_initial_neb_path(
     mic: bool = False,
     max_endpoint_mismatch: float | None = None,
     clash_distance: float = 0.7,
+    min_endpoint_displacement: float = MIN_NEB_ENDPOINT_DISPLACEMENT_A,
 ) -> None:
-    """Reject discontinuous/clashing IDPP bands before NEB optimization.
+    """Reject degenerate/clashing/discontinuous IDPP bands before NEB.
 
-    The interior-image clash check (min mobile pairwise distance vs
-    ``clash_distance``) always runs. The aligned endpoint-displacement gate is
-    only enabled when ``max_endpoint_mismatch`` is set (adsorbate/surface presets).
+    The aligned endpoint-displacement floor (``min_endpoint_displacement``)
+    always runs: endpoints closer than it are the same minimum up to
+    permutation / symmetry, so the band has zero length and can never produce
+    an interior saddle. The upper displacement gate is only enabled when
+    ``max_endpoint_mismatch`` is set (adsorbate/surface presets). The
+    interior-image clash check (min mobile pairwise distance vs
+    ``clash_distance``) always runs.
 
     Raises:
         SCGOValidationError: when the initial path is unsuitable for NEB.
@@ -1583,11 +1594,19 @@ def validate_initial_neb_path(
             "Initial NEB path rejected (clashing/discontinuous interpolation): "
             "fewer than 2 images"
         )
+    max_disp = _endpoint_mobile_max_displacement(
+        images[0], images[-1], n_slab=n_slab, mic=mic
+    )
+    min_disp = float(min_endpoint_displacement)
+    if max_disp < min_disp:
+        raise SCGOValidationError(
+            "Initial NEB path rejected (degenerate interpolation): "
+            f"aligned endpoint mobile max displacement {max_disp:.3f} Å is below "
+            f"{min_disp:.3f} Å; the endpoints are the same minimum up to "
+            "permutation/symmetry and no transition path exists"
+        )
     if max_endpoint_mismatch is not None:
         cartesian_limit = max(6.0, 3.0 * float(max_endpoint_mismatch))
-        max_disp = _endpoint_mobile_max_displacement(
-            images[0], images[-1], n_slab=n_slab, mic=mic
-        )
         if max_disp > cartesian_limit:
             raise SCGOValidationError(
                 "Initial NEB path rejected (clashing/discontinuous interpolation): "

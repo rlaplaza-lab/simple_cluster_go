@@ -849,8 +849,8 @@ def test_core_anchored_kabsch_ignores_adsorbate_drag() -> None:
 def test_validate_initial_neb_path_rejects_clash() -> None:
     # Three images so the middle one is treated as an interior clash check.
     a = Atoms("H2", positions=[[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]])
-    mid = Atoms("H2", positions=[[0.0, 0.0, 0.0], [0.3, 0.0, 0.0]])
-    b = a.copy()
+    mid = Atoms("H2", positions=[[0.6, 0.0, 0.0], [1.1, 0.0, 0.0]])
+    b = Atoms("H2", positions=[[3.0, 0.0, 0.0], [4.0, 0.0, 0.0]])
     with pytest.raises(SCGOValidationError, match="clashing/discontinuous"):
         validate_initial_neb_path(
             [a, mid, b], max_endpoint_mismatch=1.25, clash_distance=0.7
@@ -864,11 +864,20 @@ def test_validate_initial_neb_path_rejects_huge_residual() -> None:
         validate_initial_neb_path([a, b], max_endpoint_mismatch=1.25)
 
 
-def test_validate_initial_neb_path_noop_without_mismatch_gate() -> None:
-    # Without max_endpoint_mismatch the endpoint-displacement gate is skipped,
-    # but the always-on clash check must still pass (H-H at 1.0 A is non-clashing).
+def test_validate_initial_neb_path_rejects_degenerate_endpoints() -> None:
+    # Coincident endpoints are one minimum up to permutation: zero-length band.
     a = Atoms("H2", positions=[[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]])
-    validate_initial_neb_path([a, a.copy()], max_endpoint_mismatch=None)
+    with pytest.raises(SCGOValidationError, match="degenerate"):
+        validate_initial_neb_path([a, a.copy()], max_endpoint_mismatch=None)
+
+
+def test_validate_initial_neb_path_allows_short_but_real_motion() -> None:
+    # Without max_endpoint_mismatch only the degenerate floor applies: real
+    # (>0.3 A) endpoint motion passes even when tiny, and the clash check must
+    # pass too (H-H at 1.0 A is non-clashing).
+    a = Atoms("H2", positions=[[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]])
+    b = Atoms("H2", positions=[[0.5, 0.0, 0.0], [1.5, 0.0, 0.0]])
+    validate_initial_neb_path([a, b], max_endpoint_mismatch=None)
 
 
 def test_validate_initial_neb_energy_profile_rejects_huge_barrier() -> None:

@@ -215,9 +215,11 @@ def ir4_tetrahedron():
 def ir4_tetrahedron_atom_swapped():
     """Ir4 tetrahedron with two atoms swapped.
 
-    After endpoint alignment, IDPP and linear interiors still differ for this
-    pair (unlike Cu3 triangle→linear), so parallel NEB dedup keeps 8 uniques
-    for ``n_images=3`` (2 shared endpoints + 3+3 distinct interiors).
+    A label swap of a *regular* tetrahedron is the same minimum up to atom
+    permutation: canonical endpoint alignment (fingerprint + Kabsch + spatial
+    rematch) maps it onto the reactant geometry exactly, so every interpolation
+    of this pair yields identical images and ``validate_initial_neb_path``
+    rejects it as degenerate. Used to pin that rejection.
     """
     d = 2.7
     positions = [

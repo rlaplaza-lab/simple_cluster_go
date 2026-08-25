@@ -9,7 +9,11 @@ from ase.constraints import FixAtoms
 from scgo.calculators.torchsim_helpers import TorchSimBatchRelaxer
 from scgo.ts_search.neb_endpoints import prepare_neb_endpoints
 from scgo.ts_search.parallel_neb import ParallelNEBBatch, _neb_image_dedup_key
-from scgo.ts_search.transition_state import TorchSimNEB, interpolate_path
+from scgo.ts_search.transition_state import (
+    TorchSimNEB,
+    interpolate_path,
+    validate_initial_neb_path,
+)
 from scgo.utils.ts_runner_kwargs import NebRunConfig
 
 pytestmark = [pytest.mark.requires_cuda, pytest.mark.requires_mace]
@@ -269,24 +273,35 @@ def test_parallel_neb_relax_batch_dedups_identical_cu3_paths(cu3_triangle, cu3_l
     _assert_one_global_relax_batch(neb1, neb2, relaxer, expected_unique=expected_unique)
 
 
-def test_parallel_neb_relax_batch_keeps_distinct_ir4_interiors(
-    ir4_tetrahedron, ir4_tetrahedron_atom_swapped
-):
-    """Ir4 tet→atom-swapped tet: IDPP interiors differ from linear.
+def test_parallel_neb_relax_batch_keeps_distinct_interiors(cu3_triangle, cu3_linear):
+    """Distinct band interiors survive cross-band dedup (8 uniques, not 5/10).
 
-    Shared endpoints still dedupe (2), but distinct interiors keep 3+3, so the
-    first ``relax_batch`` sees 8 unique images rather than 5 or 10.
+    Canonical endpoint alignment makes IDPP and linear produce identical images
+    for well-aligned pairs (the IDPP refinement starts converged), so bands built
+    from interpolation methods alone always collapse onto each other (see the
+    Cu3 dedup test above). To exercise the keep-distinct-interiors path we
+    decorrelate the second band with ``perturb_sigma`` — the same knob production
+    uses — and require the shared endpoints to dedupe (2) while all 3+3 perturbed
+    interiors stay unique.
     """
+    rng = np.random.default_rng(42)
     relaxer = _CountingFakeRelaxer()
-    images1 = interpolate_path(
-        ir4_tetrahedron, ir4_tetrahedron_atom_swapped, n_images=3, method="idpp"
-    )
+    images1 = interpolate_path(cu3_triangle, cu3_linear, n_images=3, method="idpp")
     images2 = interpolate_path(
-        ir4_tetrahedron, ir4_tetrahedron_atom_swapped, n_images=3, method="linear"
+        cu3_triangle,
+        cu3_linear,
+        n_images=3,
+        method="idpp",
+        perturb_sigma=0.05,
+        rng=rng,
     )
 
     assert len(images1) == len(images2) == 5
-    assert not np.allclose(images1[2].positions, images2[2].positions)
+    # Endpoints coincide across bands; interiors do not.
+    assert np.allclose(images1[0].positions, images2[0].positions)
+    assert np.allclose(images1[-1].positions, images2[-1].positions)
+    for k in (1, 2, 3):
+        assert not np.allclose(images1[k].positions, images2[k].positions)
     expected_unique = _unique_neb_image_count(images1, images2)
     assert expected_unique == 8
     assert expected_unique > len(images1)
@@ -295,6 +310,27 @@ def test_parallel_neb_relax_batch_keeps_distinct_ir4_interiors(
     neb1 = TorchSimNEB(images1, relaxer, k=0.1, climb=False)
     neb2 = TorchSimNEB(images2, relaxer, k=0.1, climb=False)
     _assert_one_global_relax_batch(neb1, neb2, relaxer, expected_unique=expected_unique)
+
+
+def test_degenerate_swapped_tet_pair_rejected_before_neb(
+    ir4_tetrahedron, ir4_tetrahedron_atom_swapped
+):
+    """Label-swap of a regular tetrahedron = same minimum: pair must be skipped.
+
+    Endpoint alignment canonically rematches atoms, so the aligned endpoints
+    coincide and the band has zero length. ``validate_initial_neb_path`` must
+    reject it before any NEB optimization budget is spent (regression guard for
+    the Kaggle CI failure where this pair produced a meaningless flat band).
+    """
+    from scgo.exceptions import SCGOValidationError
+
+    images = interpolate_path(
+        ir4_tetrahedron, ir4_tetrahedron_atom_swapped, n_images=3, method="idpp"
+    )
+    for img in images[1:-1]:
+        assert np.allclose(img.positions, images[0].positions, atol=1e-6)
+    with pytest.raises(SCGOValidationError, match="degenerate"):
+        validate_initial_neb_path(images)
 
 
 def test_parallel_neb_uses_neb_forces_for_stepping(cu3_triangle, cu3_linear):
