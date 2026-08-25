@@ -79,7 +79,13 @@ class PermutationMutation(OffspringCreator):
         return _finalize_mutant(self, f, indi, "mutation: permutation")
 
     def mutate(self, atoms):
-        """Does the actual mutation."""
+        """Does the actual mutation.
+
+        Candidate swap pairs are shuffled once and applied incrementally:
+        a swap that introduces a steric clash is skipped (reverted) rather
+        than triggering a full redraw of the swap set. The mutation fails
+        only when no pair can be applied without a clash.
+        """
         N = len(atoms) if self.n_top is None else self.n_top
         slab = atoms[:len(atoms) - N]
         atoms = atoms[len(atoms) - N:]
@@ -120,12 +126,11 @@ class PermutationMutation(OffspringCreator):
         valid_pairs = [(i, j) for i in range(len(unique_tags)) for j in range(i + 1, len(unique_tags))
                        if sym[i] != sym[j]]
 
-        count = 0
-        maxcount = 1000
-        too_close = True
-        while too_close and count < maxcount:
-            count += 1
-            pos = pos_ref.copy()
+        pos = pos_ref.copy()
+
+        if self.blmin is None:
+            # No steric model to validate against; apply the target number of
+            # swaps unconditionally.
             n_swaps = min(swaps, len(valid_pairs))
             if n_swaps < 1:
                 return None
@@ -140,20 +145,39 @@ class PermutationMutation(OffspringCreator):
                 cop2 = np.mean(pos[ind2], axis=0)
                 pos[ind1] += cop2 - cop1
                 pos[ind2] += cop1 - cop2
+        else:
+            # Incremental application over a single shuffled pass of the
+            # candidate pairs; clashing swaps are reverted and skipped.
+            n_swaps = min(swaps, len(valid_pairs))
+            applied = 0
+            for pi_idx in self.rng.permutation(len(valid_pairs)):
+                if applied >= n_swaps:
+                    break
+                i, j = valid_pairs[int(pi_idx)]
+                ind1 = np.where(tags == unique_tags[i])
+                ind2 = np.where(tags == unique_tags[j])
+                cop1 = np.mean(pos[ind1], axis=0)
+                cop2 = np.mean(pos[ind2], axis=0)
+                shift1 = cop2 - cop1
+                shift2 = cop1 - cop2
+                pos[ind1] += shift1
+                pos[ind2] += shift2
 
-            top = Atoms(num, positions=pos, cell=cell, pbc=pbc, tags=tags)
-            if self.blmin is None:
-                too_close = False
-            else:
+                top = Atoms(num, positions=pos, cell=cell, pbc=pbc, tags=tags)
                 too_close = atoms_too_close(
                     top, self.blmin, use_tags=self.use_tags)
                 if not too_close and self.test_dist_to_slab:
                     too_close = atoms_too_close_two_sets(top, slab, self.blmin)
+                if too_close:
+                    pos[ind1] -= shift1
+                    pos[ind2] -= shift2
+                    continue
+                applied += 1
 
-        if too_close:
-            return None
+            if applied < 1:
+                return None
 
-        mutant = slab + top
+        mutant = slab + Atoms(num, positions=pos, cell=cell, pbc=pbc, tags=tags)
         # Apply centering only for gas-phase systems
         if not self._policy.uses_surface:
             mutant.center()

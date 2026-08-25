@@ -977,6 +977,18 @@ def create_ga_pairing(
     )
 
 
+# How root weight-table keys fan out onto partitioned operator variants
+# (``_core`` / ``_ads``) registered by ``_append_partitioned_mutation``.
+OPERATOR_PARTITION_SPECS: dict[str, tuple[str, float]] = {
+    "flattening_core": ("flattening", 0.65),
+    "flattening_ads": ("flattening", 0.35),
+    "breathing_core": ("breathing", 0.65),
+    "breathing_ads": ("breathing", 0.35),
+    "in_plane_slide_core": ("in_plane_slide", 0.15),
+    "in_plane_slide_ads": ("in_plane_slide", 0.15),
+}
+
+
 def _effective_operator_weight(
     name: str | None,
     operator_weights: dict[str, float],
@@ -998,14 +1010,7 @@ def _effective_operator_weight(
     if name in operator_weights:
         return float(operator_weights[name])
 
-    partition_specs: dict[str, tuple[str, float]] = {
-        "flattening_core": ("flattening", 0.65),
-        "flattening_ads": ("flattening", 0.35),
-        "breathing_core": ("breathing", 0.65),
-        "breathing_ads": ("breathing", 0.35),
-        "in_plane_slide_core": ("in_plane_slide", 0.15),
-        "in_plane_slide_ads": ("in_plane_slide", 0.15),
-    }
+    partition_specs = OPERATOR_PARTITION_SPECS
     if name not in partition_specs:
         return 0.0
 
@@ -1030,6 +1035,25 @@ def _effective_operator_weight(
     if active_fraction <= 0.0:
         return allocated / len(peer_names)
     return allocated * (fraction / active_fraction)
+
+
+def unmatched_operator_weight_keys(
+    operator_weights: dict[str, float],
+    name_map: dict[str, int],
+) -> list[str]:
+    """Return weight-table keys that resolve to no registered operator.
+
+    A key is matched when it names a registered operator, or when it is the
+    root of a registered partitioned variant (e.g. ``flattening`` covers
+    ``flattening_core``/``flattening_ads``). Unmatched keys silently carry no
+    selector mass, so they usually indicate a typo or a stale table entry.
+    """
+    covered: set[str] = set(name_map)
+    for name in name_map:
+        spec = OPERATOR_PARTITION_SPECS.get(name)
+        if spec is not None:
+            covered.add(spec[0])
+    return sorted(key for key in operator_weights if key not in covered)
 
 
 def _append_partitioned_mutation(
@@ -1364,6 +1388,9 @@ def create_mutation_operators(
                 kwargs_for=_slide_kwargs,
             )
 
+        # Bare slab-target searches keep in-plane rotation registered with
+        # zero table weight (pinned by tests): unavailable moves stay
+        # reachable to future weight schedules without recreating operators.
         in_plane_rotate = InPlaneRotateMutation(
             blmin,
             n_to_optimize,
@@ -1430,6 +1457,13 @@ def update_mutation_weights(
         Updated OperationSelector with new weights.
     """
     operator_weights = adaptive_config["operator_weights"]
+    unmatched = unmatched_operator_weight_keys(operator_weights, name_map)
+    if unmatched:
+        logger.warning(
+            "Adaptive operator weights reference unregistered operators; "
+            "these keys carry no selector mass: %s",
+            unmatched,
+        )
     index_to_name = {idx: name for name, idx in name_map.items()}
 
     weights: list[float] = []

@@ -65,6 +65,9 @@ def _apply_stagnation_boost(
         boosted["rotational"] *= factor * 1.10
     if "mirror" in boosted:
         boosted["mirror"] *= factor * 1.10
+    if "permutation" in boosted:
+        # Order-disorder swaps are prime stagnation escapers for alloys.
+        boosted["permutation"] *= factor * 1.10
     if "breathing" in boosted:
         boosted["breathing"] *= factor * 1.08
     if "overlap_relief" in boosted:
@@ -98,7 +101,13 @@ def _core_composition_for_weights(
 def _alloy_weights_from_core(
     core_composition: list[str],
 ) -> tuple[dict[str, float], bool]:
-    """Return alloy-biased structural weights when the core is multi-element."""
+    """Return alloy-biased structural weights when the core is multi-element.
+
+    Only operators registered for every alloy-capable system type are listed;
+    surface-only keys (``in_plane_slide``) and surface-registered keys
+    (``mirror``) are applied as floors by the per-type branches in
+    :func:`calculate_system_type_weights`.
+    """
     element_counts = get_composition_counts(core_composition)
     total_atoms = len(core_composition)
     sorted_counts = sorted(element_counts.values(), reverse=True)
@@ -113,10 +122,8 @@ def _alloy_weights_from_core(
                 "shell_swap": 0.12,
                 "flattening": 0.11,
                 "rotational": 0.07,
-                "mirror": 0.05,
                 "anisotropic_rattle": 0.11,
                 "breathing": 0.05,
-                "in_plane_slide": 0.03,
             }
         )
     else:
@@ -128,10 +135,8 @@ def _alloy_weights_from_core(
                 "shell_swap": 0.14,
                 "flattening": 0.10,
                 "rotational": 0.07,
-                "mirror": 0.04,
                 "anisotropic_rattle": 0.10,
                 "breathing": 0.04,
-                "in_plane_slide": 0.08,
             }
         )
     return weights, True
@@ -144,7 +149,6 @@ def _pure_structural_weights(*, include_surface_slide: bool) -> dict[str, float]
         "overlap_relief": 0.18,
         "flattening": 0.18,
         "rotational": 0.14,
-        "mirror": 0.07,
         "anisotropic_rattle": 0.14,
         "breathing": 0.05,
     }

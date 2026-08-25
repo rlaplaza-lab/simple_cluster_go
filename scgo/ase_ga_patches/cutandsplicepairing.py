@@ -197,7 +197,8 @@ class CutAndSplicePairing(OffspringCreator):
                  p1=1, p2=0.05, minfrac=None, cellbounds=None,
                  test_dist_to_slab=True, use_tags=False, target_tags=None, rng=None,
                  verbose=False, system_type="gas_cluster",
-                 max_pairing_attempts: int | None = None):
+                 max_pairing_attempts: int | None = None,
+                 fixed_cell_max_passes: int = 3):
 
         rng = _ensure_rng(rng)
         OffspringCreator.__init__(self, verbose, rng=rng)
@@ -227,6 +228,11 @@ class CutAndSplicePairing(OffspringCreator):
         if max_pairing_attempts is None:
             max_pairing_attempts = 150 if not uses_surface(system_type) else 1000
         self.max_pairing_attempts = int(max_pairing_attempts)
+        # For fixed-cell parents every pass over the cached cut configurations
+        # would otherwise see identical geometry (translations only exist along
+        # variable-cell vectors), so only a small number of jittered passes are
+        # run; ``max_pairing_attempts`` still caps the pass count.
+        self.fixed_cell_max_passes = max(1, int(fixed_cell_max_passes))
 
         self.scaling_volume = None
         self.descriptor = "CutAndSplicePairing"
@@ -373,6 +379,53 @@ class CutAndSplicePairing(OffspringCreator):
         cut_candidates.sort(key=lambda item: item[0])
         return cut_candidates[:12]
 
+    def _jittered_cut_configurations(self, configs, a1, a2, cell):
+        """Randomly offset cached cut points along their normals and re-rank.
+
+        Each cut point is displaced along its own normal by an offset drawn
+        uniformly from ±25 % of the parent group-center span projected onto
+        that normal. The displaced candidates are re-scored with
+        :meth:`_estimate_cut_balance` so the ranked-first-walk order is
+        preserved. Configs with degenerate normals pass through unchanged.
+        """
+        centers_a1, weights = self._group_centers_and_weights(a1)
+        centers_a2, _ = self._group_centers_and_weights(a2)
+        cell_array = np.asarray(cell)
+        jittered = []
+        for score, cut_point, cut_normal in configs:
+            cut_normal_cart = np.asarray(cut_normal, dtype=float) @ cell_array
+            norm = float(np.linalg.norm(cut_normal_cart))
+            if not np.isfinite(norm) or norm <= 1e-12:
+                jittered.append((float(score), cut_point, cut_normal))
+                continue
+            unit = cut_normal_cart / norm
+            projections = np.concatenate(
+                [
+                    np.dot(centers_a1, unit),
+                    np.dot(centers_a2, unit),
+                ]
+            )
+            span = float(np.max(projections) - np.min(projections))
+            offset = self.rng.uniform(-0.25 * span, 0.25 * span)
+            cut_point_cart = (
+                np.dot(np.asarray(cut_point, dtype=float), cell_array)[0]
+                + offset * unit
+            )
+            new_cut_point = np.linalg.solve(
+                cell_array.T, cut_point_cart
+            )[np.newaxis, :]
+            new_score = self._estimate_cut_balance(
+                centers_a1,
+                centers_a2,
+                weights,
+                cut_point_cart,
+                unit,
+            )
+            jittered.append((new_score, new_cut_point, cut_normal))
+
+        jittered.sort(key=lambda item: item[0])
+        return jittered
+
     def update_scaling_volume(self, population, w_adapt=0.5, n_adapt=0):
         """Updates the scaling volume that is used in the pairing.
 
@@ -446,6 +499,10 @@ class CutAndSplicePairing(OffspringCreator):
 
         counter = 0
         maxcount = self.max_pairing_attempts
+        if self.number_of_variable_cell_vectors == 0:
+            # Fixed-cell passes see identical geometry; jittered re-passes are
+            # bounded by fixed_cell_max_passes instead of max_pairing_attempts.
+            maxcount = min(maxcount, self.fixed_cell_max_passes)
         a1_copy = a1.copy()
         a2_copy = a2.copy()
         # Crossover builds cartesian coordinates. SHAKE/FixBondLengths belongs
@@ -519,7 +576,20 @@ class CutAndSplicePairing(OffspringCreator):
                     if not uses_surface(self.system_type):
                         a_copy.center()
 
-            cut_configurations = cached_cut_configs
+            if self.number_of_variable_cell_vectors == 0:
+                # Fixed-cell parents are restored identically on every pass;
+                # only the jittered cut points differ between passes.
+                if counter == 1:
+                    cut_configurations = cached_cut_configs
+                else:
+                    cut_configurations = self._jittered_cut_configurations(
+                        cached_cut_configs,
+                        a1_copy,
+                        a2_copy,
+                        newcell,
+                    )
+            else:
+                cut_configurations = cached_cut_configs
 
             for _score, cut_p, cut_normal in cut_configurations:
                 self.last_attempt_count += 1

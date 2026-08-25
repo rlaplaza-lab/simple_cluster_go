@@ -66,7 +66,7 @@ class RattleMutation(OffspringCreator):
     def __init__(self, blmin, n_top, system_type: SystemType, rattle_strength=0.8,
                  rattle_prop=0.4, test_dist_to_slab=True, use_tags=False,
                  target_tags=None, verbose=False, rng=None,
-                 surface_normal_axis=2):
+                 surface_normal_axis=2, patience=60):
         rng = _ensure_rng(rng)
         OffspringCreator.__init__(self, verbose, rng=rng)
         self.blmin = blmin
@@ -78,10 +78,14 @@ class RattleMutation(OffspringCreator):
         self.target_tags = target_tags
         self.system_type = system_type
         self.surface_normal_axis = surface_normal_axis
+        # Consecutive tolerated failures once the strength schedule has annealed
+        # to its lowest tier; hopeless (very dense) parents bail out early.
+        self.patience = max(0, int(patience))
         self._policy = get_system_policy(system_type)
 
         self.descriptor = "RattleMutation"
         self.min_inputs = 1
+        self.last_attempt_count = 0
 
     def get_new_individual(self, parents):
         """Generates a new individual by applying the rattle mutation to a parent.
@@ -135,8 +139,11 @@ class RattleMutation(OffspringCreator):
         )
         use_mic = bool(self._policy.uses_surface)
         parent_mobile = atoms
+        self.last_attempt_count = 0
+        failures_at_lowest_tier = 0
         for count in range(maxcount):
-            strength = strengths[min(count * len(strengths) // maxcount, len(strengths) - 1)]
+            tier = min(count * len(strengths) // maxcount, len(strengths) - 1)
+            strength = strengths[tier]
             st = 2. * strength
             pos = pos_ref.copy()
 
@@ -148,6 +155,7 @@ class RattleMutation(OffspringCreator):
                     r = self.rng.random(3)
                     pos[select] += st * (r - 0.5)
 
+            self.last_attempt_count += 1
             top = Atoms(num, positions=pos, cell=cell, pbc=pbc, tags=tags)
             if self._policy.uses_surface:
                 top = _reanchor_mobile_to_slab(
@@ -157,6 +165,10 @@ class RattleMutation(OffspringCreator):
             if not too_close and self.test_dist_to_slab:
                 too_close = atoms_too_close_two_sets(top, slab, self.blmin)
             if too_close:
+                if tier == len(strengths) - 1 and self.patience > 0:
+                    failures_at_lowest_tier += 1
+                    if failures_at_lowest_tier >= self.patience:
+                        return None
                 continue
             if not _preserves_mobile_connectivity(
                 parent_mobile,
@@ -164,6 +176,10 @@ class RattleMutation(OffspringCreator):
                 use_mic=use_mic,
                 connectivity_factor=_resolve_op_connectivity_factor(self),
             ):
+                if tier == len(strengths) - 1 and self.patience > 0:
+                    failures_at_lowest_tier += 1
+                    if failures_at_lowest_tier >= self.patience:
+                        return None
                 continue
             mutant = slab + top
             if not self._policy.uses_surface:
@@ -195,6 +211,7 @@ class AnisotropicRattleMutation(OffspringCreator):
         rng=None,
         verbose=False,
         surface_normal_axis=2,
+        patience=60,
     ):
         rng = _ensure_rng(rng)
         OffspringCreator.__init__(self, verbose, rng=rng)
@@ -208,10 +225,14 @@ class AnisotropicRattleMutation(OffspringCreator):
         self.target_tags = target_tags
         self.system_type = system_type
         self.surface_normal_axis = surface_normal_axis
+        # Consecutive tolerated failures once the scale schedule has annealed
+        # to its lowest tier; hopeless (very dense) parents bail out early.
+        self.patience = max(0, int(patience))
         self._policy = get_system_policy(system_type)
 
         self.descriptor = "AnisotropicRattleMutation"
         self.min_inputs = 1
+        self.last_attempt_count = 0
 
     def get_new_individual(self, parents):
         f = parents[0]
@@ -244,8 +265,11 @@ class AnisotropicRattleMutation(OffspringCreator):
         use_mic = bool(self._policy.uses_surface)
         parent_mobile = atoms
         count = 0
+        self.last_attempt_count = 0
+        failures_at_lowest_tier = 0
         while count < maxcount:
-            scale = scales[min(count * len(scales) // maxcount, len(scales) - 1)]
+            tier = min(count * len(scales) // maxcount, len(scales) - 1)
+            scale = scales[tier]
             in_plane = self.in_plane_strength * scale
             normal_s = self.normal_strength * scale
             pos = pos_ref.copy()
@@ -287,17 +311,23 @@ class AnisotropicRattleMutation(OffspringCreator):
                 top = _reanchor_mobile_to_slab(
                     atoms, top, slab, self.surface_normal_axis)
             count += 1
+            self.last_attempt_count += 1
             too_close = atoms_too_close(top, self.blmin, use_tags=self.use_tags)
             if not too_close and self.test_dist_to_slab:
                 too_close = atoms_too_close_two_sets(top, slab, self.blmin)
-            if too_close:
-                continue
-            if not _preserves_mobile_connectivity(
+            failed = too_close
+            if not failed and not _preserves_mobile_connectivity(
                 parent_mobile,
                 top,
                 use_mic=use_mic,
                 connectivity_factor=_resolve_op_connectivity_factor(self),
             ):
+                failed = True
+            if failed:
+                if tier == len(scales) - 1 and self.patience > 0:
+                    failures_at_lowest_tier += 1
+                    if failures_at_lowest_tier >= self.patience:
+                        return None
                 continue
             result = slab + top
             if not self._policy.uses_surface:

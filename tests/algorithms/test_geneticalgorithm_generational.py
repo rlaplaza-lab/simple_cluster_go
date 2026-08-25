@@ -511,3 +511,32 @@ def test_per_gen_max_targets_population_when_batch_size_none():
         batch_size if batch_size is not None else max(n_offspring, population_size)
     )
     assert per_gen_max == 7
+
+
+def test_ga_go_reports_mutation_counters(tmp_path, rng):
+    """Offspring workers expose mutation request/application counters."""
+    payloads: list[dict] = []
+    calc = EMT()
+    relaxer = MockRelaxer(max_steps=1)
+    minima = ga_go(
+        composition=["Pt", "Pt", "Pt"],
+        output_dir=str(tmp_path / "ga_go_mut_counters"),
+        calculator=calc,
+        relaxer=relaxer,
+        niter=2,
+        population_size=4,
+        niter_local_relaxation=1,
+        batch_size=2,
+        rng=rng,
+        timing_collector=payloads,
+    )
+    assert isinstance(minima, list)
+    assert payloads, "timing collector received no payload"
+    counters = payloads[-1]["counters"]
+    assert counters["offspring_attempts_total"] > 0
+    assert counters["offspring_created"] > 0
+    assert counters["offspring_mutations_requested"] >= 0
+    assert (
+        counters["offspring_mutations_applied"]
+        <= counters["offspring_mutations_requested"]
+    )

@@ -330,11 +330,13 @@ def _fail_until_call(n_calls):
     return fake_atoms_too_close
 
 
-def test_rattle_accepts_success_on_final_attempt(monkeypatch, pt3_atoms, rng):
-    """G4: a valid geometry found on attempt ``maxcount`` must not be discarded."""
+def test_rattle_accepts_late_success_before_patience(monkeypatch, pt3_atoms, rng):
+    """A valid geometry found late in the anneal must still be accepted."""
     from scgo.ase_ga_patches.mutations import rattle as rattle_module
 
-    monkeypatch.setattr(rattle_module, "atoms_too_close", _fail_until_call(1000))
+    # Attempt 300 is still above the lowest strength tier (~334), so the
+    # lowest-tier patience budget has not started counting yet.
+    monkeypatch.setattr(rattle_module, "atoms_too_close", _fail_until_call(300))
     mut = RattleMutation(
         {(78, 78): 0.5},
         3,
@@ -359,14 +361,17 @@ def test_rattle_returns_none_when_never_valid(monkeypatch, pt3_atoms, rng):
         rng=rng,
     )
     assert mut.mutate(pt3_atoms.copy()) is None
+    # Lowest-tier consecutive-failure patience stops the loop well before the
+    # absolute cap of 1000 attempts.
+    assert mut.last_attempt_count < 1000
 
 
-def test_anisotropic_rattle_accepts_success_on_final_attempt(
+def test_anisotropic_rattle_accepts_late_success_before_patience(
     monkeypatch, pt3_atoms, rng
 ):
     from scgo.ase_ga_patches.mutations import rattle as rattle_module
 
-    monkeypatch.setattr(rattle_module, "atoms_too_close", _fail_until_call(1000))
+    monkeypatch.setattr(rattle_module, "atoms_too_close", _fail_until_call(300))
     mut = AnisotropicRattleMutation(
         {(78, 78): 0.5},
         3,
@@ -379,10 +384,13 @@ def test_anisotropic_rattle_accepts_success_on_final_attempt(
     assert len(out) == len(pt3_atoms)
 
 
-def test_permutation_accepts_success_on_final_attempt(monkeypatch, au2pt2_atoms, rng):
+def test_permutation_accepts_success_on_final_pair(monkeypatch, au2pt2_atoms, rng):
+    """Incremental application keeps trying candidate pairs after clashes."""
     from scgo.ase_ga_patches.mutations import permutation as permutation_module
 
-    monkeypatch.setattr(permutation_module, "atoms_too_close", _fail_until_call(1000))
+    # Au2Pt2 yields four valid swap pairs; the first three clash and the
+    # last checked pair succeeds, independent of the shuffle order.
+    monkeypatch.setattr(permutation_module, "atoms_too_close", _fail_until_call(4))
     mut = PermutationMutation(
         n_top=4,
         probability=0.5,

@@ -438,6 +438,7 @@ def _build_offspring_worker(
     pairing_attempt_count = _pairing_last_attempt_count(local_pairing)
     mutation_s = 0.0
     mutation_applied = False
+    mutation_requested = False
     if child is None:
         return {
             "index": job["index"],
@@ -445,6 +446,7 @@ def _build_offspring_worker(
             "desc": None,
             "failure_reason": "pairing_failed",
             "mutation_applied": False,
+            "mutation_requested": False,
             "operator_setup_s": operator_setup_s,
             "crossover_s": crossover_s,
             "mutation_s": mutation_s,
@@ -457,12 +459,16 @@ def _build_offspring_worker(
             "desc": desc,
             "failure_reason": "too_close_prefilter",
             "mutation_applied": False,
+            "mutation_requested": False,
             "operator_setup_s": operator_setup_s,
             "crossover_s": crossover_s,
             "mutation_s": mutation_s,
             "pairing_attempt_count": pairing_attempt_count,
         }
-    if decision_rng.random() < job["current_mutation_probability"]:
+    mutation_requested = bool(
+        decision_rng.random() < job["current_mutation_probability"]
+    )
+    if mutation_requested:
         mutation_t0 = perf_counter()
         mutated = local_mutations.get_operator().mutate(child)
         mutation_s = perf_counter() - mutation_t0
@@ -510,6 +516,7 @@ def _build_offspring_worker(
             "failure_reason": "validation_failed",
             "validation_error": str(exc),
             "mutation_applied": mutation_applied,
+            "mutation_requested": mutation_requested,
             "operator_setup_s": operator_setup_s,
             "crossover_s": crossover_s,
             "mutation_s": mutation_s,
@@ -521,6 +528,7 @@ def _build_offspring_worker(
         "desc": desc,
         "failure_reason": None,
         "mutation_applied": mutation_applied,
+        "mutation_requested": mutation_requested,
         "operator_setup_s": operator_setup_s,
         "crossover_s": crossover_s,
         "mutation_s": mutation_s,
@@ -1793,19 +1801,40 @@ def ga_go(
             _ensure_offspring_worker_state(offspring_ctx)
 
             try:
-                while created < n_offspring and attempts < max_attempts:
+                parents_exhausted = False
+                parent_selection_misses = 0
+                max_parent_selection_misses = max(20, 2 * n_offspring)
+                while (
+                    created < n_offspring
+                    and attempts < max_attempts
+                    and not parents_exhausted
+                ):
                     attempts_remaining = max_attempts - attempts
                     if attempts_remaining <= 0:
                         break
                     jobs_target = min(n_offspring - created, attempts_remaining)
                     jobs: list[dict[str, Any]] = []
                     for _ in range(jobs_target):
-                        attempts += 1
                         t0 = perf_counter()
                         candidates = population.get_two_candidates()
                         t_parent_select_gen += perf_counter() - t0
                         if candidates is None:
+                            # Empty selections consume no adaptive attempt
+                            # budget; a sustained run of them means the
+                            # population cannot supply parents at all.
+                            parent_selection_misses += 1
+                            if parent_selection_misses >= max_parent_selection_misses:
+                                logger.warning(
+                                    "Generation %s: %d consecutive empty parent "
+                                    "selections; ending generation early",
+                                    generation,
+                                    parent_selection_misses,
+                                )
+                                parents_exhausted = True
+                                break
                             continue
+                        parent_selection_misses = 0
+                        attempts += 1
                         a1, a2 = candidates
                         task_seed = int(rng.integers(0, 2**31 - 1))
                         _nfp = offspring_ctx.n_frozen_prefix
@@ -1989,6 +2018,14 @@ def ga_go(
                 + t_offspring_parallel_wall_gen
             )
             profile_counters["offspring_created"] += created
+            profile_counters["offspring_mutations_requested"] = profile_counters.get(
+                "offspring_mutations_requested", 0
+            ) + sum(
+                1 for r in generation_all_job_results if r.get("mutation_requested")
+            )
+            profile_counters["offspring_mutations_applied"] = profile_counters.get(
+                "offspring_mutations_applied", 0
+            ) + sum(1 for r in generation_all_job_results if r.get("mutation_applied"))
 
             log_generation_offspring_summaries(
                 logger,

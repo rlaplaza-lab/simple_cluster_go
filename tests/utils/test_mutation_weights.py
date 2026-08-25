@@ -281,3 +281,38 @@ def test_surface_cluster_adsorbate_prioritizes_fragment_reposition() -> None:
     )
     assert weights["fragment_reposition"] >= 0.18
     assert weights["in_plane_rotate"] > 0.0
+
+
+def test_stagnation_boost_increases_permutation_for_alloys() -> None:
+    """Order-disorder swaps must gain mass under stagnation."""
+    from scgo.utils.mutation_weights import _apply_stagnation_boost
+
+    base, _ = calculate_system_type_weights("gas_cluster", ["Au", "Au", "Pt", "Pt"])
+    boosted = _apply_stagnation_boost(base, level=1.0, burst_multiplier=1.8)
+    assert boosted["permutation"] > base["permutation"]
+    assert abs(sum(boosted.values()) - 1.0) < 1e-6
+
+
+def test_gas_alloy_table_lists_only_gas_registered_operators() -> None:
+    """Surface-only keys (mirror / in_plane_slide) stay out of gas tables."""
+    weights, use_perm = calculate_system_type_weights(
+        "gas_cluster", ["Au", "Au", "Pt", "Pt"]
+    )
+    assert use_perm is True
+    assert "mirror" not in weights
+    assert "in_plane_slide" not in weights
+    # Effective distribution unchanged versus the pre-cleanup table: the same
+    # relative shares over the registered subset (well-mixed alloy branch).
+    expected = {
+        "rattle": 0.13,
+        "overlap_relief": 0.12,
+        "permutation": 0.18,
+        "shell_swap": 0.14,
+        "flattening": 0.10,
+        "rotational": 0.07,
+        "anisotropic_rattle": 0.10,
+        "breathing": 0.04,
+    }
+    total = sum(expected.values())
+    for name, raw in expected.items():
+        assert weights[name] == pytest.approx(raw / total)

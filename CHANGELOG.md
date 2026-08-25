@@ -1,5 +1,46 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- **Bounded genetic-operator retries cut parallel offspring walltime.** Batch
+  offspring generation waits on the slowest job, so unbounded inner retry
+  loops dominated generation time whenever a parent was hopeless (dense,
+  clashing) rather than merely unlucky:
+  - `CutAndSplicePairing` fixed-cell crossover now runs a small number of
+    jittered passes (new `fixed_cell_max_passes`, default `3`) over the ranked
+    cut set instead of re-walking identical geometry up to
+    `max_pairing_attempts` times; later passes offset each cut point along its
+    normal by up to ±25 % of the parent span and re-rank by balance score.
+    Variable-cell pairing is unchanged.
+  - `RattleMutation` / `AnisotropicRattleMutation` accept a `patience`
+    (default `60`): once the strength/scale schedule has annealed to its
+    lowest tier, they give up after that many consecutive failed attempts
+    instead of always burning the full 1000-attempt budget. Both now track
+    `last_attempt_count`.
+  - `PermutationMutation` applies swap pairs incrementally: candidate pairs
+    are shuffled once, clash-inducing swaps are reverted and skipped, and the
+    mutation fails only when no pair can be applied. Dense alloys no longer
+    redraw the entire swap set up to 1000 times.
+- **Weight-table hygiene.** Gas-cluster alloy/pure tables no longer list
+  surface-only keys (`mirror`, `in_plane_slide`) whose mass was silently
+  dropped during selector mapping — effective selection probabilities are
+  unchanged, but tables now state the truth. `update_mutation_weights` warns
+  about any weight key that resolves to no registered operator (new
+  `unmatched_operator_weight_keys` helper), so typos and stale entries fail
+  loudly in tests instead of skewing selection silently at runtime.
+- **Stagnation boost covers permutations.** `_apply_stagnation_boost` now also
+  lifts `permutation` (×1.10): order-disorder swaps are prime stagnation
+  escapers for alloy searches.
+- **Offspring attempt accounting.** Empty `population.get_two_candidates()`
+  selections no longer consume the adaptive per-generation attempt budget; a
+  sustained run of them (≥ `max(20, 2·n_offspring)`) ends the generation early
+  with a warning instead of spinning.
+- **Mutation observability.** Offspring workers report `mutation_requested`
+  alongside `mutation_applied`; both aggregate into
+  `counters.offspring_mutations_requested` / `.applied` in the timing payload.
+
 ## 0.9.2
 
 ### Added
