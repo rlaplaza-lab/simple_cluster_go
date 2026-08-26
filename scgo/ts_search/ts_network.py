@@ -156,7 +156,7 @@ def add_ts_to_database(
 
         return True
 
-    except (sqlite3.DatabaseError, sqlite3.OperationalError, OSError, ValueError):
+    except (sqlite3.DatabaseError, OSError, ValueError):
         logger.exception("Error adding TS %s to database", pair_id)
         return False
 
@@ -271,12 +271,7 @@ def tag_unique_ts_in_databases(
                         pair_id,
                         db_candidate,
                     )
-            except (
-                sqlite3.DatabaseError,
-                sqlite3.OperationalError,
-                OSError,
-                ValueError,
-            ):
+            except (sqlite3.DatabaseError, OSError, ValueError):
                 logger.exception(
                     "Failed to add TS %s to DB %s",
                     pair_id,

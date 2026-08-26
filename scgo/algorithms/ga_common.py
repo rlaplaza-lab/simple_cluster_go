@@ -1674,7 +1674,8 @@ def select_population_class(
             "diversity_update_interval": diversity_update_interval,
         }
         logger.info(
-            f"Using FitnessStrategyPopulation with fitness_strategy='{fitness_strategy}'"
+            "Using FitnessStrategyPopulation with fitness_strategy='%s'",
+            fitness_strategy,
         )
     else:
         PopulationClass = Population
@@ -1712,8 +1713,9 @@ def log_early_stopping_info(
             "fitness" if fitness_strategy != FitnessStrategy.LOW_ENERGY else "energy"
         )
         logger.info(
-            f"Early stopping enabled: will stop after {early_stopping_niter} "
-            f"generations with no {stopping_metric} improvement"
+            "Early stopping enabled: will stop after %d generations with no %s improvement",
+            early_stopping_niter,
+            stopping_metric,
         )
 
 

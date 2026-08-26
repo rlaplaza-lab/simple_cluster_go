@@ -57,8 +57,11 @@ class DatabaseRegistry:
             db_key = str(db_path_resolved.relative_to(base_dir_resolved))
         except ValueError as e:
             logger.warning(
-                f"Cannot register database: path mismatch between "
-                f"db_path={db_path_resolved} and base_dir={base_dir_resolved}: {e}"
+                "Cannot register database: path mismatch between db_path=%s and "
+                "base_dir=%s: %s",
+                db_path_resolved,
+                base_dir_resolved,
+                e,
             )
             return
 

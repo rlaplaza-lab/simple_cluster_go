@@ -203,13 +203,7 @@ def mark_final_minima_in_db(
                     total_rows_updated += rows_updated_this_db
                     dbs_touched.add(db_key)
                     details[db_key] = details.get(db_key, 0) + rows_updated_this_db
-        except (
-            sqlite3.DatabaseError,
-            sqlite3.OperationalError,
-            OSError,
-            json.JSONDecodeError,
-            ValueError,
-        ) as e:
+        except (sqlite3.DatabaseError, OSError, json.JSONDecodeError, ValueError) as e:
             logger.warning("Failed marking final minima for %s: %s", db_path, e)
             continue
 

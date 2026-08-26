@@ -850,7 +850,9 @@ def bh_go(
                 reverse=True,  # Higher fitness first
             )
             logger.info(
-                f"Sorted {len(unique_minima)} unique minima by {fitness_strategy} fitness"
+                "Sorted %d unique minima by %s fitness",
+                len(unique_minima),
+                fitness_strategy,
             )
 
         _finish_bh_timing()

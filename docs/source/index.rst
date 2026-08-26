@@ -23,26 +23,9 @@ Three building blocks cover every workflow:
 - **Slab**: a periodic surface the cluster or adsorbate sits on. You can also
   search the top layers of the slab itself, with the bottom layers held still.
 
-The six system types combine these pieces:
-
-.. list-table::
-   :widths: 30 70
-   :header-rows: 1
-
-   * - Type
-     - What you search
-   * - ``gas_cluster``
-     - Cluster in vacuum
-   * - ``surface_cluster``
-     - Cluster on a slab
-   * - ``gas_cluster_adsorbate``
-     - Cluster plus adsorbates in vacuum
-   * - ``surface_cluster_adsorbate``
-     - Cluster plus adsorbates on a slab
-   * - ``surface``
-     - Top layers of a bare slab
-   * - ``surface_adsorbate``
-     - Top slab layers plus adsorbates, no cluster
+The six system types combine these pieces (see :doc:`/quickstart` for the
+full table): ``gas_cluster``, ``surface_cluster``, ``gas_cluster_adsorbate``,
+``surface_cluster_adsorbate``, bare-slab ``surface``, and ``surface_adsorbate``.
 
 See :doc:`/quickstart` to get started.
 

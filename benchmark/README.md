@@ -1,6 +1,6 @@
 # SCGO MLIP regression benchmarks
 
-This directory holds **long-running** scripts that sweep cluster sizes (or surface models) and compare recovered minima to reference data. They are **not** the same as the fast EMT checks in [`tests/benchmarks/`](../tests/benchmarks/).
+This directory holds **long-running** scripts that sweep cluster sizes (or surface models) and compare recovered minima to reference data. They are separate from the fast unit tests of the benchmark helpers in [`tests/benchmark/`](../tests/benchmark/).
 
 ## Dependencies
 
@@ -25,7 +25,7 @@ Per [`benchmark_common.py`](benchmark_common.py), campaign outputs go under `ben
 
 - **Surface Pt-on-graphite** — flat root `benchmark/results/pt_surface_graphite/` ([`benchmark_Pt_surface_graphite.py`](benchmark_Pt_surface_graphite.py)), same `{path_key}_searches/` layout (e.g. `Pt5_graphite_searches/`).
 
-TS runs add sibling `{path_key}_ts_results/` trees with the same run-oriented layout (`run_*/`, `results_summary.json`, deduplicated export); pair artifacts use `pair_*` subdirectories. See [`docs/source/quickstart.rst`](../docs/source/quickstart.rst) (*On-disk layout*).
+TS runs add sibling `{path_key}_ts_results/` trees with the same run-oriented layout (`run_*/`, `results_summary.json`, deduplicated export); pair artifacts use `pair_*` subdirectories. See [`docs/source/output_layout.rst`](../docs/source/output_layout.rst) (*On-disk layout*).
 
 Benchmark GA presets enable `write_timing_json` and `detailed_timing` so profiling lines in CLI output match `{run_dir}/timing.json` on disk.
 

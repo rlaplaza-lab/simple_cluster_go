@@ -111,7 +111,7 @@ Timing and Profiling
 ``ts_params``, ``run_go_ts`` also writes ``go_ts_timing.json`` at the campaign root.
 
 See :doc:`/api/utils` for timing JSON layout and output-path helpers. On-disk layout and
-provenance: :doc:`/quickstart` (*On-disk layout*).
+provenance: :doc:`/output_layout`.
 
 Module Reference
 ----------------

@@ -2,8 +2,8 @@ Benchmarks
 ==========
 
 SCGO ships **long-running MLIP regression scripts** under ``benchmark/`` at the
-repository root. These are separate from the fast EMT sanity checks in
-``tests/benchmarks/``.
+repository root, separate from the fast unit tests of the benchmark helpers in
+``tests/benchmark/``.
 
 Dependencies
 ------------

@@ -118,9 +118,7 @@ def _apply_scgo_sqlite_settings(
         )
     finally:
         if close_after and getattr(backend, "connection", None) is not None:
-            with contextlib.suppress(
-                sqlite3.OperationalError, sqlite3.DatabaseError, AttributeError
-            ):
+            with contextlib.suppress(sqlite3.DatabaseError, AttributeError):
                 backend.__exit__(None, None, None)
 
 
@@ -285,12 +283,7 @@ def close_data_connection(da: DataConnection | None, log_errors: bool = True) ->
     # Release ASE's persistent handle first (commits + closes via __exit__).
     try:
         backend.__exit__(None, None, None)
-    except (
-        sqlite3.OperationalError,
-        sqlite3.DatabaseError,
-        TypeError,
-        AttributeError,
-    ) as e:
+    except (sqlite3.DatabaseError, TypeError, AttributeError) as e:
         if log_errors:
             logger.debug("Error closing database connection: %s", e)
 
@@ -316,7 +309,7 @@ def _run_sqlite(
         if commit:
             conn.commit()
     finally:
-        with contextlib.suppress(sqlite3.OperationalError, sqlite3.DatabaseError):
+        with contextlib.suppress(sqlite3.DatabaseError):
             conn.close()
 
 

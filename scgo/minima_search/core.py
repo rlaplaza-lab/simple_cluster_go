@@ -75,7 +75,7 @@ from scgo.utils.helpers import (
     get_cluster_formula,
     is_true_minimum,
 )
-from scgo.utils.logging import get_logger
+from scgo.utils.logging import get_logger, log_debug_v, log_info_v
 from scgo.utils.parallel_workers import resolve_n_jobs_for_tasks
 from scgo.utils.path_keys import resolve_run_path_key
 from scgo.utils.phase_logging import format_count_summary
@@ -572,24 +572,23 @@ def _gate_structurally_valid_candidates(
             dropped.append((energy, str(exc)))
             continue
         valid.append((energy, atoms))
-    if dropped and verbosity >= 1:
-        reason_counts = Counter(
-            _compact_structural_gate_reason(msg) for _, msg in dropped
-        )
-        logger.info(
+    if dropped:
+        log_info_v(
+            logger,
             "Final structural gate: kept %d/%d candidates (%s)",
             len(valid),
             len(candidates),
-            format_count_summary(reason_counts),
+            format_count_summary(
+                Counter(_compact_structural_gate_reason(msg) for _, msg in dropped)
+            ),
         )
-        if verbosity >= 2:
-            for energy, msg in dropped:
-                logger.debug(
-                    "Dropping dedup'd candidate (E=%.4f eV) failing final "
-                    "structural gate: %s",
-                    energy,
-                    msg,
-                )
+        for energy, msg in dropped:
+            log_debug_v(
+                logger,
+                "Dropping dedup'd candidate (E=%.4f eV) failing final structural gate: %s",
+                energy,
+                msg,
+            )
     return valid
 
 
@@ -1170,7 +1169,7 @@ def run_trials(
                         validated_minima.append((energy, atoms))
                     else:
                         logger.info("Candidate %s rejected", i + 1)
-                except (OSError, RuntimeError, ValueError, SCGOValidationError) as e:
+                except (SCGOValidationError, OSError, RuntimeError, ValueError) as e:
                     logger.warning(
                         "Validation failed for candidate %s (E=%.4f eV): %s",
                         i + 1,
@@ -1338,7 +1337,6 @@ def run_trials(
             )
         except (
             sqlite3.DatabaseError,
-            sqlite3.OperationalError,
             OSError,
             SCGODatabaseError,
             SCGOFileError,

@@ -124,13 +124,7 @@ class DatabaseDiscovery:
             if rowid is None:
                 return None
             return db.get_atoms(rowid)
-        except (
-            AttributeError,
-            sqlite3.DatabaseError,
-            sqlite3.OperationalError,
-            TypeError,
-            ValueError,
-        ) as e:
+        except (AttributeError, sqlite3.DatabaseError, TypeError, ValueError) as e:
             logger.debug("Failed relaxed-candidate probe: %s", e)
             return None
 
@@ -175,7 +169,6 @@ class DatabaseDiscovery:
 
             except (
                 sqlite3.DatabaseError,
-                sqlite3.OperationalError,
                 OSError,
                 ValueError,
                 KeyError,

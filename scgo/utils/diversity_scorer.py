@@ -72,9 +72,10 @@ class DiversityScorer:
         lengths = [len(d) for d in descriptors]
         if len(set(lengths)) > 1:
             logger.warning(
-                f"Inconsistent descriptor lengths: {sorted(set(lengths))}. "
-                f"May indicate different compositions; skipping vectorized "
-                f"descriptor matrix and falling back to pairwise scoring"
+                "Inconsistent descriptor lengths: %s. May indicate different "
+                "compositions; skipping vectorized descriptor matrix and falling "
+                "back to pairwise scoring",
+                sorted(set(lengths)),
             )
             return None
 
@@ -186,9 +187,10 @@ class DiversityScorer:
 
         if len(candidate_desc) != self._ref_descriptors.shape[1]:
             logger.warning(
-                f"Descriptor length mismatch: candidate {len(candidate_desc)} vs "
-                f"references {self._ref_descriptors.shape[1]}. "
-                f"May indicate different compositions"
+                "Descriptor length mismatch: candidate %d vs references %d. "
+                "May indicate different compositions",
+                len(candidate_desc),
+                self._ref_descriptors.shape[1],
             )
             return self._score_pairwise(atoms)
 
@@ -247,9 +249,10 @@ class DiversityScorer:
             # Verify length matches
             if len(new_desc) != self._ref_descriptors.shape[1]:
                 logger.warning(
-                    f"New reference descriptor length {len(new_desc)} doesn't match "
-                    f"existing {self._ref_descriptors.shape[1]}. "
-                    f"Recomputing all descriptors"
+                    "New reference descriptor length %d doesn't match existing "
+                    "%d. Recomputing all descriptors",
+                    len(new_desc),
+                    self._ref_descriptors.shape[1],
                 )
                 # Recompute all descriptors
                 self._ref_descriptors = self._compute_descriptors(

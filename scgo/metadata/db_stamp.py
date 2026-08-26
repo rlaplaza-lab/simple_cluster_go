@@ -42,7 +42,7 @@ def get_db_stamp(db_path: str | Path) -> dict[str, str]:
     try:
         db_file = str(db_path)
         conn = sqlite3.connect(f"file:{db_file}?mode=ro", uri=True, timeout=0.1)
-    except (sqlite3.OperationalError, sqlite3.DatabaseError, FileNotFoundError) as exc:
+    except (sqlite3.DatabaseError, FileNotFoundError) as exc:
         logger.debug("Could not open scgo_metadata from %s: %s", db_path, exc)
         return {}
 
@@ -54,7 +54,7 @@ def get_db_stamp(db_path: str | Path) -> dict[str, str]:
             return {}
         rows = conn.execute("SELECT key, value FROM scgo_metadata").fetchall()
         return {r[0]: r[1] for r in rows}
-    except (sqlite3.OperationalError, sqlite3.DatabaseError, FileNotFoundError) as exc:
+    except (sqlite3.DatabaseError, FileNotFoundError) as exc:
         logger.debug("Could not read scgo_metadata from %s: %s", db_path, exc)
         return {}
     finally:

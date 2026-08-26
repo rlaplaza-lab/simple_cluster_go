@@ -24,7 +24,7 @@ import numpy as np
 from ase import Atoms
 from ase.db.core import check as ase_check_kvp
 
-from scgo.utils.logging import TRACE, get_logger
+from scgo.utils.logging import get_logger
 
 logger = get_logger(__name__)
 
@@ -95,7 +95,7 @@ def set_tags(atoms: Atoms, **tags: Any) -> None:
             continue
         bag[key] = _encode_tag_value(key, value)
 
-    logger.log(TRACE, "Set tags on atoms: %s", list(tags.keys()))
+    logger.trace("Set tags on atoms: %s", list(tags.keys()))
 
 
 def get_tag(atoms: Atoms, key: str, default: Any = None) -> Any:

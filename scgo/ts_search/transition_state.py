@@ -31,7 +31,7 @@ from scgo.constants import (
     DEFAULT_NEB_TANGENT_METHOD,
     DEFAULT_TS_PAIR_COR_MAX,
 )
-from scgo.exceptions import SCGORuntimeError, SCGOValidationError
+from scgo.exceptions import SCGOFileError, SCGORuntimeError, SCGOValidationError
 from scgo.metadata.atoms import get_tag, set_tags
 from scgo.metadata.provenance import is_cuda_oom_error, output_json_provenance
 from scgo.system_types import SystemType, get_system_policy
@@ -2326,14 +2326,11 @@ def find_transition_state(
                 verbosity=verbosity,
             )
         else:
-            log_warning_v(
-                logger,
+            logger.warning(
                 "NEB not converged after %d steps (final_fmax=%s, target_fmax=%.6f)",
                 result["steps_taken"],
                 fmax_str,
                 fmax,
-                verbosity=verbosity,
-                min_verbosity=2,
             )
 
         # Last optimizer step can invalidate SinglePoint caches; refresh PES at
@@ -2381,7 +2378,7 @@ def find_transition_state(
 
     except KeyboardInterrupt:
         raise
-    except (ValueError, RuntimeError, OSError, SCGOValidationError) as e:
+    except (SCGOValidationError, ValueError, RuntimeError, OSError) as e:
         result["error"] = str(e)
         if is_cuda_oom_error(e):
             cleanup_torch_cuda(logger=logger)
@@ -2412,8 +2409,7 @@ def find_transition_state(
         }
         result["timings_s"] = ts_timings
         neb_backend = "neb_torchsim" if use_torchsim else "neb_ase"
-        if verbosity >= 2:
-            log_timing_summary(logger, neb_backend, ts_timings, verbosity=verbosity)
+        log_timing_summary(logger, neb_backend, ts_timings, verbosity=verbosity)
         if write_timing_json:
             write_timing_file(
                 output_dir,
@@ -2445,7 +2441,10 @@ _PROVENANCE_KEYS = (
 
 
 def _atomic_write_json(path: str, payload: dict[str, Any]) -> None:
-    """Write JSON via a same-directory temp file then ``os.replace``."""
+    """Write JSON via a same-directory temp file then ``os.replace``.
+
+    Raises :class:`~scgo.exceptions.SCGOFileError` on I/O failure.
+    """
     directory = os.path.dirname(path) or "."
     os.makedirs(directory, exist_ok=True)
     fd, tmp_path = tempfile.mkstemp(
@@ -2459,6 +2458,10 @@ def _atomic_write_json(path: str, payload: dict[str, Any]) -> None:
             f.flush()
             os.fsync(f.fileno())
         os.replace(tmp_path, path)
+    except OSError as e:
+        with contextlib.suppress(OSError):
+            os.unlink(tmp_path)
+        raise SCGOFileError(f"Failed to write JSON file {path}: {e}") from e
     except Exception:
         with contextlib.suppress(OSError):
             os.unlink(tmp_path)

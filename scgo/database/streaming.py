@@ -168,12 +168,7 @@ def iter_relaxed_structures(
             try:
                 cur = conn.execute(f"SELECT COUNT(*) FROM systems WHERE {where_sql}")
                 total = int((cur.fetchone() or [0])[0] or 0)
-            except (
-                sqlite3.DatabaseError,
-                sqlite3.OperationalError,
-                TypeError,
-                ValueError,
-            ) as exc:
+            except (sqlite3.DatabaseError, TypeError, ValueError) as exc:
                 logger.debug("COUNT query failed for %s: %s", db_path, exc)
                 total = 0
             logger.debug(
@@ -201,7 +196,7 @@ def iter_relaxed_structures(
             for row_id, candidate in _load_atoms_chunk(row_ids, da):
                 energy = extract_energy_from_atoms(candidate)
                 if energy is None:
-                    logger.log(TRACE, "Skipping candidate id=%s: no energy", row_id)
+                    logger.trace("Skipping candidate id=%s: no energy", row_id)
                     continue
 
                 out = copy_atoms(candidate)
@@ -232,17 +227,13 @@ def iter_database_minima(
         logger.debug("Skipping non-SCGO database: %s", db_path)
         return
 
-    try:
-        with get_connection(str(db_path)) as da:
-            yield from iter_relaxed_structures(
-                da,
-                db_path,
-                chunk_size,
-                require_final_minimum=require_final_minimum,
-                exclude_transition_states=exclude_transition_states,
-                require_transition_state=require_transition_state,
-                require_final_ts=require_final_ts,
-            )
-    except (sqlite3.DatabaseError, sqlite3.OperationalError, OSError) as e:
-        logger.error("Error streaming from %s: %s", db_path, e)
-        raise
+    with get_connection(str(db_path)) as da:
+        yield from iter_relaxed_structures(
+            da,
+            db_path,
+            chunk_size,
+            require_final_minimum=require_final_minimum,
+            exclude_transition_states=exclude_transition_states,
+            require_transition_state=require_transition_state,
+            require_final_ts=require_final_ts,
+        )

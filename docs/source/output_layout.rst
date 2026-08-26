@@ -2,7 +2,6 @@ Output Layout
 =============
 
 This page documents the on-disk directory structure created by SCGO runs.
-For a quick reference, see the summary in the :doc:`/quickstart` guide.
 
 Path Keys
 ---------
@@ -61,11 +60,6 @@ when ``output_dir`` is omitted, the default root is
 directory; the campaign root becomes ``searches_dir.parent``.
 
 **Example: ``run_go_ts`` with ``output_root`` / ``output_stem``**
-
-GO and TS use the same campaign layout: ``{path_key}_searches/`` and
-``{path_key}_ts_results/`` are siblings; each holds ``run_*`` epochs,
-campaign-level summaries, and deduplicated exports. GO databases and TS pair
-artifacts live directly under each ``run_*`` (TS uses ``pair_<i>_<j>/`` subdirs).
 
 .. code-block:: text
 
@@ -126,10 +120,6 @@ artifacts live directly under each ``run_*`` (TS uses ``pair_<i>_<j>/`` subdirs)
 On-disk layout
 --------------
 
-GO and TS write sibling ``{path_key}_searches/`` and ``{path_key}_ts_results/``
-trees. Each tree contains datetime-tagged ``run_*`` work directories, campaign
-summaries, and deduplicated exports.
-
 Run IDs
 ~~~~~~~
 
@@ -165,8 +155,7 @@ Under each ``run_*`` directory:
 
 - ``metadata.json``: composition, params snapshot, ``path_key``, and provenance
   header (``schema_version`` = 4, ``scgo_version``, ``created_at`` UTC ISO-8601
-  with ``Z``, ``python_version``). Written via a same-directory temp file then
-  ``os.replace``.
+  with ``Z``, ``python_version``)
 - ``ga_go.db`` / ``bh_go.db`` / ``simple_go.db``: optimizer database (GO only)
 - ``timing.json``: optional wall-time breakdown (``write_timing_json=True``);
   includes ``run_id`` and the same provenance header (``schema_version`` = 4).

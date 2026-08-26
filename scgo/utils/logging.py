@@ -223,33 +223,15 @@ def should_show_progress(verbosity: int) -> bool:
 # Style contract:
 # - After ``configure_logging``, prefer ``logger.info`` / ``logger.debug`` /
 #   ``logger.warning`` with %-style formatting (lazy args).
-# - Use ``log_v`` / ``log_*_v`` only when a function takes integer ``verbosity``
+# - Use ``log_*_v`` only when a function takes integer ``verbosity``
 #   and needs extra gating beyond the root logger level.
-# - v2+ per-item detail is DEBUG (``log_debug_v`` or ``log_v(..., min_verbosity=2)``),
+# - v2+ per-item detail is DEBUG (``log_debug_v``),
 #   never INFO gated to v2.
 # - Phase rollups and banners live in ``scgo.utils.phase_logging``.
 # - Prefer %-style: logger.info("Processing %s", item)
 # - Avoid f-strings: logger.info(f"Processing {item}")
 # - Use logger.exception() for unexpected errors with automatic traceback
 # - Use exc_info=(verbosity >= 2) for handled errors with conditional traceback
-
-
-def log_v(
-    logger: logging.Logger,
-    message: str,
-    *args: object,
-    verbosity: int = 1,
-    min_verbosity: int = 1,
-) -> None:
-    """Log at the level matching ``min_verbosity`` when ``verbosity`` is high enough.
-
-    Maps ``min_verbosity`` through ``VERBOSITY_LEVELS`` (0→WARNING, 1→INFO,
-    2→DEBUG, 3→TRACE). Uses lazy %-style formatting.
-    """
-    if verbosity < min_verbosity:
-        return
-    level = VERBOSITY_LEVELS.get(min_verbosity, logging.INFO)
-    logger.log(level, message, *args)
 
 
 def log_debug_v(

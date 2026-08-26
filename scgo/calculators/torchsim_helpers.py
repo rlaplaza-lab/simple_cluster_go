@@ -117,11 +117,12 @@ _TORCHSIM_KNOWN_BROKEN_MAX: tuple[int, int] = (0, 6)
 
 def _torchsim_package_version() -> str | None:
     """Return installed ``torch-sim-atomistic`` version string, or None."""
-    try:
-        from importlib.metadata import version as _pkg_version
+    from importlib.metadata import PackageNotFoundError
+    from importlib.metadata import version as _pkg_version
 
+    try:
         return _pkg_version("torch-sim-atomistic")
-    except Exception:
+    except (PackageNotFoundError, OSError):
         return None
 
 
@@ -132,7 +133,7 @@ def _torchsim_version_tuple(version: str | None) -> tuple[int, int] | None:
     try:
         major, minor, *_ = version.split(".")
         return (int(major), int(minor))
-    except Exception:
+    except ValueError:
         return None
 
 

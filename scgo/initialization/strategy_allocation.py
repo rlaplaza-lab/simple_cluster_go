@@ -247,14 +247,22 @@ def _allocate_initialization_strategies(
     random_count = sum(1 for s, _ in allocations if s == "random_spherical")
 
     logger.info(
-        f"Initialization for {n_atoms}-atom clusters: "
-        f"{n_templates} template(s), {n_seed_formulas} seed formula(s), "
-        f"{n_seed_combinations} seed combination(s), {n_exact} exact match(es) available"
+        "Initialization for %d-atom clusters: %d template(s), %d seed formula(s), "
+        "%d seed combination(s), %d exact match(es) available",
+        n_atoms,
+        n_templates,
+        n_seed_formulas,
+        n_seed_combinations,
+        n_exact,
     )
     logger.info(
-        f"Strategy allocation ({len(allocations)} structure(s)): "
-        f"{template_count} template, {seed_count} seed+growth, "
-        f"{exact_count} exact, {random_count} random"
+        "Strategy allocation (%d structure(s)): %d template, %d seed+growth, "
+        "%d exact, %d random",
+        len(allocations),
+        template_count,
+        seed_count,
+        exact_count,
+        random_count,
     )
 
     return allocations

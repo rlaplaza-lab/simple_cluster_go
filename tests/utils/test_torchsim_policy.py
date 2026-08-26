@@ -6,7 +6,7 @@ import importlib.util
 
 import pytest
 
-from scgo.exceptions import SCGOValidationError
+from scgo.exceptions import SCGONotImplementedError, SCGOValidationError
 from scgo.param_presets import get_ts_search_params
 from scgo.utils.torchsim_policy import (
     calculator_name_supports_torchsim_batched_neb,
@@ -81,7 +81,7 @@ def test_resolve_ts_mace_depends_on_torch_sim_importability(
         us, up = resolve_ts_torchsim_flags("MACE", True, True)
         assert us is True and up is True
     else:
-        with pytest.raises(ImportError, match="TorchSim was requested"):
+        with pytest.raises(SCGONotImplementedError, match="TorchSim was requested"):
             resolve_ts_torchsim_flags("MACE", True, True)
 
 

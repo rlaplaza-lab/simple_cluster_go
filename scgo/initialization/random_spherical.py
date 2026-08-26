@@ -707,8 +707,10 @@ def grow_from_seed(
     )
     if not is_feasible:
         logger.warning(
-            f"Composition growth not feasible: {error_message}. "
-            f"Base: {base_composition}, Target: {target_composition}"
+            "Composition growth not feasible: %s. Base: %s, Target: %s",
+            error_message,
+            base_composition,
+            target_composition,
         )
         return None
 

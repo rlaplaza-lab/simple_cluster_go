@@ -98,12 +98,10 @@ windows.
 
 ### Optional MLIP extras on CI
 
-`requires_mace` marks tests that import the MACE stack at runtime. UMA and UPET
-CI jobs install only their own extras and exclude these tests by marker — not
-because the physics is optional, but because the calculators are mutually
-exclusive install targets on disk-limited runners. `requires_upet` is the
-analogous marker for the UPET / metatomic-torchsim stack (excluded from MACE/UMA
-jobs).
+`requires_mace` marks tests that import the MACE stack at runtime; UMA and UPET
+CI jobs install only their own extras and exclude these tests by marker, since
+the calculators are mutually exclusive install targets on disk-limited runners.
+`requires_upet` is the analogous marker for the UPET / metatomic-torchsim stack.
 
 UMA tests that only import helpers / use mocks run on the UMA CPU job. Tests that
 construct a real FairChem relaxer may skip when HuggingFace weights are
@@ -134,9 +132,16 @@ Full coverage also includes the six-type example matrix
 ([`test_gpu_examples_integration.py`](integration/test_gpu_examples_integration.py))
 and other `requires_cuda` tests pinned to one MLIP suite.
 
-The workflow uploads a source tarball to the private Kaggle dataset `rlaplaza/scgocisrc` so the GPU kernel can run without relying on GitHub network access from Kaggle. Kaggle mounts that dataset as an extracted tree; the runner's `_resolve_dataset_dir()` probes both the legacy `/kaggle/input/scgocisrc/` layout and the current `/kaggle/input/datasets/<owner>/<slug>/` layout (falling back to a recursive search) so a mount-path change can't silently break source discovery. **Pip installs (MACE/UPET/TorchSim) still require internet on the Kaggle kernel** — enable it in your Kaggle account settings and complete phone verification if GPU sessions cannot reach PyPI. The kernel requests a **Tesla T4** GPU (`machine_shape: NvidiaTeslaT4`). Kaggle may assign a P100 otherwise; its sm_60 architecture is incompatible with the cu124 PyTorch wheels used here.
+The workflow uploads a source tarball to the private Kaggle dataset
+`rlaplaza/scgocisrc` so the GPU kernel can run without GitHub network access;
+pip installs still require internet on the kernel. The kernel requests a
+Tesla T4 (Kaggle's fallback P100 is incompatible with the cu124 wheels used
+here).
 
-Example-mimic GPU integration coverage (full mode, MACE): all six `system_type` values from `examples/`. Budgets come from the shared low-effort presets (`get_low_effort_torchsim_ga_params` / `get_low_effort_ts_search_params`), which the `examples/` scripts also use, so the matrix cannot drift from them; slabs match the examples (HOPG 5×5 × 3-layer helpers / equivalent preset defaults). Shared e2e bars require run-dir `metadata.json` and a SCGO-stamped `*.db`. At least one TS candidate is required for gas / adsorbate cases that set `require_ts_success=True`; heavy surface cases keep the OOM degradation guard with `require_ts_success=False`. All six pass a `barrier_range`, so every saddle that *is* reported must clear `assert_ts_result_valid` (interior TS image, endpoint ordering, barrier inside the band).
+Full-mode MACE coverage also includes an example-mimic matrix: all six
+`system_type` values built from the same low-effort presets the `examples/`
+scripts use, with shared e2e bars (run-dir `metadata.json`, SCGO-stamped `*.db`,
+and per-case TS-success / barrier-range requirements).
 
 To exercise a PR branch on Kaggle:
 

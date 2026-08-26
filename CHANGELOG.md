@@ -40,6 +40,19 @@
 - **Mutation observability.** Offspring workers report `mutation_requested`
   alongside `mutation_applied`; both aggregate into
   `counters.offspring_mutations_requested` / `.applied` in the timing payload.
+- **Exception-handling consistency pass.** Atomic JSON writers
+  (`metadata.run_dir`, TS metadata) now raise `SCGOFileError` on I/O failure so
+  the existing campaign-boundary catches are live; worker-failure aggregates
+  chain their first underlying exception (`surface.deposition`,
+  `database.sync`); missing TorchSim backends raise `SCGONotImplementedError`
+  (matching the UMA/UPET helpers) instead of `ImportError`;
+  `DatabaseSetupError` is exported from `scgo.database`; version probes in
+  `calculators.torchsim_helpers` catch specific exceptions instead of bare
+  `Exception`.
+- **Logging consistency pass.** All log calls use lazy %-style formatting;
+  NEB non-convergence warnings are no longer hidden below verbosity 2; the
+  unused `log_v` helper was removed (use `log_debug_v` / `log_info_v` /
+  `log_warning_v`).
 
 ## 0.9.2
 
@@ -565,7 +578,7 @@
   from `validate_adsorbate_placement_feasibility`.
 - Dropped the no-op `ClusterAdsorbateConfig` rebuild in slab-fragment deposition.
 
-### Docs
+### Documentation
 
 - Documented TS pair-selection budget / adsorbate oversampling
   (``max_pairs`` vs ``resolve_ts_pair_select_cap``) under **Pair selection** in

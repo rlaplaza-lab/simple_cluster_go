@@ -363,19 +363,13 @@ def setup_database(
 
         try:
             stamp_db(db_file)
-        except (
-            sqlite3.DatabaseError,
-            sqlite3.OperationalError,
-            OSError,
-            ValueError,
-        ) as e:
+        except (sqlite3.DatabaseError, OSError, ValueError) as e:
             logger.warning("Failed to stamp SCGO database %s: %s", db_file, e)
 
         _register_database_best_effort(output_dir_str, db_file, atoms_template, run_id)
 
         return SCGODataConnection(da, all_atom_numbers)
     except (sqlite3.DatabaseError, sqlite3.OperationalError, OSError) as e:
-        logger.error("Failed to set up database after all retries: %s", e)
         raise DatabaseSetupError(f"Failed to setup database {db_file}: {e}") from e
 
 
@@ -441,7 +435,6 @@ def _extract_structures_from_db(
                         conn.commit()
                 except (
                     sqlite3.DatabaseError,
-                    sqlite3.OperationalError,
                     OSError,
                     KeyError,
                     ValueError,

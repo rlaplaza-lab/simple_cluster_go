@@ -193,17 +193,27 @@ Per-system-type defaults:
      - 0.7
      - 0.40
      - 8.0
-     - 1.25
+     - 2.5
+   * - Bare surface
+     - 0.35
+     - 0.40
+     - 50.0
+     - 3.0
    * - Gas adsorbate
      - 0.7
      - 0.40
      - 8.0
      - 1.25
-   * - Surface adsorbate
+   * - Surface cluster adsorbate
      - 0.7
      - 0.40
      - 8.0
      - 1.5
+   * - Surface adsorbate
+     - 0.7
+     - 0.40
+     - 8.0
+     - 3.0
 
 Constraint model
 ----------------
@@ -254,15 +264,20 @@ Connectivity and legal topology
 - ``connectivity_factor`` / ``structure_connectivity_factor``: default ``1.4``.
   This is the main structural legality check during initialization, after GA
   operators, at per-minimum algorithm gates, at the final structural gate, and
-  in TS. Precedence: explicit ``connectivity_factor``, then
+  in TS. Precedence (resolved via
+  :func:`~scgo.system_types.resolve_connectivity_factor`): explicit
+  ``connectivity_factor``, then
   ``ClusterAdsorbateConfig.structure_connectivity_factor``, then
   ``SurfaceSystemConfig.structure_connectivity_factor``, then ``1.4``.
 - The value may be a global float or a dict:
 
   - float ``f``: bonded if ``d <= (r_i + r_j) * f``
-  - element dict: bonded if ``d <= r_i*f_i + r_j*f_j`` (missing symbols use ``1.4``)
+  - element dict (e.g. ``{"Pt": 1.8, "C": 1.4}``): bonded if
+    ``d <= r_i*f_i + r_j*f_j`` (missing symbols use ``1.4``)
   - pair keys ``"Pt-C"`` or ``("Pt", "C")``: bonded if ``d <= (r_i + r_j) * f_ij``;
     pair entries override element-derived thresholds
+
+  Example for Pt on graphite: ``{"Pt": 1.4, "C": 1.4, "Pt-C": 1.8}``.
 
   Example (Pt on graphite): ``{"Pt": 1.4, "C": 1.4, "Pt-C": 1.8}``.
 

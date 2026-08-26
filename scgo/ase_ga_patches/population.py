@@ -19,6 +19,9 @@ from scgo.utils.fitness_strategies import (
     set_fitness_in_atoms,
     validate_fitness_strategy,
 )
+from scgo.utils.logging import get_logger
+
+logger = get_logger(__name__)
 
 
 def _raw_score(a):
@@ -372,6 +375,7 @@ class Population:
                             for c in self.all_cand]
                 max_gen = max(gen_nums) if gen_nums else " "
             except (TypeError, ValueError):
+                logger.debug("Could not determine max generation for logfile entry")
                 max_gen = " "
             # Opening in append mode will create the file if it doesn't exist.
             with open(self.logfile, "a") as fd:

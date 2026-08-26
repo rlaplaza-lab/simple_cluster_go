@@ -149,22 +149,8 @@ Runners call :func:`~scgo.runner_api.select_scgo_minima_algorithm` automatically
      - Connectivity threshold for initialization, post-operator GA checks,
        per-minimum algorithm gates, the ``run_trials`` final structural gate, and
        TS. Accepts a global float or a dict of per-element and/or per-pair
-       multipliers (see :doc:`/validation_and_constraints`). Bonded means
-       distance ≤ threshold:
-
-       - float ``f``: ``(r_i + r_j) * f``
-       - element dict ``{"Pt": 1.8, "C": 1.4}``: ``r_i*f_i + r_j*f_j``
-         (missing symbols use ``1.4``)
-       - pair entry ``"Pt-C"`` or ``("Pt", "C")``: ``(r_i + r_j) * f_ij``
-         (order-independent; pair overrides element-derived thresholds)
-
-       Example for Pt on graphite: ``{"Pt": 1.4, "C": 1.4, "Pt-C": 1.8}``.
-       Effective value resolves via
-       :func:`~scgo.system_types.resolve_connectivity_factor` with precedence
-       ``connectivity_factor`` → ``ClusterAdsorbateConfig.structure_connectivity_factor``
-       → ``SurfaceSystemConfig.structure_connectivity_factor`` → ``1.4``. Set
-       config-level fallbacks on ``cluster_adsorbate_config`` / ``surface_config``
-       (not as a separate top-level key).
+       multipliers. Bonded means distance ≤ threshold; see
+       :doc:`/validation_and_constraints` for the full spec and precedence rules.
    * - ``allow_cluster_fragmentation``
      - ``False``
      - Allow cluster to split (surface only)
@@ -255,7 +241,7 @@ sequential). Set ``-2`` or ``-1`` to parallelize population initialization,
 offspring construction, and post-GO validation together. Per-stage keys
 (``n_jobs_population_init``, ``n_jobs_offspring``, ``validation_n_jobs``)
 override that default when set. See :doc:`/installation` for full semantics.
-Production and TorchSim/UMA/UPET benchmark presets default to ``-2``.
+The TorchSim/UMA/UPET benchmark presets default to ``-2``.
 
 .. code-block:: python
 
@@ -530,7 +516,7 @@ a finite select / ``max_pairs`` cap truncates the list.
 
 - **Bare** system types use ``max_pairs`` as the select cap. Soft scores pick
   the top N; those N bands run NEB. Setting ``max_endpoint_mismatch`` on bare
-  surface presets (``1.25`` Å) enables pre-NEB path gates only. It does not
+  surface presets (``3.0`` Å) enables pre-NEB path gates only. It does not
   turn on oversampling.
 - **Adsorbate** system types with ``max_endpoint_mismatch`` set oversample the
   select pool to
@@ -555,8 +541,12 @@ Per-system-type defaults (with a caller-set ``max_pairs=N``):
      - ``None``
      - No
      - ``N`` → ``N``
-   * - ``surface_cluster`` / ``surface``
-     - ``1.25``
+   * - ``surface_cluster``
+     - ``2.5``
+     - No
+     - ``N`` → ``N``
+   * - ``surface``
+     - ``3.0``
      - No
      - ``N`` → ``N``
    * - ``gas_cluster_adsorbate``
@@ -572,68 +562,9 @@ Per-system-type defaults (with a caller-set ``max_pairs=N``):
      - Yes
      - up to ``adsorbate_pair_select_cap(N)`` → ``N``
 
-Default hard / soft knobs:
-
-.. list-table::
-   :widths: 28 18 18 18 18
-   :header-rows: 1
-
-   * - Parameter
-     - Bare gas
-     - Bare surface
-     - Gas adsorbate
-     - Surface adsorbate
-   * - ``pair_core_rms_max`` (Å)
-     - ``None``
-     - ``None``
-     - ``1.5``
-     - ``2.0``
-   * - ``pair_score_gap_center`` (eV)
-     - ``0.30``
-     - ``0.45``
-     - ``0.50``
-     - ``0.55``
-   * - ``pair_score_gap_width`` (eV)
-     - ``0.40``
-     - ``0.55``
-     - ``0.45``
-     - ``0.50``
-   * - ``pair_score_cum_scale`` (Å)
-     - ``0.09``
-     - ``0.12``
-     - ``0.08``
-     - ``0.10``
-   * - ``pair_score_mismatch_scale`` (Å)
-     - ``0.35``
-     - ``0.45``
-     - ``0.35``
-     - ``0.45``
-   * - ``pair_score_core_rms_scale`` (Å)
-     - ``0.35``
-     - ``0.45``
-     - ``0.35``
-     - ``0.45``
-   * - ``pair_score_w_gap``
-     - ``0.50``
-     - ``0.50``
-     - ``0.25``
-     - ``0.25``
-   * - ``pair_score_w_distinct``
-     - ``0.35``
-     - ``0.35``
-     - ``0.20``
-     - ``0.20``
-   * - ``pair_score_w_mismatch``
-     - ``0.15``
-     - ``0.15``
-     - ``0.25``
-     - ``0.25``
-   * - ``pair_score_w_core``
-     - ``0.0``
-     - ``0.0``
-     - ``0.30``
-     - ``0.30``
-
+Per-system-type values for these knobs are returned by
+:func:`~scgo.pair_selection_defaults.pair_selection_param_defaults`
+(see its API entry in :doc:`/api/validation_and_constraints_api`).
 Meaning of each soft term:
 
 - ``pair_score_gap_*``: prefer energy gaps near ``gap_center`` (not too near
@@ -687,7 +618,7 @@ logs include skip counts (energy gap, mismatch, core RMS, and so on).
        the TorchSim relaxer's ``expected_max_atoms`` / ``max_atoms_to_try``. A
        chunk that hits CUDA OOM is retried once at half the budget
    * - ``max_endpoint_mismatch``
-     - ``None`` / ``1.25`` (gas adsorbate / surface) / ``1.5`` (surface cluster+adsorbate) / ``3.0`` (surface adsorbate only)
+     - ``None`` (bare gas) / ``1.25`` (gas adsorbate) / ``2.5`` (surface cluster) / ``1.5`` (surface cluster adsorbate) / ``3.0`` (bare surface and surface adsorbate)
      - Å geometric gate on comparator difference; when set, also enables the
        pre-NEB endpoint-displacement check. For adsorbate + metal-core systems,
        pair selection fingerprints the **core** and this gate means “cores too
@@ -697,13 +628,13 @@ logs include skip counts (energy gap, mismatch, core RMS, and so on).
        adsorbate system types it also enables select oversampling (see **Budget
        and oversampling**); on bare surface it does not.
    * - ``neb_prescreen_clash_distance``
-     - ``1.0`` (bare gas) / ``0.7`` (surface + adsorbate)
+     - ``1.0`` (bare gas) / ``0.7`` (surface cluster + all adsorbate) / ``0.35`` (bare surface)
      - Interior NEB image min mobile pairwise distance (Å) below which the initial path is rejected.
    * - ``min_saddle_prominence``
      - ``0.10`` (bare gas) / ``0.40`` (surface + adsorbate)
      - Minimum interior-max prominence (eV) above both endpoints for a band to pass the pre-NEB energy profile gate.
    * - ``neb_max_spurious_barrier``
-     - ``8.0`` (all types)
+     - ``8.0`` / ``50.0`` (bare surface)
      - Maximum allowed IDPP barrier (eV) before a band is rejected as discontinuous.
    * - ``neb_align_endpoints``
      - ``True``
@@ -761,7 +692,8 @@ skips the energy-profile screen):
 Per-system-type defaults for the three pre-screen knobs are listed under
 :doc:`/validation_and_constraints` (bare gas is looser:
 ``neb_prescreen_clash_distance=1.0`` / ``min_saddle_prominence=0.10``;
-surface and adsorbate are tighter: ``0.7`` / ``0.40``).
+surface clusters and adsorbates are tighter: ``0.7`` / ``0.40``; bare surface
+is widest: ``0.35`` clash with a ``50.0`` eV barrier cap).
 
 **Adsorbate NEB specifics** (beyond the gates above):
 
@@ -837,11 +769,9 @@ Surface Config
    * - ``structure_connectivity_factor``
      - ``1.4``
      - Fallback connectivity spec (float or dict; same forms as top-level
-       ``connectivity_factor``) when the GO/TS param is omitted. Read by
-       :func:`~scgo.system_types.resolve_connectivity_factor` after any explicit
-       ``connectivity_factor`` and the ``ClusterAdsorbateConfig`` value, before the
-       module default. Used for slab-contact / supported-deposit checks, not only
-       placement.
+       ``connectivity_factor``, see :doc:`/validation_and_constraints`) when the
+       GO/TS param is omitted. Used for slab-contact / supported-deposit checks,
+       not only placement.
 
 .. note::
    Use only one of the layer options, not both. See :doc:`/api/surface`.

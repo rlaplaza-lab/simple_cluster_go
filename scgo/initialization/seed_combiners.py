@@ -179,8 +179,9 @@ def combine_seeds(
 
         if not placement_success:
             logger.warning(
-                f"Failed to place seed {i + 1} on the largest facets or at a "
-                f"random offset; discarding this seed combination"
+                "Failed to place seed %d on the largest facets or at a random "
+                "offset; discarding this seed combination",
+                i + 1,
             )
             return None
 
@@ -192,11 +193,14 @@ def combine_seeds(
                 combined_atoms, connectivity_factor, use_mic=False
             )
             logger.warning(
-                f"Seed {i + 1} placement created disconnected cluster. "
-                f"Current connectivity_factor="
-                f"{format_connectivity_factor(normalize_connectivity_factor(connectivity_factor))}. "
-                f"Analysis: {analysis_msg}. "
-                f"Suggested connectivity_factor: {suggested_factor:.2f}"
+                "Seed %d placement created disconnected cluster. Current "
+                "connectivity_factor=%s. Analysis: %s. Suggested connectivity_factor: %.2f",
+                i + 1,
+                format_connectivity_factor(
+                    normalize_connectivity_factor(connectivity_factor)
+                ),
+                analysis_msg,
+                suggested_factor,
             )
             return None
 
@@ -260,8 +264,11 @@ def combine_and_grow(
     )
     if not is_feasible:
         logger.warning(
-            f"Composition growth not feasible after seed combination: {error_message}. "
-            f"Combined seed: {base_composition}, Target: {target_composition}"
+            "Composition growth not feasible after seed combination: %s. "
+            "Combined seed: %s, Target: %s",
+            error_message,
+            base_composition,
+            target_composition,
         )
         return None
 

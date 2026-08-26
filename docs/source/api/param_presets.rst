@@ -13,31 +13,31 @@ Preset Functions
    :widths: 35 65
 
    * - ``get_testing_params()``
-     - Fast EMT-based parameters for testing (small populations, few iterations)
+     - Fast EMT-based parameters for testing (``calculator="EMT"``, small ``niter`` / ``population_size`` everywhere)
    * - ``get_default_params()``
-     - Default MACE-based parameters for production
+     - Canonical MACE production defaults (baseline for GO merge)
    * - ``get_minimal_ga_params(seed, model_name)``
-     - Compact GA parameters that run sequentially (easier to debug)
+     - Compact GA parameters that run sequentially (``n_jobs_* = 1``; easier to debug)
    * - ``get_torchsim_ga_params(*, system_type, surface_config, seed, model_name)``
-     - MACE + TorchSim for GPU acceleration. Requires ``scgo[mace]``.
+     - MACE benchmark GA stack + TorchSim relaxer for GPU acceleration. Requires ``scgo[mace]``. For surface types stamps top-level ``surface_config`` only.
    * - ``get_low_effort_torchsim_ga_params(*, system_type, surface_config, seed, model_name)``
-     - Reduced-budget (~25%) variant of ``get_torchsim_ga_params`` for demos and CI. Same calculator and relaxer; smaller GA budget; ``n_jobs=1``.
+     - Reduced-budget (~25%) variant of ``get_torchsim_ga_params`` for demos and CI. Same calculator and relaxer; ~25% GA budget; sequential; no early stopping or timing JSON. Surface types clamp local relaxation up to 400 steps at run time.
    * - ``get_low_effort_upet_ga_params(*, system_type, surface_config, seed, model_name, version)``
-     - Reduced-budget (~25%) UPET GO for demos and CI. TorchSim relaxer is attached after ``model_name`` / ``version``; ``n_jobs=1``.
+     - Reduced-budget (~25%) UPET GO. TorchSim relaxer attached after ``model_name`` / ``version`` so the PES matches the ASE calculator; sequential; same surface clamp.
    * - ``get_low_effort_uma_ga_params(*, system_type, surface_config, seed, model_name, uma_task)``
-     - Reduced-budget (~25%) UMA GO for demos and local/Actions CI. FairChem TorchSim relaxer is attached after ``model_name`` / ``uma_task``; ``n_jobs=1``. (UMA is omitted from the Kaggle GPU matrix.)
+     - Reduced-budget (~25%) UMA GO. FairChem TorchSim relaxer attached after ``model_name`` / ``uma_task``; sequential; same surface clamp. (UMA is omitted from the Kaggle GPU matrix.)
    * - ``get_default_uma_params()``
-     - Default UMA (fairchem) parameters
+     - Default UMA (fairchem) parameters with auto local-step budget
    * - ``get_uma_ga_benchmark_params(seed, *, model_name, uma_task)``
-     - UMA parameters for benchmarking campaigns
+     - UMA + autobatcher for benchmarking campaigns (``expected_max_atoms=600``)
    * - ``get_default_upet_params()``
      - Default UPET (metatomic) parameters. Requires ``scgo[upet]``.
    * - ``get_upet_ga_benchmark_params(seed, *, model_name)``
      - UPET + TorchSim benchmark GA parameters
    * - ``get_diversity_params(reference_db_glob, max_references, update_interval)``
-     - Bias exploration toward diverse structures
+     - Bias exploration toward diverse structures (``fitness_strategy="diversity"``)
    * - ``get_high_energy_params()``
-     - Bias exploration toward high-energy structures
+     - Bias exploration toward high-energy structures (BH Metropolis scale raised)
 
 **Transition State Search:**
 
@@ -45,9 +45,9 @@ Preset Functions
    :widths: 35 65
 
    * - ``get_ts_search_params(calculator, calculator_kwargs, *, system_type, surface_config, seed)``
-     - TS-only settings (NEB, calculator, pairing). Requires ``system_type``. For surfaces, also requires ``surface_config``. Default calculator is ``"MACE"``. Empty ``calculator_kwargs`` are filled by :func:`~scgo.param_presets.default_calculator_kwargs`.
+     - Full flat TS dict for one ``system_type`` (NEB, calculator, pairing). Requires ``system_type``; surfaces also require ``surface_config``. Default calculator ``"MACE"``. Baseline for TS merge.
    * - ``get_low_effort_ts_search_params(calculator, calculator_kwargs, *, system_type, surface_config, seed)``
-     - Reduced-budget (~25%, floored) variant of ``get_ts_search_params`` for demos and CI. Every NEB physics knob is inherited unchanged; only ``neb_steps`` / ``torchsim_max_steps`` shrink. ``max_pairs`` is left uncapped for the caller.
+     - Reduced-budget (~25%, floored) variant for demos and CI. Every NEB physics knob is inherited unchanged; only ``neb_steps`` / ``torchsim_max_steps`` shrink (per-type floor 1000). Covers MACE, UMA, and UPET uniformly via its ``calculator`` arguments — there is no separate per-calculator TS wrapper. ``max_pairs`` is left uncapped for the caller.
    * - ``low_effort_neb_steps(system_type)``
      - The ``neb_steps`` budget used by :func:`~scgo.param_presets.get_low_effort_ts_search_params` for one system type.
    * - ``get_ts_defaults(system_type)``
@@ -56,43 +56,6 @@ Preset Functions
 .. note::
    Canonical signatures are rendered by the ``automodule`` block below; the
    summary above is a convenience view.
-
-Preset effects (vs defaults)
-----------------------------
-
-.. list-table::
-   :widths: 35 65
-   :header-rows: 1
-
-   * - Preset
-     - Main differences from :func:`~scgo.param_presets.get_default_params` / :func:`~scgo.param_presets.get_ts_search_params`
-   * - ``get_testing_params()``
-     - ``calculator="EMT"``; small ``niter`` / ``population_size`` in all optimizer slots
-   * - ``get_default_params()``
-     - Canonical MACE production defaults (baseline for GO merge)
-   * - ``get_minimal_ga_params()``
-     - Sequential GA jobs (``n_jobs_* = 1``); optional ``seed`` / ``model_name``
-   * - ``get_torchsim_ga_params()``
-     - MACE benchmark GA stack + TorchSim relaxer; for surface types stamps
-       top-level ``surface_config`` only (not into optimizer slots)
-   * - ``get_low_effort_torchsim_ga_params()``
-     - As ``get_torchsim_ga_params()``, but ~25% of the benchmark GA budget (``niter``, ``population_size``, ``niter_local_relaxation``), sequential (``n_jobs=1``), no early stopping, no timing JSON. Surface types still clamp local relaxation up to 400 steps at run time.
-   * - ``get_low_effort_upet_ga_params()``
-     - Reduced ~25% GA budget on UPET; TorchSim relaxer attached after ``model_name`` / ``version`` so the PES matches the ASE calculator; ``n_jobs=1``. Surface types still clamp local relaxation up to 400 steps at run time. Stamps top-level ``surface_config`` only.
-   * - ``get_low_effort_uma_ga_params()``
-     - Reduced ~25% GA budget on UMA; FairChem TorchSim relaxer attached after ``model_name`` / ``uma_task``; ``n_jobs=1``. Surface types still clamp local relaxation up to 400 steps at run time. Stamps top-level ``surface_config`` only.
-   * - ``get_default_uma_params()``
-     - ``calculator="UMA"`` + FairChem TorchSim relaxer with auto local-step budget
-   * - ``get_uma_ga_benchmark_params()``
-     - UMA + autobatcher, ``expected_max_atoms=600`` (benchmark parity with TorchSim GA preset); ``relaxer.max_steps`` is ``None`` until GA assigns it from ``niter_local_relaxation``
-   * - ``get_diversity_params()``
-     - ``fitness_strategy="diversity"`` + reference DB glob and update interval (top-level and BH/GA slots)
-   * - ``get_high_energy_params()``
-     - ``fitness_strategy="high_energy"``; BH Metropolis scale raised to ``2.0`` eV
-   * - ``get_ts_search_params()``
-     - Full flat TS dict for one ``system_type`` (NEB knobs from :func:`~scgo.param_presets.get_ts_defaults`); baseline for TS merge
-   * - ``get_low_effort_ts_search_params()``
-     - As ``get_ts_search_params()``, but ``neb_steps`` / ``torchsim_max_steps`` reduced to ~25% with a per-type floor (1000 for both bare and adsorbate) so bands still converge to ``neb_fmax``
 
 Parameter reference
 -------------------
@@ -180,13 +143,13 @@ and the Kaggle GPU test matrix uses, so the two cannot drift apart.
        seed=42,
    )
 
-    ts_params = get_low_effort_ts_search_params(
-        system_type="surface_cluster",
-        surface_config=surface_config,
-        seed=42,
-    )
-    # max_pairs is the dominant TS cost lever and is left to the caller.
-    ts_params["max_pairs"] = 6
+   ts_params = get_low_effort_ts_search_params(
+       system_type="surface_cluster",
+       surface_config=surface_config,
+       seed=42,
+   )
+   # max_pairs is the dominant TS cost lever and is left to the caller.
+   ts_params["max_pairs"] = 6
 
 ``get_low_effort_ts_search_params`` already covers MACE, UMA, and UPET uniformly
 via its ``calculator`` / ``calculator_kwargs`` arguments. There is no separate

@@ -369,7 +369,7 @@ def _run_serial_neb_search(
                 write_timing_json=write_timing_json,
                 neb_cfg=neb_cfg,
             )
-        except (RuntimeError, ValueError, SCGOValidationError) as e:
+        except (SCGOValidationError, ValueError, RuntimeError) as e:
             logger.error(
                 "Unexpected error while finding TS for pair %s: %s: %s",
                 pair_id,
@@ -894,7 +894,6 @@ def run_transition_state_search(
     try:
         calculator_class = get_calculator_class(calculator_name)
     except ValueError as e:
-        logger.error("Failed to locate calculator class %s: %s", calculator_name, e)
         raise SCGOValidationError(f"Cannot initialize calculator: {e}") from e
 
     log_info_v(

@@ -10,9 +10,8 @@ reloading minima from completed ``run_*`` searches. For low-level access,
 :class:`~ase_ga.data.DataConnection` with SCGO PRAGMA settings applied.
 
 :func:`~scgo.database.helpers.setup_database` writes at most one
-``simulation_cell=True`` template row. Reopening with ``remove_existing=False``
-keeps that row and checks stored stoichiometry. Relaxed-row streaming loads each
-id chunk with one ``WHERE id IN (...)`` query.
+``simulation_cell=True`` template row; reopening with ``remove_existing=False``
+keeps that row and checks stored stoichiometry.
 
 Structure tags, DB stamps, and run-dir JSON live in :doc:`metadata`.
 

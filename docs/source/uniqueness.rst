@@ -36,7 +36,7 @@ On a periodic slab, distances wrap through the cell so the same site on opposite
 edges counts as the same geometry. That wrap is off for gas-phase clusters.
 
 Role blocks and weighting
-^^^^^^^^^^^^^^^^^^^^^^^^^
+~~~~~~~~~~~~~~~~~~~~~~~~~
 
 The moving atoms are further split into **role blocks** — ``mobile_slab``,
 ``deposit``, ``adsorbate`` — and each block's distances are normalized inside
@@ -60,7 +60,7 @@ Type-aware defaults:
 - Gas-phase types: plain deposit/adsorbate blocks at weight ``1.0``.
 
 Tighter gates for supported clusters
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Because block normalization keeps deposit/adsorbate differences undiluted,
 ``surface_cluster`` and ``surface_cluster_adsorbate`` use tighter default
@@ -73,18 +73,10 @@ When it runs
 The same rule is applied:
 
 - during a **genetic algorithm** search, so the population does not fill with
-  copies
+  copies (re-presented isomers also accrue a fitness penalty via a
+  rediscovery counter)
 - at the end of **basin hopping** (unless you set ``deduplicate=False``)
 - at the end of every **campaign**, before connectivity and Hessian checks
-
-**GA in-search check (performance note).** Acceptance is decided against the
-current population (O(population size), not O(history)).  Each time an
-isomer is re-presented to the population its incumbent's rediscovery count is
-incremented; that count feeds the fitness penalty ``1/√(1 + L)`` used in
-parent selection.  Geometry fingerprints are cached on each structure without
-copying the ``Atoms`` object, so repeated comparisons reuse the fingerprint
-computed on the first call.  The end-of-campaign ``filter_unique_minima`` pass
-(BH and simple GO) is a separate full-history check and is unchanged.
 
 The simple (1–2 atom) optimizer has no in-search filter; it relies on that
 final campaign pass.

@@ -18,6 +18,7 @@ from scgo.database.discovery import (
     clear_discovery_cache,
     list_discovered_db_paths_with_run,
 )
+from scgo.database.exceptions import DatabaseSetupError
 from scgo.database.helpers import (
     extract_minima_from_database_file,
     load_previous_run_results,
@@ -34,6 +35,7 @@ from scgo.database.sync import (
 from scgo.database.transactions import database_transaction
 
 __all__ = [
+    "DatabaseSetupError",
     "get_global_cache",
     "close_data_connection",
     "get_connection",

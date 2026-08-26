@@ -44,7 +44,7 @@ results = run_go(
 `results` is a list of `(energy, Atoms)` unique minima (energy-sorted).
 
 **Algorithms:** SCGO auto-selects based on system size:
-- ≤2 mobile atoms: Simple relaxation
+- ≤2 mobile atoms (``gas_cluster`` only): Simple relaxation
 - 3 atoms, no adsorbate: Basin Hopping
 - 3+ atoms with adsorbate: Genetic Algorithm
 - ≥4 atoms: Genetic Algorithm

@@ -123,7 +123,7 @@ def database_retry(
             )
         return result
 
-    raise SCGODatabaseError(f"{operation_name} failed unexpectedly")
+    raise SCGODatabaseError(f"{operation_name} failed unexpectedly") from last_error
 
 
 def is_retryable_error(error: Exception) -> bool:

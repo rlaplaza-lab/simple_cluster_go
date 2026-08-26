@@ -91,7 +91,7 @@ def _load_candidates_from_file(db_file: str) -> list[CandidateEntry]:
                 )
             results.append((symbols, energy, atoms))
         return results
-    except (sqlite3.DatabaseError, sqlite3.OperationalError, OSError, ValueError) as e:
+    except (sqlite3.DatabaseError, OSError, ValueError) as e:
         logger.debug("Failed to load candidates from %s: %s", db_file, e)
         return []
 

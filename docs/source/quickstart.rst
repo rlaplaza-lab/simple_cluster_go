@@ -365,7 +365,7 @@ Find transition states between optimized structures.
    from scgo.param_presets import get_torchsim_ga_params, get_ts_search_params
 
    go_params = get_torchsim_ga_params(system_type="gas_cluster", seed=42)
-   go_params["n_jobs"] = -2   # one switch parallelizes population init, offspring, and validation
+   go_params["n_jobs"] = -2   # all but one CPU, across every parallel stage
    go_params["optimizer_params"]["ga"].update(
        niter=10,
        population_size=50,
@@ -397,7 +397,7 @@ Find transition states between optimized structures.
        surface_config=surface_config,
        seed=42,
    )
-   go_params["n_jobs"] = -2   # all but one CPU for population init, offspring, and validation
+   go_params["n_jobs"] = -2   # all but one CPU, across every parallel stage
 
 
    ts_params = get_ts_search_params(
@@ -508,12 +508,8 @@ Output
 ------
 
 See :doc:`/output_layout` for directory structure, path keys, run IDs, and file
-formats. Key points:
-
-- ``run_go`` writes ``{path_key}_searches/`` with ``run_*/`` subdirectories
-- GO+TS creates sibling ``{path_key}_ts_results/``
-- ``path_key`` combines nanoparticle formula, adsorbate fragments, and surface
-  name (for example ``Pt5``, ``Pt5_OH_OH_graphite``)
+formats. In brief: ``run_go`` writes ``{path_key}_searches/`` with ``run_*/``
+subdirectories, and GO+TS creates a sibling ``{path_key}_ts_results/`` tree.
 
 Parameters
 ----------

@@ -84,9 +84,9 @@ All placement randomness flows through a single ``numpy.random.Generator``:
   or set ``seed`` on ``run_go`` / ``run_go_campaign`` (converted to a generator
   at the API boundary).
 - **Batch / GA population:** ``create_initial_cluster_batch`` derives an
-  independent per-structure seed from the parent generator
-  (``batch_base_seed + i * 7919``), so ``n_jobs=1`` and parallel workers
-  produce identical populations for the same parent seed.
+  independent, deterministic per-structure seed from the parent generator, so
+  ``n_jobs=1`` and parallel workers produce identical populations for the same
+  parent seed.
 - **Campaigns:** ``run_go_campaign`` draws a reproducible per-composition seed
   from the campaign generator; failed compositions are logged and skipped (see
   below) without aborting the rest of the scan.

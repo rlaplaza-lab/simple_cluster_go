@@ -762,17 +762,20 @@ def create_deposited_cluster_batch(
             ex.submit(_build_structure_with_seed, seed, idx): idx
             for idx, seed in enumerate(task_seeds)
         }
+        first_failure: BaseException | None = None
         for future in as_completed(futures):
             idx = futures[future]
             try:
                 ordered_results[idx] = future.result()
             except Exception as exc:  # noqa: BLE001 - failures are aggregated and re-raised as SCGORuntimeError below
                 failures[idx] = f"{type(exc).__name__}: {exc}"
+                if first_failure is None:
+                    first_failure = exc
     if failures:
         raise SCGORuntimeError(
             f"Failed to generate {len(failures)} deposited structure(s) "
             f"(indexes {sorted(failures.keys())}): {failures}"
-        )
+        ) from first_failure
     if any(result is None for result in ordered_results):
         raise SCGORuntimeError("Parallel batch returned too few structures")
     _emit_batch_summary()

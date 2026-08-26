@@ -13,6 +13,7 @@ from typing import Any
 
 import numpy as np
 
+from scgo.exceptions import SCGOFileError
 from scgo.metadata.provenance import output_json_provenance
 from scgo.utils.helpers import get_cluster_formula
 from scgo.utils.logging import get_logger, log_info_v
@@ -137,6 +138,10 @@ def save_run_dir_record(
             f.flush()
             os.fsync(f.fileno())
         os.replace(tmp_path, metadata_file)
+    except OSError as e:
+        with contextlib.suppress(OSError):
+            os.unlink(tmp_path)
+        raise SCGOFileError(f"Failed to write {metadata_file}: {e}") from e
     except Exception:
         with contextlib.suppress(OSError):
             os.unlink(tmp_path)

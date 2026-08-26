@@ -335,9 +335,12 @@ class ParallelNEBBatch:
                 break
 
             logger.debug(
-                f"Step {self.step_count}: Evaluating {len(unique_images)} unique images "
-                f"({len(neb_image_map)} total slots) from {len(self.active_nebs)} active NEBs"
-                f"{'' if evaluate_endpoints else ' (interiors only)'}"
+                "Step %d: Evaluating %d unique images (%d total slots) from %d active NEBs%s",
+                self.step_count,
+                len(unique_images),
+                len(neb_image_map),
+                len(self.active_nebs),
+                "" if evaluate_endpoints else " (interiors only)",
             )
 
             # Reuse energy-screen forces at step 0 when present.
@@ -409,7 +412,9 @@ class ParallelNEBBatch:
                         results[neb_idx]["converged"] = True
                         self.converged_nebs[neb_idx] = True
                         logger.debug(
-                            f"NEB {neb_idx} finished: converged, fmax={max_force:.6f}"
+                            "NEB %d finished: converged, fmax=%.6f",
+                            neb_idx,
+                            max_force,
                         )
                     else:
                         self._step_optimizer(neb_idx)

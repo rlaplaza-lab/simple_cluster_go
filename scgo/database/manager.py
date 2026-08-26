@@ -57,8 +57,9 @@ class SCGODatabaseManager:
         self._cache_namespace = "db_manager"
 
         logger.debug(
-            f"Initialized SCGODatabaseManager: base_dir={base_dir}, "
-            f"caching={'enabled' if enable_caching else 'disabled'}"
+            "Initialized SCGODatabaseManager: base_dir=%s, caching=%s",
+            base_dir,
+            "enabled" if enable_caching else "disabled",
         )
 
     def _compute_files_fingerprint(
@@ -71,6 +72,7 @@ class SCGODatabaseManager:
             try:
                 stat = path.stat()
             except OSError:
+                logger.debug("Skipping unreadable path in fingerprint: %s", path)
                 continue
             count += 1
             max_mtime_ns = max(max_mtime_ns, int(stat.st_mtime_ns))

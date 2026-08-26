@@ -162,9 +162,11 @@ def compute_cell_side(composition: list[str], vacuum: float = VACUUM_DEFAULT) ->
     # Warn if computed cell side is unreasonably large
     if cell_side > MAX_REASONABLE_CELL_SIDE:
         logger.warning(
-            f"Computed cell_side ({cell_side:.1f} Å) exceeds reasonable threshold "
-            f"({MAX_REASONABLE_CELL_SIDE} Å) for {len(composition)} atoms; "
-            f"this may indicate a very large composition or vacuum value"
+            "Computed cell_side (%.1f Å) exceeds reasonable threshold "
+            "(%s Å) for %d atoms; this may indicate a very large composition or vacuum value",
+            cell_side,
+            MAX_REASONABLE_CELL_SIDE,
+            len(composition),
         )
 
     return cell_side
@@ -479,8 +481,8 @@ def _apply_template_rotation_and_validate(
     )
     if not is_valid:
         logger.warning(
-            f"Template structure validation failed: {error_message}; "
-            f"discarding this template candidate"
+            "Template structure validation failed: %s; discarding this template candidate",
+            error_message,
         )
         return None
     if composition is not None:
@@ -585,8 +587,9 @@ def _try_template_generation(
         # Use specific template index if provided
         if template_index < 0 or template_index >= len(weighted_candidates):
             logger.warning(
-                f"Invalid template_index {template_index}, must be in range "
-                f"[0, {len(weighted_candidates)}); using random selection"
+                "Invalid template_index %d, must be in range [0, %d); using random selection",
+                template_index,
+                len(weighted_candidates),
             )
             selected_idx = int(rng.integers(0, len(weighted_candidates)))
         else:
@@ -616,9 +619,10 @@ def _try_template_generation(
     if result is None:
         return None
     logger.debug(
-        f"Smart mode: using template {selected_type} "
-        f"({n_unique_template_types} unique type(s) available, "
-        f"{len(template_candidates)} total candidates)"
+        "Smart mode: using template %s (%d unique type(s) available, %d total candidates)",
+        selected_type,
+        n_unique_template_types,
+        len(template_candidates),
     )
     return result
 
