@@ -233,73 +233,21 @@ def _adsorbate_max_displacement(
     use_mic: bool,
     n_adsorbate: int | None = None,
 ) -> float:
-    """Max adsorbate-atom displacement after overlaying the metal/mobile core.
+    """Max adsorbate-atom displacement after one shared core overlay.
 
-    Layout is ``[slab | core | adsorbate]``. Overlay (same operator as NEB
-    endpoint prep) runs first; then adsorbate atoms are matched so a site hop
-    is not mixed with rigid reorientation. Minima are not mutated.
-
-    When ``n_adsorbate`` is set (surface adsorbate on a searchable top slab
-    layer), the adsorbate block is the trailing ``n_adsorbate`` atoms and any
-    middle mobile-slab block is treated as the overlay core even if
-    ``n_core==0``.
+    Thin view over :func:`_pair_overlay_metrics` (single overlay feeds both
+    this and :func:`_core_rms_displacement`, so pair gating and NEB endpoint
+    prep agree by construction).
     """
-    n_slab = max(0, int(n_slab))
-    n_core = max(0, int(n_core))
-    if len(atoms_j) != len(atoms_i):
-        return 0.0
-    if n_adsorbate is not None:
-        n_ads = max(0, int(n_adsorbate))
-        n_middle = len(atoms_i) - n_slab - n_ads
-        if n_middle < 0 or n_ads <= 0:
-            return 0.0
-        # Empty metal-core + searchable top layer: treat the middle block as
-        # the overlay core so the hop is OH-only, not top-layer+OH.
-        if n_core == 0 and n_middle > 0:
-            n_core = n_middle
-    else:
-        n_ads = len(atoms_i) - n_slab - n_core
-    if n_ads <= 0:
-        return 0.0
-
-    pos_i = np.asarray(atoms_i.get_positions(), dtype=float)
-    mic_cell, mic_pbc = _pair_mic_context(atoms_i, use_mic)
-
-    a0, a1 = n_slab + n_core, n_slab + n_core + n_ads
-    pos_j, nums_j = _overlay_product_core(
+    _core_rms, ads_hop = _pair_overlay_metrics(
         atoms_i,
-        np.asarray(atoms_j.get_positions(), dtype=float),
-        np.asarray(atoms_j.numbers, dtype=int),
+        atoms_j,
         n_slab=n_slab,
         n_core=n_core,
-        mic_cell=mic_cell,
-        mic_pbc=mic_pbc,
+        use_mic=use_mic,
+        n_adsorbate=n_adsorbate,
     )
-
-    ads_i = Atoms(
-        numbers=np.asarray(atoms_i.numbers[a0:a1], dtype=int),
-        positions=pos_i[a0:a1],
-        cell=atoms_i.cell,
-        pbc=atoms_i.pbc,
-    )
-    ads_j = Atoms(
-        numbers=nums_j[a0:a1],
-        positions=pos_j[a0:a1],
-        cell=atoms_j.cell,
-        pbc=atoms_j.pbc,
-    )
-    matched_ads, _matched_ads_nums = _permute_atoms_block_to_match(
-        ads_i,
-        ads_j,
-        mic_cell=mic_cell,
-        mic_pbc=mic_pbc,
-    )
-    pos_j[a0:a1] = matched_ads
-
-    dlt = pos_j[a0:a1] - pos_i[a0:a1]
-    if mic_cell is not None and mic_pbc is not None:
-        dlt, _ = find_mic(dlt, mic_cell, mic_pbc)
-    return float(np.max(np.linalg.norm(dlt, axis=1)))
+    return ads_hop
 
 
 def _core_rms_displacement(
@@ -310,22 +258,71 @@ def _core_rms_displacement(
     n_core: int,
     use_mic: bool,
 ) -> float:
-    """RMS Cartesian displacement of the core after overlaying the product core.
+    """RMS Cartesian displacement of the core after one shared core overlay.
 
-    Minima are not mutated. Gas cores overlay by fingerprint + Kabsch + spatial
-    rematch; slab cores stay in the lab frame.
+    Gas cores overlay by fingerprint + Kabsch + spatial rematch; slab cores
+    stay in the lab frame. See :func:`_pair_overlay_metrics`.
     """
-    n_core = max(0, int(n_core))
-    if n_core <= 0:
+    if n_core <= 0 or max(0, int(n_slab)) + int(n_core) > len(atoms_i):
         return 0.0
+    core_rms, _ads_hop = _pair_overlay_metrics(
+        atoms_i,
+        atoms_j,
+        n_slab=n_slab,
+        n_core=n_core,
+        use_mic=use_mic,
+    )
+    return core_rms
+
+
+def _pair_overlay_metrics(
+    atoms_i: Atoms,
+    atoms_j: Atoms,
+    *,
+    n_slab: int,
+    n_core: int,
+    use_mic: bool,
+    n_adsorbate: int | None = None,
+) -> tuple[float, float]:
+    """``(core_rms, ads_hop)`` from ONE shared product-core overlay.
+
+    Layout is ``[slab | core | adsorbate]``. Overlay uses the same operator as
+    NEB endpoint prep (:func:`_overlay_product_core`), so pair gating and NEB
+    alignment agree by construction. Minima are not mutated.
+
+    ``core_rms`` is RMS Cartesian core displacement after the overlay (0.0 when
+    there is no core block). ``ads_hop`` is the max adsorbate-atom displacement
+    after fragment matching (0.0 when there is no adsorbate block).
+
+    When ``n_adsorbate`` is set (surface adsorbate on a searchable top slab
+    layer), the adsorbate block is the trailing ``n_adsorbate`` atoms and any
+    middle mobile-slab block is treated as the overlay core even if
+    ``n_core==0``.
+    """
     n_slab = max(0, int(n_slab))
-    i0 = n_slab
-    i1 = i0 + n_core
-    if i1 > len(atoms_i) or i1 > len(atoms_j):
-        return 0.0
-    pos_i = np.asarray(atoms_i.get_positions()[i0:i1], dtype=float)
+    n_core = max(0, int(n_core))
+    n_atoms = len(atoms_i)
+    if len(atoms_j) != n_atoms:
+        return 0.0, 0.0
+
+    if n_adsorbate is not None:
+        n_ads = max(0, int(n_adsorbate))
+        n_middle = n_atoms - n_slab - n_ads
+        if n_middle < 0 or n_ads <= 0:
+            n_ads = 0
+        elif n_core == 0 and n_middle > 0:
+            # Empty metal-core + searchable top layer: treat the middle block
+            # as the overlay core so the hop is OH-only, not top-layer+OH.
+            n_core = n_middle
+    else:
+        n_ads = n_atoms - n_slab - n_core
+    if n_ads < 0:
+        n_ads = 0
+
     mic_cell, mic_pbc = _pair_mic_context(atoms_i, use_mic)
-    pos_j, _nums_j = _overlay_product_core(
+    pos_i = np.asarray(atoms_i.get_positions(), dtype=float)
+
+    pos_j, nums_j = _overlay_product_core(
         atoms_i,
         np.asarray(atoms_j.get_positions(), dtype=float),
         np.asarray(atoms_j.numbers, dtype=int),
@@ -334,10 +331,44 @@ def _core_rms_displacement(
         mic_cell=mic_cell,
         mic_pbc=mic_pbc,
     )
-    dlt = pos_j[i0:i1] - pos_i
-    if mic_cell is not None and mic_pbc is not None:
-        dlt, _ = find_mic(dlt, mic_cell, mic_pbc)
-    return float(np.sqrt(np.mean(np.sum(dlt * dlt, axis=1))))
+
+    def _mic_norms(dlt: np.ndarray) -> np.ndarray:
+        if mic_cell is not None and mic_pbc is not None:
+            dlt, _ = find_mic(dlt, mic_cell, mic_pbc)
+        return np.linalg.norm(dlt, axis=1)
+
+    core_rms = 0.0
+    if n_core > 0:
+        i0, i1 = n_slab, n_slab + n_core
+        dlt = pos_j[i0:i1] - pos_i[i0:i1]
+        norms = _mic_norms(dlt)
+        core_rms = float(np.sqrt(np.mean(norms * norms)))
+
+    ads_hop = 0.0
+    if n_ads > 0:
+        a0, a1 = n_slab + n_core, n_slab + n_core + n_ads
+        ads_i = Atoms(
+            numbers=np.asarray(atoms_i.numbers[a0:a1], dtype=int),
+            positions=pos_i[a0:a1],
+            cell=atoms_i.cell,
+            pbc=atoms_i.pbc,
+        )
+        ads_j = Atoms(
+            numbers=nums_j[a0:a1],
+            positions=pos_j[a0:a1],
+            cell=atoms_i.cell,
+            pbc=atoms_i.pbc,
+        )
+        matched_ads, _matched_ads_nums = _permute_atoms_block_to_match(
+            ads_i,
+            ads_j,
+            mic_cell=mic_cell,
+            mic_pbc=mic_pbc,
+        )
+        hop = _mic_norms(matched_ads - pos_i[a0:a1])
+        ads_hop = float(np.max(hop))
+
+    return core_rms, ads_hop
 
 
 def select_structure_pairs(
@@ -571,9 +602,12 @@ def select_structure_pairs(
                 )
                 continue
 
+            # One shared overlay feeds both adsorbate-hop and core-RMS metrics
+            # (pair gating and NEB alignment then agree by construction).
+            core_rms: float | None = None
             ads_hop: float | None = None
             if adsorbate_aware:
-                ads_hop = _adsorbate_max_displacement(
+                core_rms_c, ads_hop = _pair_overlay_metrics(
                     atoms_i,
                     atoms_j,
                     n_slab=slab_len,
@@ -581,6 +615,8 @@ def select_structure_pairs(
                     use_mic=mic,
                     n_adsorbate=n_adsorbate_mobile,
                 )
+                if fingerprint_core:
+                    core_rms = core_rms_c
 
             # Core present: gate on core fingerprint. Adsorbate-only: gate on
             # adsorbate Cartesian hop (fingerprint is often vacuous for OH).
@@ -601,26 +637,21 @@ def select_structure_pairs(
                 )
                 continue
 
-            core_rms: float | None = None
-            if fingerprint_core:
-                core_rms = _core_rms_displacement(
-                    atoms_i,
-                    atoms_j,
-                    n_slab=slab_len,
-                    n_core=n_core,
-                    use_mic=mic,
+            if (
+                core_rms is not None
+                and core_rms_limit is not None
+                and core_rms > float(core_rms_limit)
+            ):
+                n_skipped_core_rms += 1
+                logger.debug(
+                    "Skipping pair (%s, %s): core RMS too large "
+                    "(core_rms=%.3f Å > %.3f Å)",
+                    i,
+                    j,
+                    core_rms,
+                    core_rms_limit,
                 )
-                if core_rms_limit is not None and core_rms > float(core_rms_limit):
-                    n_skipped_core_rms += 1
-                    logger.debug(
-                        "Skipping pair (%s, %s): core RMS too large "
-                        "(core_rms=%.3f Å > %.3f Å)",
-                        i,
-                        j,
-                        core_rms,
-                        core_rms_limit,
-                    )
-                    continue
+                continue
 
             scored_pairs.append(
                 (

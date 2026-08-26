@@ -309,14 +309,11 @@ def _local_distance_fingerprints(atoms: Atoms) -> np.ndarray:
     """
     pos = atoms.get_positions()
     n = len(atoms)
-    fp = np.zeros((n, max(0, n - 1)), dtype=float)
-    for i in range(n):
-        d = np.linalg.norm(pos - pos[i], axis=1)
-        d = np.delete(d, i)
-        d.sort()
-        if d.size > 0:
-            fp[i, : d.size] = d
-    return fp
+    if n < 2:
+        return np.zeros((n, 0), dtype=float)
+    d = np.linalg.norm(pos[:, None, :] - pos[None, :, :], axis=2)
+    d.sort(axis=1)
+    return d[:, 1:]
 
 
 def _local_distance_fingerprints_mic(
@@ -327,16 +324,13 @@ def _local_distance_fingerprints_mic(
     """MIC-aware distance fingerprints for periodic endpoint matching."""
     pos = atoms.get_positions()
     n = len(atoms)
-    fp = np.zeros((n, max(0, n - 1)), dtype=float)
-    for i in range(n):
-        disp = pos - pos[i]
-        disp_mic, _ = find_mic(disp, cell=cell, pbc=pbc)
-        d = np.linalg.norm(disp_mic, axis=1)
-        d = np.delete(d, i)
-        d.sort()
-        if d.size > 0:
-            fp[i, : d.size] = d
-    return fp
+    if n < 2:
+        return np.zeros((n, 0), dtype=float)
+    dlt = (pos[:, None, :] - pos[None, :, :]).reshape(n * n, 3)
+    disp_mic, _ = find_mic(dlt, cell=cell, pbc=pbc)
+    d = np.linalg.norm(disp_mic.reshape(n, n, 3), axis=2)
+    d.sort(axis=1)
+    return d[:, 1:]
 
 
 def _mic_matching_context(
@@ -450,12 +444,11 @@ def _permute_atoms_block_spatially(
             raise SCGOValidationError("spatial block match: composition mismatch")
         p1 = pos1[idx1]
         p2 = pos2[idx2]
-        cost = np.zeros((len(idx1), len(idx2)), dtype=float)
-        for i, r in enumerate(p1):
-            dlt = p2 - r
-            if use_mic:
-                dlt, _ = find_mic(dlt, mic_cell, mic_pbc)
-            cost[i, :] = np.linalg.norm(dlt, axis=1)
+        m = len(idx1) * len(idx2)
+        dlt = (p1[:, None, :] - p2[None, :, :]).reshape(m, 3)
+        if use_mic:
+            dlt, _ = find_mic(dlt, mic_cell, mic_pbc)
+        cost = np.linalg.norm(dlt, axis=1).reshape(len(idx1), len(idx2))
         rows, cols = linear_sum_assignment(cost)
         for ri, ci in zip(rows, cols, strict=True):
             mapping[idx1[ri]] = idx2[ci]
@@ -844,41 +837,6 @@ def _core_alignment_mask(
     return core
 
 
-def _collective_mobile_lattice_snap(
-    ref_pos: np.ndarray,
-    prod_pos: np.ndarray,
-    cell: np.ndarray,
-    pbc: np.ndarray | list[bool],
-    mobile_mask: np.ndarray,
-    *,
-    axis_a: int,
-    axis_b: int,
-    max_shift: int,
-    score_mask: np.ndarray | None = None,
-) -> np.ndarray:
-    """Pick a uniform in-plane lattice image for mobile atoms before per-atom MIC snap."""
-    if not np.any(mobile_mask):
-        return prod_pos
-    rank_mask = mobile_mask if score_mask is None else score_mask
-
-    best_pos = prod_pos.copy()
-    best_score, _ = _score_mobile_endpoint_displacement(
-        ref_pos, best_pos, rank_mask, cell, pbc
-    )
-    for shift in _lattice_translation_candidates(
-        cell, axis_a, axis_b, max_shift=max_shift
-    ):
-        shifted = prod_pos.copy()
-        shifted[mobile_mask] += shift
-        score, _ = _score_mobile_endpoint_displacement(
-            ref_pos, shifted, rank_mask, cell, pbc
-        )
-        if score < best_score:
-            best_score = score
-            best_pos = shifted
-    return best_pos
-
-
 def _apply_global_inplane_kabsch(
     ref_pos: np.ndarray,
     prod_pos: np.ndarray,
@@ -958,18 +916,9 @@ def _align_product_surface_pbc(
     )
 
     prod = np.asarray(product_positions, dtype=float).copy()
-    if enable_cell_remap:
-        prod = _collective_mobile_lattice_snap(
-            ref_pos,
-            prod,
-            cell,
-            pbc_mic,
-            mobile_mask,
-            axis_a=axis_a,
-            axis_b=axis_b,
-            max_shift=max_lattice_shift,
-            score_mask=score_mask,
-        )
+    # Per-shift candidate search below subsumes a collective uniform lattice
+    # image: each shift is scored after per-atom MIC snapping, jointly with the
+    # optional in-plane rotation variant.
 
     prod = _snap_to_reactant_mic_frame(ref_pos, prod, cell, pbc_mic, anchor_mask)
 
@@ -1273,11 +1222,15 @@ def _reorder_product_to_match_reactant(
         )
         return product.get_positions()
     if 0 < n_slab < n_atom:
+        # Lab-frame spatial matching (same rule as _core_block_match_method):
+        # rotation-invariant fingerprints scramble atom identities across
+        # equivalent slab sites and rigid/PBC alignment cannot undo it.
         p_m, n_m = _permute_atoms_block_to_match(
             reactant[n_slab:],
             product[n_slab:],
             mic_cell=mic_cell,
             mic_pbc=mic_pbc,
+            method="spatial",
         )
         pos = product.get_positions().copy()
         nums = product.numbers.copy()
@@ -2245,10 +2198,13 @@ def find_transition_state(
                     shared_calc = True
                     img.calc = calculator
 
-            # Lightweight single-point energy pre-screen for the serial ASE path
-            # (the TorchSim path computes band_energies above via relax_batch).
-            band_energies = evaluate_neb_image_energies_ase(images)
+            # Single-point energy pre-screen for the serial ASE path, mirroring
+            # the TorchSim path: evaluated only when the energy-profile gate is
+            # enabled (``max_endpoint_mismatch``), so bare systems do not pay
+            # n_images extra calculator calls.
+            band_energies = None
             if max_endpoint_mismatch is not None:
+                band_energies = evaluate_neb_image_energies_ase(images)
                 validate_initial_neb_energy_profile(
                     band_energies,
                     reference_reactant_energy=reactant_energy,

@@ -1688,3 +1688,120 @@ def test_run_parallel_neb_reports_avg_timing_keys(tmp_path, cu3_triangle, cu3_li
     assert sum_neb_seconds_from_ts_results(results) == pytest.approx(
         timings["neb_optimization_avg_s"]
     )
+
+
+# ---------------------------------------------------------------------------
+# TorchSim NEB <-> ASE NEB parity (same MACE checkpoint, same band physics).
+#
+# The batched GPU path (TorchSimNEB + ParallelNEBBatch) is the production
+# default; these tests pin its physics to a plain ASE NEB run with the ASE
+# MACE calculator on the same ``mace_matpes_0`` checkpoint: identical step-0
+# NEB forces, and identical band geometry/energies after the same number of
+# FIRE steps. Running two *distinct* bands through one ParallelNEBBatch also
+# guards against cross-band image contamination in the fused relax_batch
+# dedup/fan-out (positions alone are ambiguous across bands by design).
+# ---------------------------------------------------------------------------
+
+_PARITY_MODEL = "mace_matpes_0"
+_PARITY_STEPS = 10
+
+
+def _parity_relaxer():
+    import torch
+
+    from scgo.calculators.torchsim_helpers import TorchSimBatchRelaxer
+
+    return TorchSimBatchRelaxer(
+        device="cuda",
+        mace_model_name=_PARITY_MODEL,
+        dtype=torch.float64,
+        force_tol=0.05,
+        max_steps=100,
+    )
+
+
+def _ase_neb_reference(images):
+    """Plain ASE NEB forces + FIRE band on MACE-calculator copies."""
+    from ase.mep import NEB as AseNEB
+    from ase.optimize import FIRE as AseFIRE
+
+    from scgo.calculators.mace_helpers import MACE
+
+    band = [img.copy() for img in images]
+    for img in band:
+        img.calc = MACE(model_name=_PARITY_MODEL, default_dtype="float64")
+    neb = AseNEB(band, k=0.1, method="improvedtangent")
+    forces0 = np.array(neb.get_forces())
+    AseFIRE(neb, logfile=None).run(steps=_PARITY_STEPS)
+    positions = np.array([img.get_positions() for img in band])
+    energies = [float(img.get_potential_energy()) for img in band]
+    return forces0, positions, energies
+
+
+def test_torchsim_neb_step0_forces_match_ase_neb(cu3_triangle, cu3_linear):
+    """TorchSimNEB reproduces ASE NEB forces at fixed geometry."""
+    images = interpolate_path(cu3_triangle, cu3_linear, n_images=5, method="idpp")
+
+    ref_forces, _, _ = _ase_neb_reference(images)
+
+    ts_band = [img.copy() for img in images]
+    neb = TorchSimNEB(ts_band, _parity_relaxer(), k=0.1, method="improvedtangent")
+    ts_forces = np.array(neb.get_forces())
+
+    assert ts_forces.shape == ref_forces.shape
+    assert np.allclose(ts_forces, ref_forces, atol=1e-6, rtol=1e-6), np.abs(
+        ts_forces - ref_forces
+    ).max()
+
+
+def test_parallel_nebbatch_bands_match_serial_ase_bands(
+    cu3_triangle, cu3_linear, cu3_bent
+):
+    """Two distinct bands through one batch match their serial ASE runs.
+
+    After identical FIRE step counts, every image of both bands must sit on
+    its own ASE reference trajectory (positions and energies). A cross-band
+    mixup would swap segments between the two references and fail loudly.
+    """
+
+    images_a = interpolate_path(cu3_triangle, cu3_linear, n_images=5, method="idpp")
+    images_b = interpolate_path(cu3_linear, cu3_bent, n_images=5, method="idpp")
+
+    refs = [_ase_neb_reference(images_a), _ase_neb_reference(images_b)]
+
+    relaxer = _parity_relaxer()
+    nebs = [
+        TorchSimNEB(
+            [img.copy() for img in imgs], relaxer, k=0.1, method="improvedtangent"
+        )
+        for imgs in (images_a, images_b)
+    ]
+    batch = ParallelNEBBatch(nebs, relaxer, max_total_steps=_PARITY_STEPS)
+    summaries = batch.run_optimization(fmax=1e-6, max_steps=_PARITY_STEPS)
+
+    for neb_idx, neb in enumerate(nebs):
+        # Neither band may hard-fail; both must use the full step budget
+        # (fmax=1e-6 never converges on this PES in 10 FIRE steps).
+        assert not summaries[neb_idx].get("failed", False)
+        assert summaries[neb_idx]["steps_taken"] == _PARITY_STEPS
+        ref_forces0, ref_positions, ref_energies = refs[neb_idx]
+
+        # Same starting physics as this band's ASE reference.
+        band = [img.copy() for img in (images_a if neb_idx == 0 else images_b)]
+        start_neb = TorchSimNEB(band, relaxer, k=0.1, method="improvedtangent")
+        assert np.allclose(
+            np.array(start_neb.get_forces()), ref_forces0, atol=1e-6, rtol=1e-6
+        )
+
+        # Same trajectory endpoint after _PARITY_STEPS FIRE steps (observed
+        # agreement is ~1e-15 A in float64; the bound leaves kernel/hardware
+        # headroom while still failing loudly on cross-band image mixups).
+        positions = np.array([img.get_positions() for img in neb.images])
+        drift = np.abs(positions - ref_positions).max()
+        assert drift < 1e-3, f"band {neb_idx} trajectory drifted {drift:.2e} A"
+
+        for img, ref_e in zip(neb.images, ref_energies, strict=True):
+            e_ts = float(img.get_potential_energy())
+            assert abs(e_ts - ref_e) < 1e-4, (
+                f"band {neb_idx} energy {e_ts} vs ASE {ref_e}"
+            )

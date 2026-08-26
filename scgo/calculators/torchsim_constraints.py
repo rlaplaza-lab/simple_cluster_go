@@ -19,6 +19,8 @@ from ase.constraints import FixBondLengths as ASEFixBondLengths
 from torch_sim.constraints import Constraint
 from torch_sim.transforms import minimum_image_displacement
 
+from scgo.exceptions import SCGOValidationError
+
 __all__ = [
     "TorchSimFixBondLengths",
     "build_torchsim_fixbondlengths_from_ase_batch",
@@ -156,14 +158,14 @@ class TorchSimFixBondLengths(Constraint):
     ) -> None:
         pairs_t = _as_tensor(pairs, dtype=torch.long, device=device)
         if pairs_t.ndim != 2 or pairs_t.shape[1] != 2:
-            raise ValueError(
+            raise SCGOValidationError(
                 "FixBondLengths pairs must have shape (n_bonds, 2), "
                 f"got {tuple(pairs_t.shape)}"
             )
         self.pairs = pairs_t
         self.bond_lengths = _as_tensor(bond_lengths, dtype=torch.float64, device=device)
         if self.bond_lengths.shape[0] != self.pairs.shape[0]:
-            raise ValueError(
+            raise SCGOValidationError(
                 "FixBondLengths bond_lengths must have one entry per pair "
                 f"({self.pairs.shape[0]}), got {self.bond_lengths.shape[0]}"
             )
@@ -292,7 +294,7 @@ class TorchSimFixBondLengths(Constraint):
         """Merge already-reindexed bond constraints into one."""
         bond_constraints = [c for c in constraints if isinstance(c, cls)]
         if not bond_constraints:
-            raise ValueError(
+            raise SCGOValidationError(
                 f"{cls.__name__}.merge requires at least one {cls.__name__}."
             )
         device = bond_constraints[0].pairs.device

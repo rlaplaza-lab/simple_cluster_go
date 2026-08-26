@@ -1052,3 +1052,85 @@ def test_prepare_neb_endpoints_slab_search_empty_core_uses_deposit_prefix() -> N
     react, prod = prepare_neb_endpoints(_combined(0.0), _combined(1.2), neb_cfg)
     assert len(react) == n_full + 2
     assert len(prod) == n_full + 2
+
+
+# ---------------------------------------------------------------------
+# Bare-slab (non-blocks) endpoint matching must be spatial, not fingerprint
+# ---------------------------------------------------------------------
+
+
+def test_bare_slab_identical_minima_align_without_label_scramble() -> None:
+    """Symmetric-slab relabeling must not inflate endpoint displacement.
+
+    Two physically identical minima (thermal noise only) on a symmetric bare
+    slab used to be matched by rotation-invariant distance fingerprints, which
+    arbitrarily permuted equivalent top-layer atoms. Rigid/PBC alignment cannot
+    undo a labeling scramble, so the aligned band showed fake 2-4 A atom swaps
+    (wasted NEB budget, spurious clash/mismatch rejects, phantom saddles).
+    Lab-frame spatial matching pins equivalent sites to ~zero displacement.
+    """
+    slab = fcc111("Pt", size=(4, 4, 3), vacuum=8.0, orthogonal=True)
+    slab.pbc = [True, True, False]
+    n_slab = len(slab) - 16  # bottom layers frozen, top layer mobile
+    rng = np.random.default_rng(11)
+
+    react = slab.copy()
+    prod = slab.copy()
+    prod.set_positions(
+        slab.get_positions() + rng.normal(scale=0.02, size=slab.get_positions().shape)
+    )
+
+    images = interpolate_path(
+        react,
+        prod,
+        n_images=5,
+        method="linear",
+        mic=True,
+        align_endpoints=True,
+        system_type="surface",
+        n_slab=n_slab,
+    )
+
+    disp = np.linalg.norm(
+        images[-1].get_positions()[n_slab:] - images[0].get_positions()[n_slab:],
+        axis=1,
+    )
+    assert float(disp.max()) < 0.2
+
+    # No interior image may contain atoms crossing through each other.
+    from scgo.ts_search.transition_state import _mobile_min_pairwise_distance
+
+    for img in images[1:-1]:
+        min_d = _mobile_min_pairwise_distance(img, n_slab=n_slab, mic=True)
+        assert min_d > 1.5
+
+
+def test_bare_slab_shifted_product_recovers_lattice_frame() -> None:
+    """Product displaced by one in-plane cell must align back onto the slab."""
+    slab = fcc111("Pt", size=(2, 2, 3), vacuum=8.0, orthogonal=True)
+    slab.pbc = [True, True, False]
+    n_slab = len(slab) - 4
+    cell_vec = np.asarray(slab.cell[0])
+
+    react = slab.copy()
+    prod = slab.copy()
+    pos = prod.get_positions()
+    # Exactly one in-plane lattice vector: alignment must undo it entirely.
+    pos[n_slab:] += cell_vec
+    prod.set_positions(pos)
+
+    images = interpolate_path(
+        react,
+        prod,
+        n_images=3,
+        method="linear",
+        mic=True,
+        align_endpoints=True,
+        system_type="surface",
+        n_slab=n_slab,
+    )
+    disp = np.linalg.norm(
+        images[-1].get_positions()[n_slab:] - images[0].get_positions()[n_slab:],
+        axis=1,
+    )
+    assert float(disp.max()) < 0.25

@@ -4,6 +4,19 @@ Hard gates and ranking scales used by
 ``scgo.ts_search.transition_state_io.select_structure_pairs``. Override via
 ``ts_params`` (see docs ``parameters.rst``). Values depend on whether the system
 uses a surface and/or an adsorbate.
+
+Regime mapping (deliberate, see ``pair_selection_param_defaults``):
+
+- ``gas_cluster`` / ``surface_cluster`` -> BARE regime: a supported metal
+  cluster IS the whole mobile part, so bare distinctness + energy-gap ranking
+  applies; there is no separate adsorbate block to gate.
+- ``gas_cluster_adsorbate`` / ``surface_cluster_adsorbate`` /
+  ``surface_adsorbate`` -> ADSORBATE regime with the core-RMS hard gate. For
+  ``surface_adsorbate`` on a searchable top layer the runner infers the mobile
+  top-layer block as the "core" (see ``run_transition_state_search``), so
+  ``pair_core_rms_max`` bounds top-layer registry drift between paired minima;
+  whole-layer registry variants that exceed it are intentionally filtered
+  before NEB budget is spent.
 """
 
 from __future__ import annotations
