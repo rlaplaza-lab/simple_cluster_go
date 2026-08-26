@@ -1,20 +1,29 @@
 All Parameters
 ==============
 
-This page lists all parameters you can use in SCGO. For preset functions and
-their defaults, see :doc:`/api/param_presets`.
+This is the exhaustive reference for every knob. It lists all keys you can
+set in ``params`` / ``go_params`` / ``ts_params`` and their defaults.
+
+Read :doc:`/quickstart` for examples, :doc:`/uniqueness` for how duplicates
+are removed, and :doc:`/validation_and_constraints` for which structures are
+legal. Return here when you need a specific default or table. For preset
+functions, see :doc:`/api/param_presets`.
+
+.. contents::
+   :local:
+   :depth: 2
 
 Parameter resolution
 --------------------
 
-All high-level ``run_*`` functions share the same contract:
+All high-level ``run_*`` functions follow the same rule:
 
-1. **Safe defaults**: pass ``params=None``, ``go_params=None``, or
-   ``ts_params=None`` to use full preset defaults.
-2. **Partial overrides**: pass a dict with only the keys you want to change;
-   runners merge with defaults before execution.
-3. **Presets**: start from a :doc:`/api/param_presets` builder, edit what you
-   need, then pass to ``run_*``.
+1. **Safe defaults:** pass ``params=None``, ``go_params=None``, or
+   ``ts_params=None`` for full preset defaults.
+2. **Partial overrides:** pass a dict with only the keys you want to change.
+   Runners merge it with defaults before execution.
+3. **Presets:** start from a builder in :doc:`/api/param_presets`, change what
+   you need, then pass it to ``run_*``.
 
 **Merge rules**
 
@@ -26,35 +35,34 @@ All high-level ``run_*`` functions share the same contract:
      - Merge behavior
    * - ``params`` / ``go_params``
      - Deep-merge onto :func:`~scgo.param_presets.get_default_params` via
-       :func:`~scgo.utils.run_helpers.initialize_params`. Nested dicts (for
-       example ``optimizer_params["ga"]``) merge recursively; user keys win.
-       Changing ``calculator`` from the MACE default replaces
-       ``calculator_kwargs`` wholesale (new-calculator defaults from
-       :func:`~scgo.param_presets.default_calculator_kwargs`, then any user
-       kwargs) so MACE keys do not leak into EMT/UMA/UPET.
+       :func:`~scgo.utils.run_helpers.initialize_params`. Nested dicts like
+       ``optimizer_params["ga"]`` merge recursively. User keys win. If you
+       change ``calculator`` from the MACE default, ``calculator_kwargs`` is
+       replaced wholesale. It starts from the new calculator's defaults via
+       :func:`~scgo.param_presets.default_calculator_kwargs`, then your keys
+       are applied. MACE keys do not leak into EMT/UMA/UPET.
    * - ``ts_params``
      - Deep-merge onto :func:`~scgo.param_presets.get_ts_search_params` via
        :func:`~scgo.utils.run_helpers.initialize_ts_params`. Not merged with GO
-       defaults. For ``run_go_ts*``, calculator settings align with merged
-       ``go_params`` unless ``ts_params`` sets ``calculator``, in which case
-       ``calculator_kwargs`` are replaced wholesale.
+       defaults. For ``run_go_ts*``, TS calculator settings follow the merged
+       ``go_params`` unless ``ts_params`` sets ``calculator``. In that case
+       ``calculator_kwargs`` is replaced wholesale.
    * - Forbidden in dicts
-     - Top-level ``system_type`` in ``go_params`` / ``ts_params`` (use the run
-       ``system_type=`` argument). Identity keys
-       (``system_type``, ``surface_config``, ``adsorbate_definition``,
-       ``adsorbate_fragment_template``, ``cluster_adsorbate_config``) are also
-       forbidden inside ``optimizer_params`` slots. Those slots hold algorithm
-       hyperparameters only.
+     - Do not put ``system_type`` at top level in ``go_params`` or
+       ``ts_params``. Use the run ``system_type=`` argument. Also do not put
+       identity keys (``system_type``, ``surface_config``,
+       ``adsorbate_definition``, ``adsorbate_fragment_template``,
+       ``cluster_adsorbate_config``) inside ``optimizer_params`` slots. Those
+       slots hold only algorithm hyperparameters.
    * - Run kwargs
-     - ``system_type``, ``surface_config``, ``adsorbates``, ``seed``,
-       ``verbosity``, ``output_*`` belong on the ``run_*`` call.
-       Top-level ``surface_config`` / adsorbate keys in ``go_params`` (or
-       ``ts_params`` for ``surface_config``) are enough when the run argument
-       is omitted, and must agree when both are set.
+     - These belong on the ``run_*`` call: ``system_type``,
+       ``surface_config``, ``adsorbates``, ``seed``, ``verbosity``,
+       ``output_*``. A top-level ``surface_config`` or adsorbate key in
+       ``go_params`` (or ``surface_config`` in ``ts_params``) is enough when
+       the run argument is omitted. If both are set, they must agree.
 
-**Logging** (``verbosity >= 1``): SCGO logs the defaults source and a flat list
-of user overrides, then the resolved GO optimizer settings or TS NEB
-configuration. See :doc:`/api/utils`.
+With ``verbosity >= 1``, SCGO logs where defaults came from and which keys you
+overrode. It then logs the resolved GO or TS settings. See :doc:`/api/utils`.
 
 Verbosity levels (``run_*`` ``verbosity=`` argument):
 
@@ -105,6 +113,11 @@ GO Parameters
 -------------
 
 Passed as ``params`` or ``go_params`` to ``run_go``, ``run_go_campaign``, ``run_go_ts``, etc.
+
+Most runs use the defaults. Change ``calculator`` / ``calculator_kwargs``
+for a different MLIP, ``n_jobs`` for parallelism, or ``connectivity_factor``
+to tune bonding. Uniqueness knobs are in :doc:`/uniqueness`. For the full
+connectivity spec, see :doc:`/validation_and_constraints`.
 
 **Algorithm selection**
 
@@ -382,6 +395,10 @@ TS Parameters
 
 Passed as ``ts_params`` to ``run_ts_search``, ``run_ts_campaign``, ``run_go_ts``, etc. Sparse dicts are merged with :func:`~scgo.param_presets.get_ts_search_params` defaults at run time.
 
+Use :doc:`/quickstart` for the pairing overview. This section is the
+exhaustive reference. Most runs only change ``max_pairs`` and the calculator.
+Pairing and NEB defaults are tuned per system type and rarely need edits.
+
 **Core:**
 
 .. list-table::
@@ -409,13 +426,10 @@ Passed as ``ts_params`` to ``run_ts_search``, ``run_ts_campaign``, ``run_go_ts``
    * - ``dedupe_minima``
      - ``True``
      - Drop duplicate GO minima before pairing (GO uniqueness; see
-       :doc:`/uniqueness`). For slab-search types the comparison window is
-       the mobile partition ``[fixed | top layers | adsorbate]`` tail —
-       matching GO-phase ``search_mobile_count`` semantics — so distinct
-       top-layer registries survive and the frozen bottom slab cannot dilute
-       the comparison. Other types compare the trailing mobile core +
-       adsorbate atoms. The ``minima_energy_tolerance`` semantics are
-       unchanged.
+       :doc:`/uniqueness`). For slab-search types the mobile tail is
+       compared, so distinct top-layer registries are kept. The frozen
+       bottom slab does not dilute the comparison. Other types compare the
+       trailing mobile core plus adsorbate atoms.
    * - ``tag_ts_in_db``
      - ``True``
      - Tag unique successful saddles in the minima databases (consumed by TS
@@ -434,11 +448,10 @@ Passed as ``ts_params`` to ``run_ts_search``, ``run_ts_campaign``, ``run_go_ts``
        ``0.7`` Å; see :doc:`/uniqueness`)
    * - ``pair_core_rms_max``
      - see **Pair selection** below
-     - Hard max core RMS (Å) for adsorbate+core pairing. Gas cores are
-       fingerprint-matched, Kabsch-aligned (including 1-atom translation),
-       then spatially rematched so reflected fingerprint labelings cannot
-       inflate RMS. Slab cores stay in the surface frame. Pair selection and
-       NEB endpoint prep (including bare gas clusters) share this overlay.
+     - Hard max core RMS (Å) for adsorbate plus core pairing. Gas cores are
+       fingerprint-matched and Kabsch-aligned (including 1-atom translation),
+       then spatially rematched. Slab cores stay in the lab frame. Pair
+       selection and NEB endpoint prep share this overlay.
    * - ``pair_score_*``
      - see **Pair selection** below
      - Soft ranking scales and weights (gap / distinct / mismatch / core)
@@ -457,23 +470,23 @@ Passed as ``ts_params`` to ``run_ts_search``, ``run_ts_campaign``, ``run_go_ts``
      - ``False``
      - Write ``{ts_run_dir}/timing.json``; enables ``go_ts_timing.json`` rollup in ``run_go_ts``
 
-Unknown ``ts_params`` keys are rejected up front with a
-:class:`~scgo.exceptions.SCGOValidationError` listing the offending keys and
-the expected set (mirroring the GO behavior) — a typo such as ``neb_fmx``
-fails fast instead of being silently ignored.
+Unknown ``ts_params`` keys fail fast. They raise
+:class:`~scgo.exceptions.SCGOValidationError` and list the bad keys and the
+expected set. This mirrors GO. A typo like ``neb_fmx`` is caught immediately
+and not ignored silently.
 
 Direct calls to :func:`~scgo.ts_search.run_transition_state_search` that omit
-NEB knobs resolve them from the same per-system presets
-(:func:`~scgo.param_presets.get_ts_defaults`) used by ``get_ts_search_params``:
-adsorbate types get spring constant ``0.5``, steps ``4000`` and climb; bare
-surfaces get steps ``2000``; MIC / cell remap / lattice rotation follow the
-system policy.
+NEB knobs use the same per-system presets
+(:func:`~scgo.param_presets.get_ts_defaults`) as ``get_ts_search_params``.
+Adsorbate types default to spring ``0.5``, steps ``4000``, and climb. Bare
+surfaces default to steps ``2000``. MIC, cell remap, and lattice rotation
+follow the system policy.
 
 .. note::
 
-   With ``neb_steps="auto"`` on surface types, the step budget is derived from
-   the **total expanded** atom count (slab included), not just the mobile
-   region — budget accordingly when using large slabs.
+   With ``neb_steps="auto"`` on surface types, the step budget uses the
+   **total** atom count including the slab, not only the mobile region. Budget
+   accordingly for large slabs.
 
 **Pair selection**
 (:func:`~scgo.ts_search.transition_state_io.select_structure_pairs`;
@@ -494,38 +507,37 @@ Before any NEB force evaluation, SCGO:
    by IDPP path quality and keeps the best ``max_pairs``.
 7. Truncates to ``max_pairs`` again, then runs NEB.
 
-Minima are laid out ``[slab | core | adsorbate]``. Pairing uses different hard
-gates by regime:
+Minima are laid out ``[slab | core | adsorbate]``. Hard gates differ by
+regime:
 
 - **Bare** (``gas_cluster`` / ``surface_cluster`` / ``surface``): fingerprint
-  the full mobile region; skip similar pairs; optional
-  ``max_endpoint_mismatch`` on fingerprint difference.
-- **Adsorbate + metal core**: fingerprint the **core only**; do not skip
-  similar cores (site hops look identical); hard-gate core difference with
-  ``max_endpoint_mismatch`` and core RMS with ``pair_core_rms_max``. Soft rank
-  prefers mid energy gap, similar cores, and some adsorbate site displacement.
-- **Adsorbate-only slab** (no mobile core): do not skip similar; gate on
+  the full mobile region. Skip similar pairs. Optionally gate on
+  ``max_endpoint_mismatch``.
+- **Adsorbate plus metal core**: fingerprint the core only. Do not skip
+  similar cores. Site hops look identical. Gate core difference with
+  ``max_endpoint_mismatch`` and ``pair_core_rms_max``. Soft rank favors mid
+  energy gap, similar cores, and some adsorbate motion.
+- **Adsorbate-only slab** (no mobile core): do not skip similar. Gate on
   adsorbate travel via ``max_endpoint_mismatch``.
 
-Hard gates always apply. Soft ``pair_score_*`` terms only order candidates when
-a finite select / ``max_pairs`` cap truncates the list.
+Hard gates always apply. Soft ``pair_score_*`` terms only order candidates
+when a finite cap truncates the list.
 
 **Budget and oversampling**
 
-``max_pairs`` is the number of NEBs you pay for:
+``max_pairs`` is the number of NEBs you pay for.
 
-- **Bare** system types use ``max_pairs`` as the select cap. Soft scores pick
-  the top N; those N bands run NEB. Setting ``max_endpoint_mismatch`` on bare
-  surface presets (``3.0`` Å) enables pre-NEB path gates only. It does not
-  turn on oversampling.
-- **Adsorbate** system types with ``max_endpoint_mismatch`` set oversample the
-  select pool to
-  ``min(max_pairs * 10, max(max_pairs, 50))``
-  (:func:`~scgo.ts_search.transition_state_io.adsorbate_pair_select_cap`), then
-  re-rank by IDPP profile and keep ``max_pairs`` for NEB. Example:
-  ``max_pairs=6`` selects up to 50 ranked pairs, then runs at most 6 NEBs. If
-  TorchSim / IDPP screening is unavailable, the runner still truncates the
-  oversampled list to ``max_pairs`` before NEB.
+- **Bare** systems use ``max_pairs`` as the select cap. Soft scores pick the
+  top N. Those N bands run NEB. Setting ``max_endpoint_mismatch`` on bare
+  surface presets (3.0 Å) enables pre-NEB path gates only. It does not turn on
+  oversampling.
+- **Adsorbate** systems with ``max_endpoint_mismatch`` set oversample. The
+  select pool grows to ``min(max_pairs * 10, max(max_pairs, 50))``
+  (:func:`~scgo.ts_search.transition_state_io.adsorbate_pair_select_cap`).
+  Then it is re-ranked by IDPP profile and kept to ``max_pairs`` for NEB.
+  Example: ``max_pairs=6`` selects up to 50 ranked pairs, then runs at most
+  6 NEBs. If TorchSim or IDPP screening is not available, the runner still
+  truncates the oversampled list to ``max_pairs`` before NEB.
 
 Per-system-type defaults (with a caller-set ``max_pairs=N``):
 
@@ -619,14 +631,13 @@ logs include skip counts (energy gap, mismatch, core RMS, and so on).
        chunk that hits CUDA OOM is retried once at half the budget
    * - ``max_endpoint_mismatch``
      - ``None`` (bare gas) / ``1.25`` (gas adsorbate) / ``2.5`` (surface cluster) / ``1.5`` (surface cluster adsorbate) / ``3.0`` (bare surface and surface adsorbate)
-     - Å geometric gate on comparator difference; when set, also enables the
-       pre-NEB endpoint-displacement check. For adsorbate + metal-core systems,
-       pair selection fingerprints the **core** and this gate means “cores too
-       different”; adsorbate site hops with an identical core are kept. For
-       adsorbate-only slabs the same threshold gates adsorbate travel (wider
-       default so graphite hollow/bridge hops are not rejected wholesale). On
-       adsorbate system types it also enables select oversampling (see **Budget
-       and oversampling**); on bare surface it does not.
+     - Geometric gate (Å) on comparator difference. When set, it also enables
+       the pre-NEB endpoint-displacement check. For adsorbate plus metal core,
+       it gates core difference. Identical-core site hops are kept. For
+       adsorbate-only slabs, it gates adsorbate travel. The wider 3.0 Å
+       default keeps graphite hollow/bridge hops. On adsorbate types it also
+       enables select oversampling (see **Budget and oversampling**). On bare
+       surface it does not.
    * - ``neb_prescreen_clash_distance``
      - ``1.0`` (bare gas) / ``0.7`` (surface cluster + all adsorbate) / ``0.35`` (bare surface)
      - Interior NEB image min mobile pairwise distance (Å) below which the initial path is rejected.
@@ -673,27 +684,26 @@ logs include skip counts (energy gap, mismatch, core RMS, and so on).
 
 **NEB pre-screen gates:**
 
-Before any NEB optimization, ``validate_initial_neb_path`` runs for every
-system type. ``validate_initial_neb_energy_profile`` runs only when
-``max_endpoint_mismatch`` is set (bare ``gas_cluster`` leaves it ``None`` and
-skips the energy-profile screen):
+Before any NEB run, ``validate_initial_neb_path`` always runs.
+``validate_initial_neb_energy_profile`` runs only when
+``max_endpoint_mismatch`` is set. Bare ``gas_cluster`` leaves it ``None`` and
+skips the energy screen.
 
-- Degenerate-path check (aligned endpoint mobile displacement must reach
-  ``MIN_NEB_ENDPOINT_DISPLACEMENT_A`` = 0.3 Å; below it the two endpoints are
-  the same minimum up to permutation/symmetry and no transition path exists)
-  always runs. The interior-image clash check (minimum mobile pairwise distance
-  vs ``neb_prescreen_clash_distance``) also always runs; an upper aligned
-  endpoint-displacement gate applies when ``max_endpoint_mismatch`` is set.
-- Energy-profile check (barrier cap ``neb_max_spurious_barrier``; endpoint-energy
-  drift ``> 0.5`` eV and interior-max prominence below ``min_saddle_prominence``)
-  runs only when ``max_endpoint_mismatch`` is set and endpoint energies are
-  available. Bands with fewer than three images skip the prominence/drift check.
+- **Path check.** Aligned endpoints must move at least 0.3 Å
+  (``MIN_NEB_ENDPOINT_DISPLACEMENT_A``). Less means they are the same minimum
+  with permuted labels or symmetry. No path exists. The interior-image clash
+  check also always runs. It compares the smallest mobile pair distance to
+  ``neb_prescreen_clash_distance``. When ``max_endpoint_mismatch`` is set, an
+  upper displacement gate also applies.
+- **Energy-profile check.** Runs only when ``max_endpoint_mismatch`` is set
+  and endpoint energies are known. It checks barrier cap
+  ``neb_max_spurious_barrier``, endpoint drift greater than 0.5 eV, and
+  interior prominence below ``min_saddle_prominence``. Bands with fewer than
+  three images skip the prominence and drift checks.
 
-Per-system-type defaults for the three pre-screen knobs are listed under
-:doc:`/validation_and_constraints` (bare gas is looser:
-``neb_prescreen_clash_distance=1.0`` / ``min_saddle_prominence=0.10``;
-surface clusters and adsorbates are tighter: ``0.7`` / ``0.40``; bare surface
-is widest: ``0.35`` clash with a ``50.0`` eV barrier cap).
+Per-type defaults are in :doc:`/validation_and_constraints`. Bare gas is
+looser (1.0 Å and 0.10 eV). Surface clusters and adsorbates are tighter
+(0.7 Å and 0.40 eV). Bare surface is widest (0.35 Å and 50.0 eV).
 
 **Adsorbate NEB specifics** (beyond the gates above):
 

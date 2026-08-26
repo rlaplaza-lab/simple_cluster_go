@@ -327,7 +327,45 @@ slab layers** rather than a deposited nanoparticle. Pass an empty composition
 Transition States
 -----------------
 
-Find transition states between optimized structures.
+Find transition states between optimized structures. SCGO builds a short list
+of minima pairs, ranks them, and runs NEB only on the top candidates. The
+budget is ``max_pairs``.
+
+How candidate pairs are chosen
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+SCGO does not run NEB on every possible combination. It builds and ranks
+candidates before spending any NEB force evaluations:
+
+1. **Load and dedupe minima.** GO minima are loaded and filtered with the
+   uniqueness rule (see :doc:`/uniqueness`). For TS, the distance gate is
+   tighter (``0.1`` Å instead of ``0.7`` Å).
+2. **Enumerate pairs.** Every remaining pair is considered.
+3. **Hard gates — drop bad pairs.** A pair is skipped if its energy gap
+   exceeds ``energy_gap_threshold`` (2.0 eV for bare systems, 0.75 eV with
+   adsorbates), if its shape difference exceeds ``max_endpoint_mismatch``,
+   or, for adsorbate plus metal core, if core RMS exceeds
+   ``pair_core_rms_max``.
+4. **Soft rank.** Survivors are scored with ``pair_score_*`` weights. The
+   score favors a mid-range energy gap, similar cores, and some adsorbate
+   site motion. Bare systems favor distinct fingerprints instead.
+5. **Budget and oversampling.** Keep the top N pairs where N comes from the
+   budget. Bare systems use ``max_pairs`` directly. Adsorbate systems with
+   ``max_endpoint_mismatch`` set oversample to
+   ``min(max_pairs * 10, max(max_pairs, 50))`` and re-rank by IDPP path
+   quality before keeping ``max_pairs`` for NEB. When TorchSim or IDPP
+   screening is not available, the oversampled list is still truncated to
+   ``max_pairs`` before NEB.
+6. **Run NEB.** Only those N pairs run NEB. Bare ``surface_cluster`` and
+   ``surface`` use the same budget rule as bare gas (no oversampling even
+   though ``max_endpoint_mismatch`` is set).
+
+Hard gates always apply. Soft scores only matter when the pool is larger than
+the budget. Pair selection and NEB endpoint setup share the same core overlay:
+gas cores are fingerprint-matched then Kabsch-aligned (including 1-atom
+translation); slab cores stay in the lab frame. Defaults by system type and
+full knob tables: :doc:`/parameters` (Pair selection) and
+:doc:`/validation_and_constraints`.
 
 **TS from existing minima** (after a prior ``run_go`` or manual GO output):
 

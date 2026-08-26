@@ -16,7 +16,7 @@ What SCGO works with
 
 Three building blocks cover every workflow:
 
-- **Cluster** (also called the **core** when molecules are present): the metal
+- **Cluster** (also called the ``core`` when molecules are present): the metal
   nanoparticle whose shape you are searching.
 - **Adsorbate**: a small molecule or fragment (for example OH or CO) attached
   to the cluster or the surface.
@@ -39,10 +39,10 @@ Contents
    installation
    quickstart
    surface_slab_guide
-   output_layout
-   parameters
    uniqueness
    validation_and_constraints
+   output_layout
+   parameters
    benchmarks
 
 .. toctree::
