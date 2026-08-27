@@ -12,6 +12,7 @@ functions, see :doc:`/api/param_presets`.
 .. contents::
    :local:
    :depth: 2
+   :class: this-will-duplicate-information-and-it-is-still-useful-here
 
 Parameter resolution
 --------------------
